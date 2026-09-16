@@ -1,4 +1,4 @@
-name: Build SpendTracker Android APK
+name: Build SpendTracker Android APK & Play Store Bundle
 
 on:
   push:
@@ -20,24 +20,29 @@ jobs:
       with:
         java-version: '17'
         distribution: 'temurin'
-        cache: gradle
 
-    - name: Grant Execute Permission to Gradlew
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
+      with:
+        gradle-version: '8.4'
+
+    - name: Build Signed APK & Play Store App Bundle (AAB)
       run: |
-        if [ -f gradlew ]; then chmod +x gradlew; fi
+        gradle assembleRelease bundleRelease --no-daemon --stacktrace
 
-    - name: Build Signed APK and Play Store App Bundle (AAB)
-      run: |
-        gradle assembleRelease bundleRelease --no-daemon || ./gradlew assembleRelease bundleRelease
-
-    - name: Upload Release APK (Direct Install)
+    - name: Upload Signed Release APK
       uses: actions/upload-artifact@v4
       with:
         name: SpendTracker-Release-APK
         path: app/build/outputs/apk/release/*.apk
+        if-no-files-found: error
 
-    - name: Upload Google Play Bundle (AAB)
+    - name: Upload Play Store App Bundle (AAB)
       uses: actions/upload-artifact@v4
       with:
         name: SpendTracker-GooglePlay-AAB
         path: app/build/outputs/bundle/release/*.aab
+        if-no-files-found: error

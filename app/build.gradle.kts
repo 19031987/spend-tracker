@@ -19,7 +19,7 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("../../release-keystore.jks")
+            storeFile = rootProject.file("release-keystore.jks")
             storePassword = "SpendTracker123!"
             keyAlias = "spendtracker"
             keyPassword = "SpendTracker123!"
