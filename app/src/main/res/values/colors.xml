@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#0F172A</color>
+    <color name="primary_dark">#020617</color>
+    <color name="accent">#38BDF8</color>
+    <color name="bg_dark">#090D16</color>
+    <color name="card_bg">#131D31</color>
+    <color name="card_border">#1E293B</color>
+    <color name="text_white">#F8FAFC</color>
+    <color name="text_muted">#94A3B8</color>
+    <color name="hsbc_red">#DB0011</color>
+    <color name="paypal_blue">#0079C1</color>
+    <color name="green_accent">#10B981</color>
+    <color name="amber_warning">#F59E0B</color>
+</resources>

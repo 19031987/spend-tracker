@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">SpendTracker</string>
+    <string name="title_monthly">Total Spent This Month</string>
+    <string name="btn_test_notification">⚡ Simulate Notification</string>
+    <string name="enable_listener_title">Enable Real-Time Tracking</string>
+    <string name="enable_listener_desc">Tap here to grant Notification Access so HSBC &amp; PayPal purchases are automatically tracked.</string>
+</resources>
