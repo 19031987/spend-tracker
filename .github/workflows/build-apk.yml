@@ -37,25 +37,19 @@ jobs:
       env:
         ANDROID_HOME: /usr/local/lib/android/sdk
       run: |
-        gradle :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+        set -o pipefail
+        gradle :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace
         mkdir -p dist
-        find app/ -name "*.apk" -o -name "*.aab"
-        find . -name "*.apk" -exec cp -v {} dist/ \; || true
-        find . -name "*.aab" -exec cp -v {} dist/ \; || true
-        find . -maxdepth 4 > file-tree.txt
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git checkout -B debug-log
-        git add -f build.log file-tree.txt dist/ || true
-        git commit -m "debug: add build.log and file-tree [skip ci]" || true
-        git push -f origin debug-log || true
+        find app/build/outputs/ -name "*.apk" -exec cp -v {} dist/ \;
+        find app/build/outputs/ -name "*.aab" -exec cp -v {} dist/ \;
+        ls -la dist/
 
     - name: Upload Signed Release Files (APK and AAB)
       uses: actions/upload-artifact@v4
       with:
         name: SpendTracker-Release-Files
         path: dist/
-        if-no-files-found: warn
+        if-no-files-found: error
 
     - name: Publish GitHub Release with APK & AAB
       uses: softprops/action-gh-release@v2
