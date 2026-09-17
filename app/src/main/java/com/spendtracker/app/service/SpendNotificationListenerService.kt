@@ -44,7 +44,7 @@ class SpendNotificationListenerService : NotificationListenerService() {
                 putExtra("merchant", parsed.merchant)
                 putExtra("category", parsed.category)
                 putExtra("source", parsed.source)
-                setPackage(packageName)
+                setPackage(applicationContext.packageName)
             }
             sendBroadcast(intent)
         }

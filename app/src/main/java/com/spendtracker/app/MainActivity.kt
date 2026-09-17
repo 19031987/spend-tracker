@@ -210,7 +210,7 @@ class MainActivity : AppCompatActivity() {
             val nameTv = TextView(this).apply {
                 text = "📍 ${m.merchant}"
                 setTextColor(Color.WHITE)
-                textSize = 13spToPx()
+                textSize = 13f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.7f)
             }
 
@@ -218,7 +218,7 @@ class MainActivity : AppCompatActivity() {
                 text = String.format(Locale.UK, "£%.2f", m.total)
                 setTextColor(Color.parseColor("#F8FAFC"))
                 setTypeface(null, Typeface.BOLD)
-                textSize = 13spToPx()
+                textSize = 13f
                 gravity = Gravity.END
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.3f)
             }
@@ -324,6 +324,4 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton("Cancel", null)
             .show()
     }
-
-    private fun TextView.spToPx(): Float = 13f
 }

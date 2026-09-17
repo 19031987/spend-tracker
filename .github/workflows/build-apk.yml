@@ -26,6 +26,9 @@ jobs:
       with:
         gradle-version: '8.4'
 
+    - name: Accept Android SDK Licenses
+      run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+
     - name: Build Signed APK & Play Store App Bundle (AAB)
       env:
         ANDROID_HOME: /usr/local/lib/android/sdk
