@@ -34,21 +34,22 @@ jobs:
       env:
         ANDROID_HOME: /usr/local/lib/android/sdk
       run: |
-        gradle assembleRelease bundleRelease --no-daemon --stacktrace 2>&1 | tee build.log || (echo "### Build Failure" >> $GITHUB_STEP_SUMMARY && echo '```' >> $GITHUB_STEP_SUMMARY && tail -n 80 build.log >> $GITHUB_STEP_SUMMARY && echo '```' >> $GITHUB_STEP_SUMMARY && exit 1)
-
-    - name: List Generated Build Outputs
-      run: find app/build/outputs -type f
+        gradle :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+        echo "=== FOUND FILES ==="
+        find . -name "*.apk" -o -name "*.aab"
 
     - name: Upload Signed Release APK
       uses: actions/upload-artifact@v4
       with:
         name: SpendTracker-Release-APK
-        path: app/build/outputs/**/*.apk
+        path: |
+          **/*.apk
         if-no-files-found: warn
 
     - name: Upload Play Store App Bundle (AAB)
       uses: actions/upload-artifact@v4
       with:
         name: SpendTracker-GooglePlay-AAB
-        path: app/build/outputs/**/*.aab
+        path: |
+          **/*.aab
         if-no-files-found: warn
