@@ -55,10 +55,10 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.0.0
-        name: "SpendTracker Production Release v1.0.0"
+        tag_name: v1.0.1
+        name: "SpendTracker Release v1.0.1"
         body: |
-          ### SpendTracker v1.0.0 - Google Play Release
+          ### SpendTracker v1.0.1 - Google Play Release
           - **Google Play App Bundle (`.aab`)**: `app-release.aab` (Upload this file to Google Play Console)
           - **Signed Direct APK (`.apk`)**: `app-release.apk` (Install directly on any Android device)
           - **Keystore**: Signed with production release keystore
