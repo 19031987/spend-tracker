@@ -2,7 +2,6 @@ package com.spendtracker.app.service
 
 import android.app.Notification
 import android.content.Intent
-import android.os.Build
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -32,14 +31,15 @@ class SpendNotificationListenerService : NotificationListenerService() {
 
         val parsed = SpendParser.parse(packageName, title, content)
         if (parsed != null) {
-            Log.i(TAG, "Detected ${parsed.source} spend: ${parsed.currency}${parsed.amount} at ${parsed.merchant} (${parsed.category})")
+            Log.i(TAG, "Detected [${parsed.type}] ${parsed.source}: ${parsed.currency}${parsed.amount} at ${parsed.merchant} (${parsed.category})")
             
-            // Save to SQLite
+            // Save to lightweight file-based SQLite database
             val db = SpendDatabase(applicationContext)
             db.insertExpense(parsed)
 
             // Send local broadcast to update UI immediately
             val intent = Intent(ACTION_NEW_EXPENSE).apply {
+                putExtra("type", parsed.type)
                 putExtra("amount", parsed.amount)
                 putExtra("merchant", parsed.merchant)
                 putExtra("category", parsed.category)

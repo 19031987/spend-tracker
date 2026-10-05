@@ -55,13 +55,16 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.0.2
-        name: "SpendTracker Release v1.0.2"
+        tag_name: v1.0.3
+        name: "SpendTracker Release v1.0.3 (Monarch Edition)"
         body: |
-          ### SpendTracker v1.0.2 - Google Play Release (API 36)
-          - **Google Play App Bundle (`.aab`)**: `app-release.aab` (Upload this file to Google Play Console)
-          - **Signed Direct APK (`.apk`)**: `app-release.apk` (Install directly on any Android device)
-          - **Keystore**: Signed with production release keystore
+          ### SpendTracker v1.0.3 - Monarch Cash Flow & Vendor Edition
+          - 👑 **Monarch Budgeting UI**: Redesigned modern fintech theme with monthly Cash Flow card.
+          - 🟢 **Money In (Income)**: Accurately captured in positive vibrant green with up-inflow tracking.
+          - 🔴 **Money Out (Expenses)**: Categorized in soft crimson/red with outflow analysis.
+          - 🏢 **Precise Vendor / Merchant Capture**: Cleans merchant names and filters noise.
+          - 🗄️ **Lightweight File Database**: SQLite file-based storage capturing exact timestamps and net balance.
+          - ⚡ **Bank Simulation & Manual Entry**: Added support for custom transactions and alerts.
         files: dist/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
