@@ -12,14 +12,15 @@ import java.util.Locale
 
 data class TransactionRecord(
     val id: Long,
-    val type: String, // "IN" for Money In (green), "OUT" for Money Out (red)
+    val type: String, // "IN" for Money In (green), "OUT" for Money Out
     val amount: Double,
     val currency: String,
     val merchant: String,
     val category: String,
     val source: String,
     val timestamp: Long,
-    val formattedTime: String
+    val formattedTime: String,
+    val rawText: String? = null
 )
 
 data class CategorySpend(
@@ -39,7 +40,7 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
 
     companion object {
         const val DATABASE_NAME = "spend_tracker.db"
-        const val DATABASE_VERSION = 2
+        const val DATABASE_VERSION = 3
 
         const val TABLE_NAME = "transactions"
         const val COL_ID = "id"
@@ -59,7 +60,7 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
                 $COL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
                 $COL_TYPE TEXT NOT NULL DEFAULT 'OUT',
                 $COL_AMOUNT REAL NOT NULL,
-                $COL_CURRENCY TEXT NOT NULL,
+                $COL_CURRENCY TEXT NOT NULL DEFAULT '£',
                 $COL_MERCHANT TEXT NOT NULL,
                 $COL_CATEGORY TEXT NOT NULL,
                 $COL_SOURCE TEXT NOT NULL,
@@ -68,8 +69,9 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
             )
         """.trimIndent()
         db.execSQL(createTable)
-        db.execSQL("CREATE INDEX idx_transactions_timestamp ON $TABLE_NAME($COL_TIMESTAMP)")
-        db.execSQL("CREATE INDEX idx_transactions_type ON $TABLE_NAME($COL_TYPE)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_transactions_timestamp ON $TABLE_NAME($COL_TIMESTAMP)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_transactions_type ON $TABLE_NAME($COL_TYPE)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_transactions_source ON $TABLE_NAME($COL_SOURCE)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -81,11 +83,58 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
                 // If migration fails, recreate
                 db.execSQL("DROP TABLE IF EXISTS $TABLE_NAME")
                 onCreate(db)
+                return
             }
+        }
+        if (oldVersion < 3) {
+            // Run automatic data sanitization and cleanup for duplicated or inverted records
+            cleanupAndRepairData(db)
         }
     }
 
+    /**
+     * Checks if a duplicate transaction was already recorded in the last [windowMillis] (default 3 mins).
+     * Prevents Android notification service re-post loops from adding duplicate values.
+     */
+    fun isDuplicate(expense: ParsedExpense, timestamp: Long = System.currentTimeMillis(), windowMillis: Long = 180_000L): Boolean {
+        val db = readableDatabase
+        val minTs = timestamp - windowMillis
+        val maxTs = timestamp + windowMillis
+
+        val cursor = db.rawQuery(
+            """
+            SELECT 1 FROM $TABLE_NAME 
+            WHERE ABS($COL_AMOUNT - ?) < 0.001 
+              AND $COL_TYPE = ? 
+              AND $COL_SOURCE = ? 
+              AND ($COL_MERCHANT = ? OR $COL_RAW_TEXT = ?)
+              AND $COL_TIMESTAMP BETWEEN ? AND ? 
+            LIMIT 1
+            """.trimIndent(),
+            arrayOf(
+                expense.amount.toString(),
+                expense.type,
+                expense.source,
+                expense.merchant,
+                expense.rawText,
+                minTs.toString(),
+                maxTs.toString()
+            )
+        )
+        val exists = cursor.moveToFirst()
+        cursor.close()
+        return exists
+    }
+
+    /**
+     * Inserts a parsed transaction, safely rejecting duplicate notification events.
+     * Returns the new row ID, or -1 if skipped as duplicate.
+     */
     fun insertExpense(expense: ParsedExpense, timestamp: Long = System.currentTimeMillis()): Long {
+        if (isDuplicate(expense, timestamp)) {
+            return -1L
+        }
+
         val db = writableDatabase
         val values = ContentValues().apply {
             put(COL_TYPE, expense.type)
@@ -131,6 +180,72 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
     fun clearAll() {
         val db = writableDatabase
         db.delete(TABLE_NAME, null, null)
+    }
+
+    /**
+     * Self-healing data repair routine:
+     * 1. Removes rapid duplicate notifications (e.g. repeated £1650.99, £8.99 in same 3-min window)
+     * 2. Corrects inverted transaction signs where money was added/received/topped-up but stored as OUT
+     * 3. Fixes spurious source names (e.g. "purchase" -> Chase)
+     */
+    fun cleanupAndRepairData(dbInstance: SQLiteDatabase? = null) {
+        val db = dbInstance ?: writableDatabase
+        try {
+            // 1. Delete identical duplicates within 3-minute windows
+            db.execSQL("""
+                DELETE FROM $TABLE_NAME
+                WHERE $COL_ID NOT IN (
+                    SELECT MIN($COL_ID)
+                    FROM $TABLE_NAME
+                    GROUP BY ROUND($COL_AMOUNT, 2), $COL_TYPE, $COL_SOURCE, $COL_MERCHANT, ($COL_TIMESTAMP / 180000)
+                )
+            """.trimIndent())
+
+            // 2. Fix inverted signs for incoming deposits/added funds
+            db.execSQL("""
+                UPDATE $TABLE_NAME
+                SET $COL_TYPE = 'IN',
+                    $COL_CATEGORY = CASE 
+                        WHEN $COL_CATEGORY = 'General Spend' THEN 'Top-ups & Deposits'
+                        ELSE $COL_CATEGORY
+                    END
+                WHERE $COL_TYPE = 'OUT' AND (
+                    LOWER($COL_RAW_TEXT) LIKE '%added%' OR
+                    LOWER($COL_RAW_TEXT) LIKE '%received%' OR
+                    LOWER($COL_RAW_TEXT) LIKE '%sent you%' OR
+                    LOWER($COL_RAW_TEXT) LIKE '%refund%' OR
+                    LOWER($COL_RAW_TEXT) LIKE '%salary%' OR
+                    LOWER($COL_RAW_TEXT) LIKE '%deposit%' OR
+                    LOWER($COL_RAW_TEXT) LIKE '%top up%' OR
+                    LOWER($COL_RAW_TEXT) LIKE '%topped up%' OR
+                    LOWER($COL_RAW_TEXT) LIKE '%credited%' OR
+                    LOWER($COL_MERCHANT) LIKE '%income%' OR
+                    LOWER($COL_MERCHANT) LIKE '%deposit%' OR
+                    LOWER($COL_MERCHANT) LIKE '%refund%'
+                )
+            """.trimIndent())
+
+            // 3. Fix erroneous Chase attribution caused by "purchase" matching "chase"
+            db.execSQL("""
+                UPDATE $TABLE_NAME
+                SET $COL_SOURCE = 'Google Pay',
+                    $COL_MERCHANT = 'Google Pay'
+                WHERE $COL_SOURCE = 'Chase' 
+                  AND (LOWER($COL_RAW_TEXT) LIKE '%google pay%' OR LOWER($COL_RAW_TEXT) LIKE '%gpay%')
+            """.trimIndent())
+
+            // 4. Remove obvious OTP / balance rows that were mistakenly saved by old regex
+            db.execSQL("""
+                DELETE FROM $TABLE_NAME
+                WHERE LOWER($COL_RAW_TEXT) LIKE '%available balance%'
+                   OR LOWER($COL_RAW_TEXT) LIKE '%is now £%'
+                   OR LOWER($COL_RAW_TEXT) LIKE '%approve your%'
+                   OR LOWER($COL_RAW_TEXT) LIKE '%declined%'
+            """.trimIndent())
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun getStartOfMonth(): Long {
@@ -217,7 +332,7 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
         return total
     }
 
-    // Source breakdown (HSBC vs PayPal vs Others) with (MoneyIn, MoneyOut)
+    // Source breakdown (HSBC, PayPal, Chase, Monzo, etc.) with (MoneyIn, MoneyOut)
     fun getSourceTotals(): Map<String, Pair<Double, Double>> {
         val db = readableDatabase
         val cursor = db.rawQuery(
@@ -277,9 +392,9 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
     fun getAllTransactions(limit: Int = 100, typeFilter: String? = null): List<TransactionRecord> {
         val db = readableDatabase
         val query = if (typeFilter == null) {
-            "SELECT $COL_ID, $COL_TYPE, $COL_AMOUNT, $COL_CURRENCY, $COL_MERCHANT, $COL_CATEGORY, $COL_SOURCE, $COL_TIMESTAMP FROM $TABLE_NAME ORDER BY $COL_TIMESTAMP DESC LIMIT ?"
+            "SELECT $COL_ID, $COL_TYPE, $COL_AMOUNT, $COL_CURRENCY, $COL_MERCHANT, $COL_CATEGORY, $COL_SOURCE, $COL_TIMESTAMP, $COL_RAW_TEXT FROM $TABLE_NAME ORDER BY $COL_TIMESTAMP DESC LIMIT ?"
         } else {
-            "SELECT $COL_ID, $COL_TYPE, $COL_AMOUNT, $COL_CURRENCY, $COL_MERCHANT, $COL_CATEGORY, $COL_SOURCE, $COL_TIMESTAMP FROM $TABLE_NAME WHERE $COL_TYPE = ? ORDER BY $COL_TIMESTAMP DESC LIMIT ?"
+            "SELECT $COL_ID, $COL_TYPE, $COL_AMOUNT, $COL_CURRENCY, $COL_MERCHANT, $COL_CATEGORY, $COL_SOURCE, $COL_TIMESTAMP, $COL_RAW_TEXT FROM $TABLE_NAME WHERE $COL_TYPE = ? ORDER BY $COL_TIMESTAMP DESC LIMIT ?"
         }
 
         val args = if (typeFilter == null) arrayOf(limit.toString()) else arrayOf(typeFilter, limit.toString())
@@ -299,7 +414,8 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
                     category = cursor.getString(5),
                     source = cursor.getString(6),
                     timestamp = ts,
-                    formattedTime = sdf.format(Date(ts))
+                    formattedTime = sdf.format(Date(ts)),
+                    rawText = cursor.getString(8)
                 )
             )
         }

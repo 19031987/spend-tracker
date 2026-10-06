@@ -4,7 +4,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_dark">
+    android:background="@color/bg_app">
 
     <androidx.core.widget.NestedScrollView
         android:layout_width="match_parent"
@@ -15,13 +15,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="16dp">
+            android:padding="18dp">
 
-            <!-- Top Header (Monarch Style) -->
+            <!-- Material UI Top Header -->
             <RelativeLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="16dp">
+                android:layout_marginBottom="20dp">
 
                 <LinearLayout
                     android:layout_width="wrap_content"
@@ -33,17 +33,19 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="👑 Monarch Spend"
-                        android:textColor="@color/text_white"
-                        android:textSize="22sp"
+                        android:text="SpendTracker"
+                        android:textColor="@color/text_primary"
+                        android:textSize="24sp"
+                        android:fontFamily="sans-serif-black"
                         android:textStyle="bold" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Cash Flow &amp; Vendor Tracker"
-                        android:textColor="@color/text_muted"
-                        android:textSize="12sp" />
+                        android:layout_marginTop="2dp"
+                        android:text="Cash Flow &amp; Expense Radar"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -56,39 +58,47 @@
                     <Button
                         android:id="@+id/btnAddTransaction"
                         android:layout_width="wrap_content"
-                        android:layout_height="36dp"
-                        android:layout_marginEnd="6dp"
-                        android:backgroundTint="@color/card_subtle"
+                        android:layout_height="40dp"
+                        android:layout_marginEnd="8dp"
+                        android:backgroundTint="@color/pure_black"
                         android:text="+ Add"
                         android:textAllCaps="false"
-                        android:textColor="@color/accent"
-                        android:textSize="12sp"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="12dp" />
+                        android:textColor="@color/pure_white"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:elevation="1dp"
+                        app:cornerRadius="20dp"
+                        android:paddingStart="16dp"
+                        android:paddingEnd="16dp" />
 
                     <Button
                         android:id="@+id/btnSimulate"
                         android:layout_width="wrap_content"
-                        android:layout_height="36dp"
+                        android:layout_height="40dp"
                         android:backgroundTint="@color/card_subtle"
                         android:text="⚡ Test"
                         android:textAllCaps="false"
-                        android:textColor="@color/amber_warning"
-                        android:textSize="12sp"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="12dp" />
+                        android:textColor="@color/text_primary"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        app:cornerRadius="20dp"
+                        android:paddingStart="14dp"
+                        android:paddingEnd="14dp" />
                 </LinearLayout>
             </RelativeLayout>
 
             <!-- Notification Access Warning Banner -->
-            <androidx.cardview.widget.CardView
+            <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardPermissionWarning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="16dp"
                 android:visibility="gone"
                 app:cardBackgroundColor="@color/warning_bg"
-                app:cardCornerRadius="12dp">
+                app:strokeWidth="1dp"
+                app:strokeColor="@color/amber_warning"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="0dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -108,26 +118,28 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:text="Tap here to grant permission so SpendTracker can automatically capture vendor spending and deposits from your bank alerts."
-                        android:textColor="@color/text_white"
+                        android:text="Tap to enable notification access so bank deposits and spends are tracked in real-time."
+                        android:textColor="@color/text_primary"
                         android:textSize="12sp" />
                 </LinearLayout>
-            </androidx.cardview.widget.CardView>
+            </com.google.android.material.card.MaterialCardView>
 
-            <!-- Monarch Cash Flow Hero Card -->
-            <androidx.cardview.widget.CardView
+            <!-- Material UI Cash Flow Hero Card -->
+            <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="16dp"
+                android:layout_marginBottom="18dp"
                 app:cardBackgroundColor="@color/card_bg"
-                app:cardCornerRadius="16dp"
+                app:strokeWidth="1dp"
+                app:strokeColor="@color/card_border"
+                app:cardCornerRadius="20dp"
                 app:cardElevation="2dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="18dp">
+                    android:padding="20dp">
 
                     <!-- Cash Flow Header -->
                     <RelativeLayout
@@ -148,21 +160,22 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_alignParentEnd="true"
-                            android:text="Positive Flow"
+                            android:text="✓ Positive Flow"
                             android:textColor="@color/money_in_green"
-                            android:textSize="11sp"
+                            android:textSize="12sp"
                             android:textStyle="bold" />
                     </RelativeLayout>
 
-                    <!-- Net Balance -->
+                    <!-- Net Balance (Prominent Large Font) -->
                     <TextView
                         android:id="@+id/tvNetCashFlow"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="£0.00"
+                        android:layout_marginTop="8dp"
+                        android:text="+£0.00"
                         android:textColor="@color/money_in_green"
-                        android:textSize="34sp"
+                        android:textSize="38sp"
+                        android:fontFamily="sans-serif-black"
                         android:textStyle="bold" />
 
                     <TextView
@@ -170,18 +183,18 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="Net savings this month"
-                        android:textColor="@color/text_dim"
+                        android:textColor="@color/text_secondary"
                         android:textSize="12sp" />
 
                     <!-- Two Pillars: Money In vs Money Out -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
+                        android:layout_marginTop="18dp"
                         android:orientation="horizontal"
                         android:weightSum="2">
 
-                        <!-- Money In Box (Green) -->
+                        <!-- Money In Box (Emerald Green) -->
                         <LinearLayout
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
@@ -189,7 +202,7 @@
                             android:layout_marginEnd="6dp"
                             android:background="@drawable/bg_stat_box"
                             android:orientation="vertical"
-                            android:padding="12dp">
+                            android:padding="14dp">
 
                             <TextView
                                 android:layout_width="wrap_content"
@@ -207,7 +220,7 @@
                                 android:layout_marginTop="4dp"
                                 android:text="+£0.00"
                                 android:textColor="@color/money_in_green"
-                                android:textSize="18sp"
+                                android:textSize="19sp"
                                 android:textStyle="bold" />
 
                             <TextView
@@ -220,7 +233,7 @@
                                 android:textSize="11sp" />
                         </LinearLayout>
 
-                        <!-- Money Out Box (Red) -->
+                        <!-- Money Out Box (Rose Outflow) -->
                         <LinearLayout
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
@@ -228,7 +241,7 @@
                             android:layout_marginStart="6dp"
                             android:background="@drawable/bg_stat_box"
                             android:orientation="vertical"
-                            android:padding="12dp">
+                            android:padding="14dp">
 
                             <TextView
                                 android:layout_width="wrap_content"
@@ -246,7 +259,7 @@
                                 android:layout_marginTop="4dp"
                                 android:text="-£0.00"
                                 android:textColor="@color/money_out_red"
-                                android:textSize="18sp"
+                                android:textSize="19sp"
                                 android:textStyle="bold" />
 
                             <TextView
@@ -260,11 +273,11 @@
                         </LinearLayout>
                     </LinearLayout>
 
-                    <!-- Monarch Cash Flow Ratio Bar -->
+                    <!-- Material Cash Flow Ratio Bar -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="14dp"
+                        android:layout_marginTop="16dp"
                         android:orientation="vertical">
 
                         <ProgressBar
@@ -281,15 +294,15 @@
                             android:id="@+id/tvCashFlowRatio"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
+                            android:layout_marginTop="6dp"
                             android:text="0% of income spent"
-                            android:textColor="@color/text_dim"
+                            android:textColor="@color/text_secondary"
                             android:textSize="11sp" />
                     </LinearLayout>
                 </LinearLayout>
-            </androidx.cardview.widget.CardView>
+            </com.google.android.material.card.MaterialCardView>
 
-            <!-- Bank Sources Split (HSBC vs PayPal vs Others) -->
+            <!-- Bank Accounts Breakdown (HSBC vs PayPal) -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -297,20 +310,23 @@
                 android:orientation="horizontal"
                 android:weightSum="2">
 
-                <!-- HSBC Box -->
-                <androidx.cardview.widget.CardView
+                <!-- HSBC Card -->
+                <com.google.android.material.card.MaterialCardView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginEnd="6dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="@color/card_bg"
-                    app:cardCornerRadius="12dp">
+                    app:strokeWidth="1dp"
+                    app:strokeColor="@color/card_border"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="1dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="12dp">
+                        android:padding="14dp">
 
                         <TextView
                             android:layout_width="wrap_content"
@@ -326,34 +342,38 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="4dp"
                             android:text="Spent: £0.00"
-                            android:textColor="@color/text_white"
-                            android:textSize="13sp"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp"
                             android:textStyle="bold" />
 
                         <TextView
                             android:id="@+id/tvHsbcIn"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
                             android:text="In: +£0.00"
                             android:textColor="@color/money_in_green"
-                            android:textSize="11sp" />
+                            android:textSize="12sp" />
                     </LinearLayout>
-                </androidx.cardview.widget.CardView>
+                </com.google.android.material.card.MaterialCardView>
 
-                <!-- PayPal Box -->
-                <androidx.cardview.widget.CardView
+                <!-- PayPal Card -->
+                <com.google.android.material.card.MaterialCardView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
                     android:layout_weight="1"
                     app:cardBackgroundColor="@color/card_bg"
-                    app:cardCornerRadius="12dp">
+                    app:strokeWidth="1dp"
+                    app:strokeColor="@color/card_border"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="1dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="12dp">
+                        android:padding="14dp">
 
                         <TextView
                             android:layout_width="wrap_content"
@@ -369,88 +389,98 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="4dp"
                             android:text="Spent: £0.00"
-                            android:textColor="@color/text_white"
-                            android:textSize="13sp"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp"
                             android:textStyle="bold" />
 
                         <TextView
                             android:id="@+id/tvPayPalIn"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
                             android:text="In: +£0.00"
                             android:textColor="@color/money_in_green"
-                            android:textSize="11sp" />
+                            android:textSize="12sp" />
                     </LinearLayout>
-                </androidx.cardview.widget.CardView>
+                </com.google.android.material.card.MaterialCardView>
             </LinearLayout>
 
             <!-- Where You're Spending: Category Breakdown -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="8dp"
+                android:layout_marginBottom="10dp"
                 android:text="Spending by Category"
-                android:textColor="@color/text_white"
-                android:textSize="15sp"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp"
+                android:fontFamily="sans-serif-black"
                 android:textStyle="bold" />
 
-            <androidx.cardview.widget.CardView
+            <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="18dp"
                 app:cardBackgroundColor="@color/card_bg"
-                app:cardCornerRadius="14dp">
+                app:strokeWidth="1dp"
+                app:strokeColor="@color/card_border"
+                app:cardCornerRadius="18dp"
+                app:cardElevation="1dp">
 
                 <LinearLayout
                     android:id="@+id/layoutCategories"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="14dp" />
-            </androidx.cardview.widget.CardView>
+                    android:padding="16dp" />
+            </com.google.android.material.card.MaterialCardView>
 
             <!-- Top Vendors / Merchants Captured -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="8dp"
+                android:layout_marginBottom="10dp"
                 android:text="Top Places You Spend (Vendors)"
-                android:textColor="@color/text_white"
-                android:textSize="15sp"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp"
+                android:fontFamily="sans-serif-black"
                 android:textStyle="bold" />
 
-            <androidx.cardview.widget.CardView
+            <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="18dp"
                 app:cardBackgroundColor="@color/card_bg"
-                app:cardCornerRadius="14dp">
+                app:strokeWidth="1dp"
+                app:strokeColor="@color/card_border"
+                app:cardCornerRadius="18dp"
+                app:cardElevation="1dp">
 
                 <LinearLayout
                     android:id="@+id/layoutTopMerchants"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="14dp" />
-            </androidx.cardview.widget.CardView>
+                    android:padding="16dp" />
+            </com.google.android.material.card.MaterialCardView>
 
             <!-- Transactions Filter Header -->
             <RelativeLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="10dp">
+                android:layout_marginBottom="12dp">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_alignParentStart="true"
                     android:layout_centerVertical="true"
-                    android:text="Captured Transactions"
-                    android:textColor="@color/text_white"
-                    android:textSize="15sp"
+                    android:text="Recent Transactions"
+                    android:textColor="@color/text_primary"
+                    android:textSize="16sp"
+                    android:fontFamily="sans-serif-black"
                     android:textStyle="bold" />
 
-                <!-- Filter Toggle Pills -->
+                <!-- Material Filter Toggle Pills -->
                 <LinearLayout
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -461,43 +491,45 @@
                         android:id="@+id/btnFilterAll"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp"
-                        android:paddingTop="4dp"
-                        android:paddingBottom="4dp"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:paddingTop="6dp"
+                        android:paddingBottom="6dp"
                         android:text="All"
-                        android:textSize="11sp"
+                        android:textSize="12sp"
                         android:textStyle="bold"
-                        android:textColor="@color/text_white"
+                        android:textColor="@color/pure_white"
                         android:background="@drawable/bg_pill_active" />
 
                     <TextView
                         android:id="@+id/btnFilterOut"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="4dp"
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp"
-                        android:paddingTop="4dp"
-                        android:paddingBottom="4dp"
-                        android:text="Out"
-                        android:textSize="11sp"
+                        android:layout_marginStart="6dp"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:paddingTop="6dp"
+                        android:paddingBottom="6dp"
+                        android:text="Outflow"
+                        android:textSize="12sp"
                         android:textStyle="bold"
-                        android:textColor="@color/text_muted" />
+                        android:textColor="@color/text_secondary"
+                        android:background="@drawable/bg_pill_inactive" />
 
                     <TextView
                         android:id="@+id/btnFilterIn"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="4dp"
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp"
-                        android:paddingTop="4dp"
-                        android:paddingBottom="4dp"
-                        android:text="In"
-                        android:textSize="11sp"
+                        android:layout_marginStart="6dp"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:paddingTop="6dp"
+                        android:paddingBottom="6dp"
+                        android:text="Inflow"
+                        android:textSize="12sp"
                         android:textStyle="bold"
-                        android:textColor="@color/text_muted" />
+                        android:textColor="@color/text_secondary"
+                        android:background="@drawable/bg_pill_inactive" />
                 </LinearLayout>
             </RelativeLayout>
 
@@ -514,9 +546,9 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center"
-                android:padding="28dp"
+                android:padding="32dp"
                 android:text="No transactions captured yet.\nTap '+ Add' to record or '⚡ Test' to simulate bank notifications!"
-                android:textColor="@color/text_muted"
+                android:textColor="@color/text_secondary"
                 android:textSize="13sp" />
 
         </LinearLayout>

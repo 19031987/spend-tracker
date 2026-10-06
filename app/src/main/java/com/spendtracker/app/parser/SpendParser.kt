@@ -1,53 +1,165 @@
 package com.spendtracker.app.parser
 
 import java.util.Locale
-import java.util.regex.Pattern
 
+/**
+ * SIGN CONVENTION (single source of truth for the whole app)
+ * ----------------------------------------------------------
+ *  - [amount] is ALWAYS stored as a positive magnitude.
+ *  - [type] == [SpendParser.TYPE_IN]  -> inflow  (deposit, top-up, refund, salary) -> shown as "+£x" (green)
+ *  - [type] == [SpendParser.TYPE_OUT] -> outflow (purchase, bill, transfer out)    -> shown as "−£x"
+ * The sign is derived from [type] at display/aggregation time, never from the stored amount.
+ */
 data class ParsedExpense(
-    val type: String, // "IN" for Money In (green), "OUT" for Money Out (red)
+    val type: String, // "IN" for Money In (green), "OUT" for Money Out
     val amount: Double,
     val currency: String,
     val merchant: String,
     val category: String,
     val source: String,
-    val rawText: String
+    val rawText: String,
+    /** True when no merchant could be extracted and a generic "<Source> Payment" label was used. */
+    val merchantIsFallback: Boolean = false
 )
 
 object SpendParser {
 
+    const val TYPE_IN = "IN"
+    const val TYPE_OUT = "OUT"
+
+    private enum class Trust { TRUSTED, FINANCE, SMS, UNTRUSTED }
+
+    private data class Money(val sign: String, val currency: String, val amount: Double, val start: Int, val end: Int)
+
+    private val IC = RegexOption.IGNORE_CASE
+
     private val KNOWN_SOURCES = listOf(
-        "Chase", "Monzo", "Revolut", "Amex", "Barclays", "Apple Pay",
-        "Google Pay", "Starling", "HSBC", "PayPal", "Santander", "NatWest", "Lloyds", "Halifax"
+        "Chase", "Monzo", "Revolut", "Amex", "Barclays", "Apple Pay", "Google Pay", "Samsung Pay",
+        "Starling", "HSBC", "PayPal", "Santander", "NatWest", "Lloyds", "Halifax", "Nationwide"
     )
 
-    // Money In Patterns: capture incoming funds, refunds, transfers, deposits, salary
-    private val MONEY_IN_PATTERNS = listOf(
-        // "You received £250.00 from John Smith" or "Payment of £50.00 received from Tom"
-        Pattern.compile("(?i)(?:you received|received|payment of|transfer of)\\s*([£$€]|GBP)?\\s*([0-9,]+\\.[0-9]{2})\\s*(?:GBP\\s*)?from\\s+([^.,\\n]+)"),
-        // "Dave sent you £40.00"
-        Pattern.compile("(?i)([^.,\\n]+)\\s+sent you\\s*([£$€]|GBP)?\\s*([0-9,]+\\.[0-9]{2})"),
-        // "Refund of £24.99 from Amazon" or "You received a refund of £12.50 from eBay"
-        Pattern.compile("(?i)(?:refund(?:\\s+of)?|you received a refund of)\\s*([£$€]|GBP)?\\s*([0-9,]+\\.[0-9]{2})\\s*(?:GBP\\s*)?from\\s+([^.,\\n]+)"),
-        // "Deposit of £1,500.00 from Employer Corp" or "Salary credit: £2,500.00 from TechCorp"
-        Pattern.compile("(?i)(?:deposit of|salary(?:\\s+credit)?[:\\s]+)\\s*([£$€]|GBP)?\\s*([0-9,]+\\.[0-9]{2})\\s*(?:GBP\\s*)?(?:from\\s+([^.,\\n]+))?"),
-        // "£50.00 received from Michael"
-        Pattern.compile("(?i)([£$€]|GBP)\\s*([0-9,]+\\.[0-9]{2})\\s*(?:received from|deposited by)\\s*([^.,\\n]+)")
+    // ---------------------------------------------------------------------------------------
+    // Package allow-listing. FIX: previously EVERY notification on the phone (WhatsApp, email,
+    // shopping apps, promos) was run through the parser, so any "£" figure became a transaction.
+    // ---------------------------------------------------------------------------------------
+    private val BANK_PACKAGE_HINTS = listOf(
+        "jpmorgan" to "Chase", "chase" to "Chase", "getmondo" to "Monzo", "monzo" to "Monzo",
+        "revolut" to "Revolut", "americanexpress" to "Amex", "amex" to "Amex",
+        "barclays" to "Barclays", "barclaycard" to "Barclays", "starling" to "Starling",
+        "hsbc" to "HSBC", "paypal" to "PayPal", "santander" to "Santander", "natwest" to "NatWest",
+        "lloyds" to "Lloyds", "halifax" to "Halifax", "nationwide" to "Nationwide"
     )
 
-    // Money Out Patterns: card spends, payments, direct debits, purchases
-    private val MONEY_OUT_PATTERNS = listOf(
-        // "Direct debit to British Gas of £65.00" or "Payment to Netflix of £8.99"
-        Pattern.compile("(?i)(?:direct debit|standing order|payment)\\s+to\\s+([^.,\\n:]+?)\\s+(?:of|for)\\s*([£$€]|GBP)?\\s*([0-9,]+\\.[0-9]{2})"),
-        // "You spent £18.50 with your card at ASDA" or "Card ending 8219 spent £4.20 at Costa"
-        Pattern.compile("(?i)(?:you spent|card ending \\d+ spent|payment of|paid|a charge of|transaction of|spent)\\s*([£$€]|GBP)?\\s*([0-9,]+\\.[0-9]{2})\\s*(?:GBP\\s*)?(?:at|to|with your card at)?\\s*([^.,\\n]+)"),
-        // "Approved: £34.20 at Waitrose" or "You paid £29.99 to Steam Games"
-        Pattern.compile("(?i)(?:approved:\\s*)?([£$€]|GBP)?\\s*([0-9,]+\\.[0-9]{2})\\s*(?:GBP\\s*)?(?:spent at|paid to|at|to)\\s*([^.,\\n]+)"),
-        // "You sent £30.00 to Landlord"
-        Pattern.compile("(?i)(?:you sent|transfer to|direct debit to)\\s*([£$€]|GBP)?\\s*([0-9,]+\\.[0-9]{2})\\s*(?:GBP\\s*)?to\\s+([^.,\\n]+)"),
-        // "Payment to Netflix: £8.99"
-        Pattern.compile("(?i)(?:payment to|paid)\\s+([^.,\\n:]+)[:\\s]+([£$€]|GBP)?\\s*([0-9,]+\\.[0-9]{2})"),
-        // "£12.50 spent at TESCO"
-        Pattern.compile("(?i)([£$€]|GBP)\\s*([0-9,]+\\.[0-9]{2})\\s*(?:spent at|paid to|at|to)\\s*([^.,\\n]+)")
+    private val WALLET_PACKAGE_HINTS = listOf(
+        "walletnfcrel", "com.google.android.apps.wallet", "nbu.paisa",
+        "samsung.android.spay", "samsungpay", "samsung.android.samsungpay"
+    )
+
+    private val FINTECH_PACKAGE_HINTS = listOf(
+        "bank", "curve", "transferwise", "kroo", "tsb", "metrobank", "firstdirect", "virginmoney",
+        "capitalone", "mbna", "moneybox", "zopa", "tide", "monese", "vanquis", "klarna", "clearpay",
+        "rbs", "ulster", "coop", "marcus", "venmo", "squareup.cash"
+    )
+
+    private val SMS_PACKAGES = listOf(
+        "com.google.android.apps.messaging", "com.samsung.android.messaging",
+        "com.android.mms", "com.android.messaging", "com.oneplus.mms"
+    )
+
+    // FIX: word-bounded matching. `contains("chase")` used to match "purCHASE", tagging every
+    // "Google Pay Purchase" as a Chase transaction.
+    private val BANK_CONTENT_WORDS = listOf(
+        "chase" to "Chase", "monzo" to "Monzo", "revolut" to "Revolut",
+        "amex|american express" to "Amex", "barclays|barclaycard" to "Barclays",
+        "starling" to "Starling", "hsbc" to "HSBC", "paypal" to "PayPal",
+        "santander" to "Santander", "natwest" to "NatWest", "lloyds" to "Lloyds",
+        "halifax" to "Halifax", "nationwide" to "Nationwide"
+    ).map { (words, name) -> Regex("\\b(?:$words)\\b", IC) to name }
+
+    private val GOOGLE_PAY_WORDS = Regex("\\b(?:google pay|google wallet|gpay)\\b", IC)
+    private val APPLE_PAY_WORDS = Regex("\\bapple pay\\b", IC)
+    private val SAMSUNG_PAY_WORDS = Regex("\\bsamsung (?:pay|wallet)\\b", IC)
+
+    // ---------------------------------------------------------------------------------------
+    // Amount extraction. FIX: a currency marker (£ € $ GBP EUR USD) is now REQUIRED.
+    // The old fallback `([£$€]|GBP)?\s*([0-9,]+\.[0-9]{2})` made the currency optional, so dates
+    // ("05.10.26"), times, card digits and balances were captured as spend.
+    // ---------------------------------------------------------------------------------------
+    private const val CUR_ALT = "[£€\$]|GBP|EUR|USD"
+    private const val NUM = "(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\\.[0-9]{1,2})?"
+
+    private val MONEY_PREFIX = Regex("([+\\-\u2212]?)($CUR_ALT)\\s?($NUM)(?![0-9])", IC)
+    private val MONEY_SUFFIX = Regex("(?<![0-9.,])([+\\-\u2212]?)($NUM)\\s?(GBP|EUR|USD)\\b", IC)
+
+    // FIX: balances / limits are stripped BEFORE looking for the transaction amount, so
+    // "You spent £8.99 ... Balance £1,650.99" no longer records £1,650.99.
+    private val BALANCE_PHRASES = listOf(
+        Regex(
+            "\\b(?:(?:available|new|current|remaining|account|card)\\s+)?" +
+                "(?:balance|bal|credit limit|available to spend|left to spend|spending limit)\\b\\.?" +
+                "\\s*(?:is|of|now|was|:|=|-)?\\s*(?:now\\s+)?[+\\-\u2212]?(?:$CUR_ALT)\\s?$NUM",
+            IC
+        ),
+        Regex("\\bavailable(?:\\s+funds)?\\s*(?:is|of|:|=|-)?\\s*(?:$CUR_ALT)\\s?$NUM", IC),
+        Regex("(?:$CUR_ALT)\\s?$NUM\\s*(?:available|remaining|balance|left to spend)\\b", IC)
+    )
+
+    // Notifications that mention money but are NOT a completed transaction
+    // (3-D Secure approvals, OTPs, declines, requests, statements, summaries, promos).
+    private val IGNORE = Regex(
+        "\\b(?:approve|confirm|verify|authori[sz]e|passcode|one[- ]time|otp|security code|verification|" +
+            "declined|unsuccessful|failed|insufficient|requested|request|requesting|statement|" +
+            "minimum payment|payment due|is due|due on|due date|offer|offers|voucher|promo|promotion|" +
+            "discount|win|chance to|earn up to|save up to|get up to|this week|this month|last week|" +
+            "last month|so far|summary|in total|total spend|reminder|scheduled|upcoming|" +
+            "will be taken|will be paid|will leave)\\b",
+        IC
+    )
+    private val PROMO = Regex("[0-9]+\\s?%\\s?off\\b", IC)
+
+    // ---------------------------------------------------------------------------------------
+    // Direction (sign) detection. FIX: inflow phrasing such as "£23.00 has been added",
+    // "You topped up", "paid in", "credited" was not recognised and fell through to OUT,
+    // which is why added funds rendered as negative spend. Also "credit" used to match
+    // "credit card", flipping card spends into income.
+    // Precedence: explicit +/- sign > strong IN > strong OUT > weak IN > weak OUT.
+    // ---------------------------------------------------------------------------------------
+    private val STRONG_IN = Regex(
+        "\\b(?:received from|you(?:'ve|’ve| have)? received|sent you|refund(?:ed)?|salary|wages|payroll|" +
+            "paid in|paid into|credited|deposit(?:ed)?|top(?:ped)?[ -]?up|added to your|has been added|" +
+            "have been added|you(?:'ve|’ve| have)? added|added money|money in|reimburs(?:ed|ement)|" +
+            "transfer from|reversal|reversed|incoming payment|incoming transfer)\\b",
+        IC
+    )
+    private val STRONG_OUT = Regex(
+        "\\b(?:you(?:'ve|’ve| have)? (?:spent|paid|sent|bought|made a payment)|spent|paid to|payment to|" +
+            "direct debit|standing order|purchase[ds]?|charged|debited|withdrawal|withdrawn|withdrew|" +
+            "card payment|sent to|transfer to)\\b",
+        IC
+    )
+    private val WEAK_IN = Regex("\\b(?:received|incoming|has arrived|arrived|cashback|interest|credit)\\b(?!\\s*card)", IC)
+    private val WEAK_OUT = Regex(
+        "\\b(?:payment|paid|pay|transaction|approved|contactless|card ending|debit|subscription|bill|order|spend|charge)\\b",
+        IC
+    )
+
+    // ---------------------------------------------------------------------------------------
+    // Merchant extraction
+    // ---------------------------------------------------------------------------------------
+    private const val NAME = "([A-Za-z0-9&'][^.,;:!?\\n•*()|]{0,48}?)"
+    private const val TERM =
+        "(?=\\s+(?:on|via|using|with|ref|reference|card|was|has|is|have|and|for)\\b|\\s+at\\s+[0-9]|\\s+-\\s|[.,;:!?\\n•*()|]|\\s*$)"
+
+    private val IN_SENT_YOU = Regex("$NAME\\s+(?:has\\s+)?sent you\\b", IC)
+    private val IN_FROM = Regex("\\bfrom\\s+$NAME$TERM", IC)
+    private val OUT_DD = Regex("\\b(?:direct debit|standing order|payment|transfer)\\s+to\\s+$NAME(?=\\s+(?:of|for)\\b)", IC)
+    private val OUT_AT_TO = Regex("\\b(?:at|to)\\s+$NAME$TERM", IC)
+
+    private val GENERIC_TITLE = Regex(
+        "\\b(?:alert|alerts|notification|payment|payments|purchase|transaction|activity|account|card|" +
+            "received|money|spend|spending|spent|update|credit|debit|wallet|pay|paid|deposit|refund|" +
+            "salary|transfer|bank|banking)\\b",
+        IC
     )
 
     private val CATEGORY_RULES_OUT = mapOf(
@@ -63,160 +175,79 @@ object SpendParser {
         "Income & Salary" to listOf("salary", "payroll", "wages", "employer", "dividend", "earnings", "work"),
         "Refunds" to listOf("refund", "returned", "chargeback", "reimbursement"),
         "Transfers In" to listOf("sent you", "received from", "transfer from", "friends", "gift", "john", "dave", "sarah", "alex", "tom", "jane"),
-        "Cashback & Rewards" to listOf("cashback", "reward", "interest", "bonus")
+        "Cashback & Rewards" to listOf("cashback", "reward", "interest", "bonus"),
+        "Top-ups & Deposits" to listOf("top up", "topped up", "top-up", "topup", "added", "deposit", "paid in")
     )
 
+    // ---------------------------------------------------------------------------------------
+    // Public API
+    // ---------------------------------------------------------------------------------------
+
     fun detectSource(packageName: String, content: String): String {
-        val combined = "$packageName $content".lowercase(Locale.ROOT)
+        val pkg = packageName.lowercase(Locale.ROOT)
+        BANK_PACKAGE_HINTS.firstOrNull { pkg.contains(it.first) }?.let { return it.second }
+
+        // Earliest bank mention in the text wins (title usually comes first).
+        val fromContent = BANK_CONTENT_WORDS
+            .mapNotNull { (regex, name) -> regex.find(content)?.let { it.range.first to name } }
+            .minByOrNull { it.first }
+            ?.second
+        if (fromContent != null) return fromContent
+
         return when {
-            combined.contains("chase") -> "Chase"
-            combined.contains("monzo") || combined.contains("mondo") -> "Monzo"
-            combined.contains("revolut") -> "Revolut"
-            combined.contains("amex") || combined.contains("americanexpress") -> "Amex"
-            combined.contains("barclays") -> "Barclays"
-            combined.contains("apple") || combined.contains("wallet") -> "Apple Pay"
-            combined.contains("google") || combined.contains("gpay") -> "Google Pay"
-            combined.contains("starling") -> "Starling"
-            combined.contains("hsbc") -> "HSBC"
-            combined.contains("paypal") -> "PayPal"
-            combined.contains("santander") -> "Santander"
-            combined.contains("natwest") -> "NatWest"
-            combined.contains("lloyds") -> "Lloyds"
-            combined.contains("halifax") -> "Halifax"
+            pkg.contains("walletnfcrel") || pkg.contains("nbu.paisa") || GOOGLE_PAY_WORDS.containsMatchIn(content) -> "Google Pay"
+            pkg.contains("samsung") && pkg.contains("pay") || SAMSUNG_PAY_WORDS.containsMatchIn(content) -> "Samsung Pay"
+            APPLE_PAY_WORDS.containsMatchIn(content) -> "Apple Pay"
             else -> "Card Payment"
         }
     }
 
+    /**
+     * Parses a notification into a transaction, or returns null if it is not a completed
+     * transaction from a trusted financial source.
+     *
+     * @param packageName posting app. Pass "" for trusted internal input (simulator / data repair).
+     */
     fun parse(packageName: String, title: String?, text: String?): ParsedExpense? {
-        val fullContent = listOfNotNull(title, text).joinToString(" ").trim()
-        if (fullContent.isEmpty()) return null
+        val pkg = packageName.trim().lowercase(Locale.ROOT)
+        val content = listOfNotNull(title?.trim(), text?.trim()).filter { it.isNotEmpty() }.joinToString(" ")
+        if (content.isEmpty()) return null
 
-        val source = detectSource(packageName, fullContent)
+        val trust = classifyPackage(pkg)
+        if (trust == Trust.UNTRUSTED) return null
+        if (IGNORE.containsMatchIn(content) || PROMO.containsMatchIn(content)) return null
 
-        // 1. Check Money In patterns first
-        for (pattern in MONEY_IN_PATTERNS) {
-            val matcher = pattern.matcher(fullContent)
-            if (matcher.find()) {
-                val groupCount = matcher.groupCount()
-                var curr = "£"
-                var amount = 0.0
-                var merchantRaw = "Income Sender"
+        var scrubbed = content
+        for (r in BALANCE_PHRASES) scrubbed = r.replace(scrubbed, " ")
 
-                if (groupCount >= 3) {
-                    val g1 = matcher.group(1)
-                    val g2 = matcher.group(2)
-                    val g3 = matcher.group(3)
+        val money = findFirstMoney(scrubbed) ?: return null
+        if (money.amount <= 0.0 || money.amount >= 1_000_000.0) return null
 
-                    if (isCurrencyOrAmount(g1) || isNumber(g2)) {
-                        curr = g1?.trim() ?: "£"
-                        amount = g2?.replace(",", "")?.toDoubleOrNull() ?: 0.0
-                        merchantRaw = g3?.trim() ?: "Income Sender"
-                    } else {
-                        // Pattern like "Dave sent you £40.00" -> g1 is Dave, g2 is curr, g3 is amt
-                        merchantRaw = g1?.trim() ?: "Income Sender"
-                        curr = g2?.trim() ?: "£"
-                        amount = g3?.replace(",", "")?.toDoubleOrNull() ?: 0.0
-                    }
-                } else if (groupCount == 2) {
-                    curr = matcher.group(1)?.trim() ?: "£"
-                    amount = matcher.group(2)?.replace(",", "")?.toDoubleOrNull() ?: 0.0
-                    merchantRaw = "Direct Deposit"
-                }
-
-                if (amount > 0.0) {
-                    val cleanMerchant = cleanMerchantName(merchantRaw, source)
-                    val category = categorize("$cleanMerchant $fullContent", "IN")
-                    return ParsedExpense(
-                        type = "IN",
-                        amount = amount,
-                        currency = if (curr.contains("GBP", ignoreCase = true)) "£" else curr,
-                        merchant = cleanMerchant,
-                        category = category,
-                        source = source,
-                        rawText = fullContent
-                    )
-                }
-            }
+        val type = when {
+            money.sign == "+" -> TYPE_IN
+            money.sign == "-" || money.sign == "\u2212" -> TYPE_OUT
+            STRONG_IN.containsMatchIn(scrubbed) -> TYPE_IN
+            STRONG_OUT.containsMatchIn(scrubbed) -> TYPE_OUT
+            WEAK_IN.containsMatchIn(scrubbed) -> TYPE_IN
+            WEAK_OUT.containsMatchIn(scrubbed) -> TYPE_OUT
+            trust == Trust.SMS -> return null // SMS needs an explicit transaction verb
+            else -> TYPE_OUT // bank/wallet alert with an amount but no verb, e.g. "£4.00 with Visa ••1234"
         }
 
-        // 2. Check Money Out patterns
-        for (pattern in MONEY_OUT_PATTERNS) {
-            val matcher = pattern.matcher(fullContent)
-            if (matcher.find()) {
-                val groupCount = matcher.groupCount()
-                var curr = "£"
-                var amount = 0.0
-                var merchantRaw = "Retailer"
+        val source = detectSource(pkg, content)
+        val (merchantRaw, isFallback) = extractMerchant(type, scrubbed, money.end, title, source)
+        val merchant = if (isFallback) merchantRaw else cleanMerchantName(merchantRaw, source)
 
-                if (groupCount >= 3) {
-                    val g1 = matcher.group(1)
-                    val g2 = matcher.group(2)
-                    val g3 = matcher.group(3)
-
-                    if (isNumber(g2) || isCurrencyOrAmount(g1)) {
-                        curr = g1?.trim() ?: "£"
-                        amount = g2?.replace(",", "")?.toDoubleOrNull() ?: 0.0
-                        merchantRaw = g3?.trim() ?: "Retailer"
-                    } else {
-                        // e.g. Direct debit to British Gas of £65.00 -> g1: British Gas, g2: £, g3: 65.00
-                        merchantRaw = g1?.trim() ?: "Retailer"
-                        curr = g2?.trim() ?: "£"
-                        amount = g3?.replace(",", "")?.toDoubleOrNull() ?: 0.0
-                    }
-                }
-
-                if (amount > 0.0) {
-                    val cleanMerchant = cleanMerchantName(merchantRaw, source)
-                    val category = categorize("$cleanMerchant $fullContent", "OUT")
-                    return ParsedExpense(
-                        type = "OUT",
-                        amount = amount,
-                        currency = if (curr.contains("GBP", ignoreCase = true)) "£" else curr,
-                        merchant = cleanMerchant,
-                        category = category,
-                        source = source,
-                        rawText = fullContent
-                    )
-                }
-            }
-        }
-
-        // 3. Fallback pattern: detect currency & amount, and determine direction
-        val fallbackMatcher = Pattern.compile("([£$€]|GBP)?\\s*([0-9,]+\\.[0-9]{2})").matcher(fullContent)
-        if (fallbackMatcher.find()) {
-            val curr = fallbackMatcher.group(1) ?: "£"
-            val amt = fallbackMatcher.group(2)?.replace(",", "")?.toDoubleOrNull() ?: return null
-
-            val lower = fullContent.lowercase(Locale.ROOT)
-            val isIn = listOf("received", "sent you", "deposit", "salary", "refund", "credit", "+").any { lower.contains(it) }
-            val txType = if (isIn) "IN" else "OUT"
-            val fallbackMerchant = if (isIn) "$source Credit" else "$source Payment"
-            val category = if (isIn) "Money In" else "General Spend"
-
-            return ParsedExpense(
-                type = txType,
-                amount = amt,
-                currency = if (curr.contains("GBP", ignoreCase = true)) "£" else curr,
-                merchant = fallbackMerchant,
-                category = category,
-                source = source,
-                rawText = fullContent
-            )
-        }
-
-        return null
-    }
-
-    private fun isNumber(str: String?): Boolean {
-        if (str == null) return false
-        val s = str.replace(",", "").trim()
-        return s.toDoubleOrNull() != null
-    }
-
-    private fun isCurrencyOrAmount(str: String?): Boolean {
-        if (str == null) return false
-        val s = str.trim()
-        return s.contains("£") || s.contains("$") || s.contains("€") || s.contains("GBP", ignoreCase = true)
+        return ParsedExpense(
+            type = type,
+            amount = money.amount,
+            currency = money.currency,
+            merchant = merchant,
+            category = categorize("$merchant $content", type),
+            source = source,
+            rawText = content,
+            merchantIsFallback = isFallback
+        )
     }
 
     fun cleanMerchantName(raw: String, source: String = ""): String {
@@ -258,39 +289,90 @@ object SpendParser {
         }
 
         val words = clean.split(" ").filter { it.isNotEmpty() }
-        if (words.isEmpty()) return "Retailer"
+        if (words.isEmpty()) return if (source.isNotEmpty()) "$source Account" else "Retailer"
 
         return words.joinToString(" ") { word ->
             word.lowercase(Locale.ROOT).replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
         }
     }
 
-    fun categorize(textToCheck: String, txType: String = "OUT"): String {
+    fun categorize(textToCheck: String, txType: String = TYPE_OUT): String {
         val lower = textToCheck.lowercase(Locale.ROOT)
-        if (txType == "IN") {
-            for ((category, keywords) in CATEGORY_RULES_IN) {
-                for (kw in keywords) {
-                    if (kw.length <= 3) {
-                        val pattern = Regex("(?i)\\b" + Regex.escape(kw) + "\\b")
-                        if (pattern.containsMatchIn(lower)) return category
-                    } else {
-                        if (lower.contains(kw)) return category
-                    }
+        val rules = if (txType == TYPE_IN) CATEGORY_RULES_IN else CATEGORY_RULES_OUT
+        for ((category, keywords) in rules) {
+            for (kw in keywords) {
+                if (kw.length <= 3) {
+                    if (Regex("(?i)\\b" + Regex.escape(kw) + "\\b").containsMatchIn(lower)) return category
+                } else if (lower.contains(kw)) {
+                    return category
                 }
             }
-            return "Money In"
-        } else {
-            for ((category, keywords) in CATEGORY_RULES_OUT) {
-                for (kw in keywords) {
-                    if (kw.length <= 3) {
-                        val pattern = Regex("(?i)\\b" + Regex.escape(kw) + "\\b")
-                        if (pattern.containsMatchIn(lower)) return category
-                    } else {
-                        if (lower.contains(kw)) return category
-                    }
-                }
-            }
-            return "General Spend"
         }
+        return if (txType == TYPE_IN) "Money In" else "General Spend"
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Internals
+    // ---------------------------------------------------------------------------------------
+
+    private fun classifyPackage(pkg: String): Trust = when {
+        pkg.isEmpty() -> Trust.TRUSTED
+        BANK_PACKAGE_HINTS.any { pkg.contains(it.first) } -> Trust.FINANCE
+        WALLET_PACKAGE_HINTS.any { pkg.contains(it) } -> Trust.FINANCE
+        FINTECH_PACKAGE_HINTS.any { pkg.contains(it) } -> Trust.FINANCE
+        SMS_PACKAGES.any { pkg == it } -> Trust.SMS
+        else -> Trust.UNTRUSTED
+    }
+
+    private fun findFirstMoney(text: String): Money? {
+        val prefix = MONEY_PREFIX.find(text)?.let { m ->
+            val amt = m.groupValues[3].replace(",", "").toDoubleOrNull() ?: return@let null
+            Money(m.groupValues[1], normalizeCurrency(m.groupValues[2]), amt, m.range.first, m.range.last + 1)
+        }
+        val suffix = MONEY_SUFFIX.find(text)?.let { m ->
+            val amt = m.groupValues[2].replace(",", "").toDoubleOrNull() ?: return@let null
+            Money(m.groupValues[1], normalizeCurrency(m.groupValues[3]), amt, m.range.first, m.range.last + 1)
+        }
+        return listOfNotNull(prefix, suffix).minByOrNull { it.start }
+    }
+
+    private fun normalizeCurrency(raw: String): String = when (raw.uppercase(Locale.ROOT)) {
+        "GBP" -> "£"
+        "EUR" -> "€"
+        "USD" -> "$"
+        else -> raw
+    }
+
+    private fun isUsableName(candidate: String?): Boolean {
+        val c = candidate?.trim() ?: return false
+        if (c.length < 2) return false
+        val lower = c.lowercase(Locale.ROOT)
+        if (lower == "you" || lower == "your" || lower.startsWith("your ") || lower.startsWith("you ")) return false
+        if (Regex("^[0-9:./ -]+$").matches(c)) return false
+        return true
+    }
+
+    private fun extractMerchant(type: String, text: String, amountEnd: Int, title: String?, source: String): Pair<String, Boolean> {
+        if (type == TYPE_IN) {
+            IN_SENT_YOU.find(text)?.groupValues?.get(1)?.takeIf { isUsableName(it) }?.let { return it.trim() to false }
+            IN_FROM.findAll(text).map { it.groupValues[1] }.firstOrNull { isUsableName(it) }?.let { return it.trim() to false }
+        } else {
+            OUT_DD.find(text)?.groupValues?.get(1)?.takeIf { isUsableName(it) }?.let { return it.trim() to false }
+            // Prefer a merchant that appears AFTER the amount ("£4.20 at Costa")...
+            val tail = if (amountEnd in 0..text.length) text.substring(amountEnd) else ""
+            OUT_AT_TO.findAll(tail).map { it.groupValues[1] }.firstOrNull { isUsableName(it) }?.let { return it.trim() to false }
+            // ...then anywhere ("Payment to Netflix: £8.99").
+            OUT_AT_TO.findAll(text).map { it.groupValues[1] }.firstOrNull { isUsableName(it) }?.let { return it.trim() to false }
+        }
+
+        // Wallet apps (Google Wallet etc.) put the merchant in the title: "Tesco" / "£4.00 with Visa ••1234".
+        val t = title?.trim().orEmpty()
+        if (t.isNotEmpty() && !GENERIC_TITLE.containsMatchIn(t) && findFirstMoney(t) == null &&
+            BANK_CONTENT_WORDS.none { it.first.containsMatchIn(t) } && isUsableName(t)
+        ) {
+            return t to false
+        }
+
+        return (if (type == TYPE_IN) "$source Deposit" else "$source Payment") to true
     }
 }

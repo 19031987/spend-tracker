@@ -32,21 +32,24 @@ class SpendNotificationListenerService : NotificationListenerService() {
         val parsed = SpendParser.parse(packageName, title, content)
         if (parsed != null) {
             Log.i(TAG, "Detected [${parsed.type}] ${parsed.source}: ${parsed.currency}${parsed.amount} at ${parsed.merchant} (${parsed.category})")
-            
-            // Save to lightweight file-based SQLite database
-            val db = SpendDatabase(applicationContext)
-            db.insertExpense(parsed)
 
-            // Send local broadcast to update UI immediately
-            val intent = Intent(ACTION_NEW_EXPENSE).apply {
-                putExtra("type", parsed.type)
-                putExtra("amount", parsed.amount)
-                putExtra("merchant", parsed.merchant)
-                putExtra("category", parsed.category)
-                putExtra("source", parsed.source)
-                setPackage(applicationContext.packageName)
+            // Save to lightweight file-based SQLite database with duplicate protection
+            val db = SpendDatabase(applicationContext)
+            val rowId = db.insertExpense(parsed)
+            if (rowId > 0) {
+                // Send local broadcast to update UI immediately
+                val intent = Intent(ACTION_NEW_EXPENSE).apply {
+                    putExtra("type", parsed.type)
+                    putExtra("amount", parsed.amount)
+                    putExtra("merchant", parsed.merchant)
+                    putExtra("category", parsed.category)
+                    putExtra("source", parsed.source)
+                    setPackage(applicationContext.packageName)
+                }
+                sendBroadcast(intent)
+            } else {
+                Log.d(TAG, "Skipped duplicate notification event for: ${parsed.merchant} ${parsed.currency}${parsed.amount}")
             }
-            sendBroadcast(intent)
         }
     }
 }

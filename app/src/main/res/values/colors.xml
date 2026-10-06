@@ -1,36 +1,48 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Monarch Modern Palette -->
-    <color name="primary">#0B0F19</color>
-    <color name="primary_dark">#050811</color>
-    <color name="bg_dark">#090D16</color>
-    <color name="card_bg">#121927</color>
-    <color name="card_subtle">#1A2234</color>
-    <color name="card_border">#1E293B</color>
-    
-    <!-- Cash Flow Accents -->
-    <color name="money_in_green">#10B981</color>
-    <color name="money_in_bg">#064E3B</color>
-    <color name="money_out_red">#F43F5E</color>
-    <color name="money_out_bg">#4C0519</color>
-    <color name="cash_flow_bar_bg">#1E293B</color>
+    <!-- Material UI Pure White & Pitch Black Palette -->
+    <color name="pure_white">#FFFFFF</color>
+    <color name="pure_black">#000000</color>
 
-    <!-- General Accents -->
-    <color name="accent">#38BDF8</color>
-    <color name="accent_purple">#818CF8</color>
-    <color name="amber_warning">#F59E0B</color>
-    <color name="warning_bg">#311B07</color>
+    <color name="primary">#000000</color>
+    <color name="primary_dark">#000000</color>
+    <color name="accent">#000000</color>
 
-    <!-- Text Colors -->
-    <color name="text_white">#F8FAFC</color>
-    <color name="text_high">#E2E8F0</color>
-    <color name="text_muted">#94A3B8</color>
-    <color name="text_dim">#64748B</color>
+    <!-- App Background & Cards (Material UI White & Black) -->
+    <color name="bg_white">#FFFFFF</color>
+    <color name="bg_black">#000000</color>
+    <color name="card_bg_white">#FFFFFF</color>
+    <color name="card_border_white">#E5E7EB</color>
+    <color name="card_subtle_white">#F9FAFB</color>
 
-    <!-- Bank Tags -->
-    <color name="hsbc_red">#EF4444</color>
+    <!-- Current active defaults (Crisp White Material Base with Black Contrast) -->
+    <color name="bg_app">#FFFFFF</color>
+    <color name="card_bg">#FFFFFF</color>
+    <color name="card_subtle">#F3F4F6</color>
+    <color name="card_border">#E5E7EB</color>
+    <color name="stat_box_bg">#F9FAFB</color>
+
+    <!-- High-Contrast Typography -->
+    <color name="text_primary">#0F172A</color>
+    <color name="text_secondary">#475569</color>
+    <color name="text_muted">#64748B</color>
+    <color name="text_dim">#94A3B8</color>
+    <color name="text_inverse">#FFFFFF</color>
+
+    <!-- Financial Semantics (Crisp Material Green & Red) -->
+    <color name="money_in_green">#059669</color>
+    <color name="money_in_bg">#ECFDF5</color>
+    <color name="money_out_red">#E11D48</color>
+    <color name="money_out_bg">#FFF1F2</color>
+
+    <!-- Warning / Notification -->
+    <color name="amber_warning">#D97706</color>
+    <color name="warning_bg">#FEF3C7</color>
+
+    <!-- Bank Institutions (Monochrome or Subtle Accents) -->
+    <color name="hsbc_red">#DC2626</color>
     <color name="paypal_blue">#0284C7</color>
-    <color name="monzo_coral">#FB7185</color>
-    <color name="revolut_blue">#38BDF8</color>
+    <color name="monzo_coral">#F43F5E</color>
+    <color name="revolut_blue">#2563EB</color>
     <color name="chase_blue">#1D4ED8</color>
 </resources>
