@@ -32,9 +32,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import java.math.BigDecimal
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -391,4 +393,11 @@ private fun AccountPicker(
             }
         }
     }
+}
+
+/** "12.34" or "12,34" to 1234. Returns null if invalid, <= 0, or has more than 2 decimals. */
+internal fun parseMinorUnits(input: String): Long? {
+    val value = input.trim().replace(',', '.').toBigDecimalOrNull() ?: return null
+    if (value.signum() <= 0 || value.stripTrailingZeros().scale() > 2) return null
+    return runCatching { value.multiply(BigDecimal(100)).longValueExact() }.getOrNull()
 }

@@ -108,7 +108,7 @@ class SpendNotificationListenerService : NotificationListenerService() {
                         amount = signedAmount,
                         category = resolvedCategoryKey,
                         note = "Captured from ${parsed.source} alert",
-                        timestamp = if (parsed.timestamp > 0) parsed.timestamp else System.currentTimeMillis(),
+                        timestamp = if (sbn.postTime > 0) sbn.postTime else System.currentTimeMillis(),
                         type = txType,
                         excludeFromSpending = false,
                         merchant = parsed.merchant
