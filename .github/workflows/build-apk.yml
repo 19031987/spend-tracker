@@ -55,15 +55,15 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.0.4
-        name: "SpendTracker Release v1.0.4 (Material UI White & Black Edition)"
+        tag_name: v1.1.0
+        name: "SpendTracker Release v1.1.0 (Jetpack Compose & Room Edition)"
         body: |
-          ### SpendTracker v1.0.4 - Material UI White & Black Edition
-          - ⚪⚫ **Material UI White & Black Theme**: High-contrast monochrome Material Design with pure white surface, pitch black accents, and subtle borders.
-          - 💰 **Fixed Calculation & Sign Inversion**: Deposits (e.g. +£23.00) are accurately logged as positive inflow; expenses (-£4.00) without phantom balance additions.
-          - 🔍 **Strict Word-Boundary Source Matching**: Eliminates misclassification of "purchase" as "Chase".
-          - 🛡️ **SQLite Hash Deduplication**: Prevents repeated notifications from double-counting within a 3-minute window.
-          - 📦 **Self-Healing Database**: Repaired existing corrupt rows on launch and maintains cash flow accuracy.
+          ### SpendTracker v1.1.0 - Jetpack Compose & Room Edition
+          - 🎨 **Jetpack Compose & Material 3**: Complete UI modernized with Compose, dynamic safe-area insets, and overlap-proof header bar.
+          - 🔄 **Internal Account Transfers**: Dual-legged atomic transfer entries (`-amount` source, `+amount` destination) with spend exclusion flag ensuring internal money movements never distort analytics.
+          - 📊 **Spending Analytics & Canvas Bar Charts**: Compare Week, Month, or Year spend against previous periods with +/- delta badge and category progress breakdown.
+          - 🏷️ **Dynamic Categorization & Transfer Mode**: Dynamic filter chips for Expenses/Income and contextual transfer note fields.
+          - 🗄️ **Room v2 Migration**: Upgraded database with migration path, auto-linked transfers, and reactive Flows.
         files: dist/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
