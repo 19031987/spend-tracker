@@ -55,15 +55,16 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.1.0
-        name: "SpendTracker Release v1.1.0 (Jetpack Compose & Room Edition)"
+        tag_name: v1.2.0
+        name: "SpendTracker Release v1.2.0 (Smart Auto-Categorization & Period Comparison)"
         body: |
-          ### SpendTracker v1.1.0 - Jetpack Compose & Room Edition
-          - 🎨 **Jetpack Compose & Material 3**: Complete UI modernized with Compose, dynamic safe-area insets, and overlap-proof header bar.
-          - 🔄 **Internal Account Transfers**: Dual-legged atomic transfer entries (`-amount` source, `+amount` destination) with spend exclusion flag ensuring internal money movements never distort analytics.
-          - 📊 **Spending Analytics & Canvas Bar Charts**: Compare Week, Month, or Year spend against previous periods with +/- delta badge and category progress breakdown.
-          - 🏷️ **Dynamic Categorization & Transfer Mode**: Dynamic filter chips for Expenses/Income and contextual transfer note fields.
-          - 🗄️ **Room v2 Migration**: Upgraded database with migration path, auto-linked transfers, and reactive Flows.
+          ### SpendTracker v1.2.0 - Monarch Money Features & Period Comparison
+          - ⚡ **3-Tier Smart Auto-Categorization**: Automatic payee evaluation (User Custom Rules ➔ Historical Memory ➔ Built-in Dictionary) with live auto-assigned badges.
+          - ⚙️ **Monarch-Style Settings Modal**: 4 dedicated tabs for Categories & Groups, Merchant Rules, App Preferences (currencies, timeframes, theme), and Data Actions (CSV/JSON export, demo reset).
+          - ➕ **Custom Category & Group Creator**: Create subcategories and groups with custom emojis, pastel color swatches, and automatic merchant rule persistence.
+          - 🔔 **Room-Powered Notification Listener**: Intercepts bank spend alerts directly into Room database with in-app permission banner.
+          - 📈 **Period Comparison Screen (M3)**: Week, Month, and Year comparison view with `SingleChoiceSegmentedButtonRow`, elevated overview card, trend badges, and dual-track progress breakdown.
+          - 🧪 **Interactive Simulator & Verification Studio**: Browser harness with push simulator, bank presets, and automated test suite.
         files: dist/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

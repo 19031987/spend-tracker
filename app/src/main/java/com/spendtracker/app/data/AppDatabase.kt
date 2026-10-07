@@ -25,15 +25,66 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE transactions ADD COLUMN merchant TEXT")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS category_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                name TEXT NOT NULL,
+                emoji TEXT NOT NULL,
+                sortOrder INTEGER NOT NULL,
+                isBuiltIn INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS categories (
+                `key` TEXT PRIMARY KEY NOT NULL,
+                groupId INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                emoji TEXT NOT NULL,
+                colorHex TEXT NOT NULL,
+                type TEXT NOT NULL,
+                isBuiltIn INTEGER NOT NULL,
+                isHidden INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_categories_groupId ON categories(groupId)")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS merchant_rules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                matchType TEXT NOT NULL,
+                pattern TEXT NOT NULL,
+                categoryKey TEXT NOT NULL,
+                createdAt INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        CatalogSeed.seed(db)
+    }
+}
+
 @Database(
-    entities = [AccountEntity::class, TransactionEntity::class],
-    version = 2,
+    entities = [
+        AccountEntity::class,
+        TransactionEntity::class,
+        CategoryGroupEntity::class,
+        CategoryEntity::class,
+        MerchantRuleEntity::class
+    ],
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun transactionDao(): TransactionDao
     abstract fun accountDao(): AccountDao
+    abstract fun catalogDao(): CatalogDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -44,10 +95,11 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 "spend_tracker_room.db"
             )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         db.execSQL("INSERT INTO accounts(name) VALUES ('Checking'), ('Savings'), ('Credit Card')")
+                        CatalogSeed.seed(db)
                     }
                 })
                 .build()

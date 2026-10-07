@@ -68,7 +68,9 @@ sealed interface NewTransaction {
         val type: TransactionType,
         val accountId: Long,
         val amountMinor: Long,
-        val category: TransactionCategory,
+        val category: TransactionCategory? = null,
+        val categoryKey: String? = category?.name,
+        val merchant: String? = null,
         val note: String?,
         val timestamp: Long
     ) : NewTransaction

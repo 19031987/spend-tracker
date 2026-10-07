@@ -16,3 +16,6 @@ local.properties
 __pycache__/
 *.pyc
 release-output/
+spending-tracker-apk/
+*.apk
+*.aab

@@ -94,4 +94,13 @@ abstract class TransactionDao {
             " GROUP BY COALESCE(category, 'OTHER_EXPENSE') ORDER BY total DESC"
     )
     abstract fun observeCategoryTotals(start: Long, end: Long): Flow<List<CategoryTotal>>
+
+    @Query("SELECT * FROM transactions ORDER BY timestamp DESC")
+    abstract suspend fun getAllTransactions(): List<TransactionEntity>
+
+    @Query("DELETE FROM transactions")
+    abstract suspend fun deleteAll(): Int
+
+    @Insert
+    abstract suspend fun insertAll(transactions: List<TransactionEntity>)
 }

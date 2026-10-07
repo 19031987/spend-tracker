@@ -1,4 +1,19 @@
-<!DOCTYPE html>
+# -*- coding: utf-8 -*-
+"""
+Generates the complete, self-contained Monarch Spend simulator with:
+- Top Settings button & Monarch-style Settings Modal (4 tabs: Categories & Groups, Merchant Rules, Preferences, Data Actions)
+- Bank Notification Listener / Alert Simulation Studio (Live push banner, bank presets & custom alerts)
+- 3-tier Auto-categorization engine (User rules > History > Built-in dictionary > Uncategorized)
+- Live [⚡ Auto-assigned: Groceries] hint with one-click Change action
+- Category Selector Sheet with sticky '+ Add New Category' button
+- Custom Category Creation Form with Parent Group (+ New Group), emoji grid, pastel swatches, and rule checkbox
+- Interactive Test Bench with pre-populated demo transactions and verification suite
+- Pure White & Pitch Black Material / Monarch CSS
+"""
+
+import sys
+
+html_content = '''<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -1677,18 +1692,18 @@
         // 3-tier Built-In Dictionary
         const BUILT_IN_DICTIONARY = [
             // Groceries
-            { regex: /\b(tesco|sainsbury|asda|aldi|lidl|waitrose|whole\s?foods|morrisons|co-?op|ocado)\b/i, categoryId: 'cat_groceries' },
+            { regex: /\\b(tesco|sainsbury|asda|aldi|lidl|waitrose|whole\\s?foods|morrisons|co-?op|ocado)\\b/i, categoryId: 'cat_groceries' },
             // Dining / Coffee
-            { regex: /\b(uber\s?eats|deliveroo|just\s?eat)\b/i, categoryId: 'cat_dining' },
-            { regex: /\b(starbucks|costa|pret|mcdonald|greggs|nero|caffe\s?nero|kfc|nando)\b/i, categoryId: 'cat_coffee' },
+            { regex: /\\b(uber\\s?eats|deliveroo|just\\s?eat)\\b/i, categoryId: 'cat_dining' },
+            { regex: /\\b(starbucks|costa|pret|mcdonald|greggs|nero|caffe\\s?nero|kfc|nando)\\b/i, categoryId: 'cat_coffee' },
             // Transport
-            { regex: /\b(uber|bolt|trainline|tfl|shell|bp|esso|lyft)\b/i, categoryId: 'cat_transport' },
+            { regex: /\\b(uber|bolt|trainline|tfl|shell|bp|esso|lyft)\\b/i, categoryId: 'cat_transport' },
             // Subscriptions
-            { regex: /\b(netflix|spotify|apple|amazon\s?prime|prime\s?video|youtube|disney)\b/i, categoryId: 'cat_subs' },
+            { regex: /\\b(netflix|spotify|apple|amazon\\s?prime|prime\\s?video|youtube|disney)\\b/i, categoryId: 'cat_subs' },
             // Utilities
-            { regex: /\b(british\s?gas|octopus|edison|water|broadband|edf|virgin\s?media)\b/i, categoryId: 'cat_utilities' },
+            { regex: /\\b(british\\s?gas|octopus|edison|water|broadband|edf|virgin\\s?media)\\b/i, categoryId: 'cat_utilities' },
             // Salary
-            { regex: /\b(salary|payroll|direct\s?deposit|wages)\b/i, categoryId: 'cat_salary' }
+            { regex: /\\b(salary|payroll|direct\\s?deposit|wages)\\b/i, categoryId: 'cat_salary' }
         ];
 
         const INITIAL_RULES = [
@@ -1759,11 +1774,11 @@
         function cleanParsedMerchant(raw) {
             if (!raw) return "Unknown Payee";
             let c = raw.trim();
-            c = c.replace(/^(?:at|to|from|spent at|payment to|card ending \d+ spent|spent)\s+/i, '');
-            c = c.replace(/\s+on\s+\d{1,2}[/-]\d{1,2}.*$/i, '');
-            c = c.replace(/\s+with\s+(?:Visa|Mastercard|card).*$/i, '');
-            c = c.replace(/\b(?:LTD|LIMITED|UK)\b/gi, '');
-            c = c.replace(/[^a-zA-Z0-9 &'. -]/g, ' ').replace(/\s+/g, ' ').trim();
+            c = c.replace(/^(?:at|to|from|spent at|payment to|card ending \\d+ spent|spent)\\s+/i, '');
+            c = c.replace(/\\s+on\\s+\\d{1,2}[/-]\\d{1,2}.*$/i, '');
+            c = c.replace(/\\s+with\\s+(?:Visa|Mastercard|card).*$/i, '');
+            c = c.replace(/\\b(?:LTD|LIMITED|UK)\\b/gi, '');
+            c = c.replace(/[^a-zA-Z0-9 &'. -]/g, ' ').replace(/\\s+/g, ' ').trim();
             return c || "Unknown Payee";
         }
 
@@ -1774,22 +1789,22 @@
             const source = detectSource(pkg, full);
 
             // Ignore OTPs, confirmations, approvals without amount
-            if (/\b(approve|confirm|verify|otp|passcode|security code)\b/i.test(full)) return null;
+            if (/\\b(approve|confirm|verify|otp|passcode|security code)\\b/i.test(full)) return null;
 
             // Extract Amount (e.g. £14.80 or 14.80 GBP)
-            const amtMatch = full.match(/([£$€])?\s*([0-9,]+\.[0-9]{2})/);
+            const amtMatch = full.match(/([£$€])?\\s*([0-9,]+\\.[0-9]{2})/);
             if (!amtMatch) return null;
 
             const amount = parseFloat(amtMatch[2].replace(/,/g, ''));
             const currency = amtMatch[1] || activeCurrency;
 
             // Detect Inflow vs Outflow
-            const isInflow = /\b(salary|payroll|received|sent you|refund|added to your|credited|deposit)\b/i.test(full);
+            const isInflow = /\\b(salary|payroll|received|sent you|refund|added to your|credited|deposit)\\b/i.test(full);
             const type = isInflow ? "INCOME" : "EXPENSE";
 
             // Extract Merchant Name
             let merchant = "Unknown Payee";
-            const atMatch = full.match(/\b(?:at|to|from)\s+([A-Za-z0-9&'. -]{2,30}?)(?=\s+(?:on|via|using|with|ref|for|of)|$)/i);
+            const atMatch = full.match(/\\b(?:at|to|from)\\s+([A-Za-z0-9&'. -]{2,30}?)(?=\\s+(?:on|via|using|with|ref|for|of)|$)/i);
             if (atMatch && atMatch[1]) {
                 merchant = cleanParsedMerchant(atMatch[1]);
             } else if (title && !title.toLowerCase().includes("alert") && !title.toLowerCase().includes("notification")) {
@@ -2331,7 +2346,7 @@
                     t.amount.toFixed(2)
                 ].join(',');
             });
-            const csv = [headers.join(','), ...rows].join('\r\n');
+            const csv = [headers.join(','), ...rows].join('\\r\\n');
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -2632,8 +2647,7 @@
             passes++;
             logMessage("✅ PASS: Push notification listener simulated & parsed successfully", "success");
 
-            logMessage(`
-🏆 SUITE COMPLETED: ${passes}/6 assertions passed.`, "success");
+            logMessage(`\n🏆 SUITE COMPLETED: ${passes}/6 assertions passed.`, "success");
             initDashboard();
         }
 
@@ -2672,3 +2686,9 @@
     </script>
 </body>
 </html>
+'''
+
+with open('simulator/index.html', 'w', encoding='utf-8') as f:
+    f.write(html_content.strip() + '\n')
+
+print("Successfully wrote simulator/index.html with UTF-8 encoding.")

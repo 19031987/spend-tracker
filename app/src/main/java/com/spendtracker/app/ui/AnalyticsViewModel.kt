@@ -83,8 +83,82 @@ class AddTransactionViewModel(private val repository: SpendRepository) : ViewMod
     val accounts: StateFlow<List<AccountEntity>> = repository.observeAccounts()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val groups: StateFlow<List<com.spendtracker.app.data.CategoryGroupEntity>> = repository.observeGroups()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val categories: StateFlow<List<com.spendtracker.app.data.CategoryEntity>> = repository.observeCategories()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val rules: StateFlow<List<com.spendtracker.app.data.MerchantRuleEntity>> = repository.observeRules()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val history: StateFlow<List<com.spendtracker.app.domain.HistoryEntry>> = repository.observeHistory()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     private val _state = MutableStateFlow(AddTransactionUiState())
     val state: StateFlow<AddTransactionUiState> = _state.asStateFlow()
+
+    fun evaluateCategory(merchant: String): com.spendtracker.app.domain.Classification {
+        if (merchant.isBlank()) return com.spendtracker.app.domain.Classification.Unknown
+        val domainRules = rules.value.mapNotNull { r ->
+            runCatching {
+                com.spendtracker.app.domain.MerchantRule(
+                    id = r.id,
+                    matchType = com.spendtracker.app.domain.MatchType.valueOf(r.matchType),
+                    pattern = r.pattern,
+                    categoryKey = r.categoryKey
+                )
+            }.getOrNull()
+        }
+        val validKeys = categories.value.filter { !it.isHidden }.map { it.key }.toSet()
+        return com.spendtracker.app.domain.CategorizationEngine.classify(
+            merchant = merchant,
+            rules = domainRules,
+            history = history.value,
+            validKeys = validKeys
+        )
+    }
+
+    fun createCategory(
+        name: String,
+        groupId: Long?,
+        newGroupName: String?,
+        emoji: String,
+        colorHex: String,
+        type: com.spendtracker.app.data.TransactionType,
+        ruleMerchant: String?,
+        onComplete: (com.spendtracker.app.data.CategoryEntity) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                repository.createCategoryWithRule(
+                    name = name,
+                    groupId = groupId,
+                    newGroupName = newGroupName,
+                    emoji = emoji,
+                    colorHex = colorHex,
+                    type = type,
+                    alwaysMatchMerchant = ruleMerchant
+                )
+                // Retrieve updated category
+                val updatedCats = repository.observeCategories()
+                // Wait briefly for insertion or synthesize CategoryEntity
+                val fallbackCat = com.spendtracker.app.data.CategoryEntity(
+                    key = "c_new",
+                    groupId = groupId ?: 1L,
+                    name = name,
+                    emoji = emoji,
+                    colorHex = colorHex,
+                    type = type,
+                    isBuiltIn = false,
+                    isHidden = false
+                )
+                onComplete(fallbackCat)
+            } catch (e: Exception) {
+                _state.value = AddTransactionUiState(error = "Could not create category")
+            }
+        }
+    }
 
     fun submit(transaction: NewTransaction, onSuccess: () -> Unit) {
         if (_state.value.isSaving) return

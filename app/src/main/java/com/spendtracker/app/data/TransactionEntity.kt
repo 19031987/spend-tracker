@@ -17,6 +17,7 @@ enum class TransactionCategory(val label: String, val type: TransactionType) {
     SHOPPING("Shopping", TransactionType.EXPENSE),
     HEALTH("Health", TransactionType.EXPENSE),
     ENTERTAINMENT("Entertainment", TransactionType.EXPENSE),
+    SUBSCRIPTIONS("Subscriptions", TransactionType.EXPENSE),
     TRAVEL("Travel", TransactionType.EXPENSE),
     EDUCATION("Education", TransactionType.EXPENSE),
     OTHER_EXPENSE("Other", TransactionType.EXPENSE),
@@ -67,5 +68,6 @@ data class TransactionEntity(
     @ColumnInfo(defaultValue = "'EXPENSE'") val type: TransactionType = TransactionType.EXPENSE,
     val destinationAccountId: Long? = null,
     val pairedTransactionId: Long? = null,
-    @ColumnInfo(defaultValue = "0") val excludeFromSpending: Boolean = false
+    @ColumnInfo(defaultValue = "0") val excludeFromSpending: Boolean = false,
+    val merchant: String? = null
 )
