@@ -80,9 +80,30 @@ sealed interface NewTransaction {
         val destinationAccountId: Long,
         val amountMinor: Long,
         val note: String?,
-        val timestamp: Long
+        val timestamp: Long,
+        val sourceName: String? = null,
+        val destinationName: String? = null
     ) : NewTransaction
 }
+
+data class TransactionItem(
+    val id: Long,
+    val type: TransactionType,
+    val amountMinor: Long,
+    val accountId: Long,
+    val accountName: String,
+    val destinationAccountId: Long? = null,
+    val destinationAccountName: String? = null,
+    val categoryKey: String? = null,
+    val categoryName: String = "Other",
+    val categoryEmoji: String = "🏷️",
+    val categoryColorHex: String = "#E2E8F0",
+    val merchant: String? = null,
+    val note: String? = null,
+    val source: String = "Chase",
+    val timestamp: Long = 0L,
+    val excludeFromSpending: Boolean = false
+)
 
 object ChartBucketing {
 

@@ -69,6 +69,20 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE transactions ADD COLUMN source TEXT")
+        db.execSQL("INSERT OR IGNORE INTO accounts(name) VALUES ('Chase')")
+        db.execSQL("INSERT OR IGNORE INTO accounts(name) VALUES ('HSBC')")
+        db.execSQL(
+            """
+            INSERT OR IGNORE INTO categories(`key`, groupId, name, emoji, colorHex, type, isBuiltIn, isHidden)
+            VALUES ('INTERNAL_TRANSFER', 6, 'Internal Transfer', '🔄', '#EDE9FE', 'TRANSFER', 1, 0)
+            """.trimIndent()
+        )
+    }
+}
+
 @Database(
     entities = [
         AccountEntity::class,
@@ -77,7 +91,7 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
         CategoryEntity::class,
         MerchantRuleEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -95,11 +109,23 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 "spend_tracker_room.db"
             )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL("INSERT INTO accounts(name) VALUES ('Checking'), ('Savings'), ('Credit Card')")
+                        db.execSQL("INSERT INTO accounts(name) VALUES ('Chase'), ('HSBC'), ('Savings'), ('Credit Card')")
                         CatalogSeed.seed(db)
+                    }
+
+                    override fun onOpen(db: SupportSQLiteDatabase) {
+                        super.onOpen(db)
+                        db.execSQL("INSERT OR IGNORE INTO accounts(name) VALUES ('Chase')")
+                        db.execSQL("INSERT OR IGNORE INTO accounts(name) VALUES ('HSBC')")
+                        db.execSQL(
+                            """
+                            INSERT OR IGNORE INTO categories(`key`, groupId, name, emoji, colorHex, type, isBuiltIn, isHidden)
+                            VALUES ('INTERNAL_TRANSFER', 6, 'Internal Transfer', '🔄', '#EDE9FE', 'TRANSFER', 1, 0)
+                            """.trimIndent()
+                        )
                     }
                 })
                 .build()

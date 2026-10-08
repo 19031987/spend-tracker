@@ -26,7 +26,9 @@ enum class TransactionCategory(val label: String, val type: TransactionType) {
     FREELANCE("Freelance", TransactionType.INCOME),
     INVESTMENT("Investment", TransactionType.INCOME),
     GIFT("Gift", TransactionType.INCOME),
-    OTHER_INCOME("Other income", TransactionType.INCOME);
+    OTHER_INCOME("Other income", TransactionType.INCOME),
+
+    INTERNAL_TRANSFER("Internal Transfer", TransactionType.TRANSFER);
 
     companion object {
         fun forType(type: TransactionType): List<TransactionCategory> =
@@ -69,5 +71,6 @@ data class TransactionEntity(
     val destinationAccountId: Long? = null,
     val pairedTransactionId: Long? = null,
     @ColumnInfo(defaultValue = "0") val excludeFromSpending: Boolean = false,
-    val merchant: String? = null
+    val merchant: String? = null,
+    val source: String? = null
 )

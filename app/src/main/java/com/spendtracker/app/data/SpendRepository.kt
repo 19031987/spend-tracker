@@ -42,20 +42,70 @@ class SpendRepository(
         rows.map { HistoryEntry(it.merchant, it.category, it.uses) }
     }
 
+    fun observeTransactions(): Flow<List<TransactionEntity>> = transactionDao.observeAll()
+
+    fun observeTransactionItems(): Flow<List<com.spendtracker.app.domain.TransactionItem>> = combine(
+        transactionDao.observeAll(),
+        accountDao.observeAll(),
+        catalogDao.observeCategories()
+    ) { txs, accounts, cats ->
+        val accMap = accounts.associateBy { it.id }
+        val catMap = cats.associateBy { it.key }
+
+        txs.map { tx ->
+            val isTransfer = tx.type == TransactionType.TRANSFER || tx.category == "INTERNAL_TRANSFER"
+            val acc = accMap[tx.accountId]
+            val destAcc = tx.destinationAccountId?.let { accMap[it] }
+
+            val cat = if (isTransfer) {
+                com.spendtracker.app.data.CategoryEntity(
+                    key = "INTERNAL_TRANSFER",
+                    groupId = 6L,
+                    name = "Internal Transfer",
+                    emoji = "🔄",
+                    colorHex = "#EDE9FE",
+                    type = TransactionType.TRANSFER,
+                    isBuiltIn = true,
+                    isHidden = false
+                )
+            } else {
+                catMap[tx.category]
+            }
+
+            com.spendtracker.app.domain.TransactionItem(
+                id = tx.id,
+                type = tx.type,
+                amountMinor = kotlin.math.abs(tx.amount),
+                accountId = tx.accountId,
+                accountName = acc?.name ?: tx.source ?: "Chase",
+                destinationAccountId = tx.destinationAccountId,
+                destinationAccountName = destAcc?.name,
+                categoryKey = cat?.key ?: tx.category,
+                categoryName = cat?.name ?: "Other",
+                categoryEmoji = cat?.emoji ?: "🏷️",
+                categoryColorHex = cat?.colorHex ?: "#E2E8F0",
+                merchant = tx.merchant,
+                note = tx.note,
+                source = tx.source ?: acc?.name ?: "Chase",
+                timestamp = tx.timestamp,
+                excludeFromSpending = tx.excludeFromSpending || isTransfer
+            )
+        }
+    }
+
     /** Throws [IllegalArgumentException] on invalid input. */
     suspend fun add(transaction: NewTransaction) {
         when (transaction) {
             is NewTransaction.Entry -> {
                 require(transaction.amountMinor > 0) { "Amount must be greater than zero" }
-                require(transaction.type != TransactionType.TRANSFER) {
-                    "Use a Transfer for moving money between accounts"
-                }
-                val chosenCategory = transaction.categoryKey
-                    ?: transaction.category?.name
-                    ?: "OTHER_EXPENSE"
-                val signed =
-                    if (transaction.type == TransactionType.EXPENSE) -transaction.amountMinor
-                    else transaction.amountMinor
+                val accounts = accountDao.getAll().associateBy { it.id }
+                val accName = accounts[transaction.accountId]?.name ?: "Chase"
+                val isTransferCat = transaction.categoryKey == "INTERNAL_TRANSFER" || transaction.category == TransactionCategory.INTERNAL_TRANSFER
+                val isInternalTransfer = transaction.type == TransactionType.TRANSFER || isTransferCat
+                val chosenCategory = if (isInternalTransfer) "INTERNAL_TRANSFER"
+                    else transaction.categoryKey ?: transaction.category?.name ?: "OTHER_EXPENSE"
+                val txType = if (isInternalTransfer) TransactionType.TRANSFER else transaction.type
+                val signed = if (txType == TransactionType.EXPENSE) -transaction.amountMinor else transaction.amountMinor
                 transactionDao.insert(
                     TransactionEntity(
                         accountId = transaction.accountId,
@@ -63,21 +113,77 @@ class SpendRepository(
                         category = chosenCategory,
                         note = transaction.note?.trim()?.takeIf { it.isNotEmpty() },
                         timestamp = transaction.timestamp,
-                        type = transaction.type,
-                        excludeFromSpending = false,
-                        merchant = transaction.merchant?.trim()?.takeIf { it.isNotEmpty() }
+                        type = txType,
+                        excludeFromSpending = isInternalTransfer,
+                        merchant = transaction.merchant?.trim()?.takeIf { it.isNotEmpty() },
+                        source = accName
                     )
                 )
             }
             is NewTransaction.Transfer -> {
+                val accounts = accountDao.getAll().associateBy { it.id }
+                val srcName = transaction.sourceName ?: accounts[transaction.sourceAccountId]?.name ?: "Chase"
+                val dstName = transaction.destinationName ?: accounts[transaction.destinationAccountId]?.name ?: "HSBC"
                 transactionDao.insertTransferPair(
                     sourceAccountId = transaction.sourceAccountId,
                     destinationAccountId = transaction.destinationAccountId,
                     amountMinor = transaction.amountMinor,
                     timestamp = transaction.timestamp,
-                    note = transaction.note?.trim()?.takeIf { it.isNotEmpty() }
+                    note = transaction.note?.trim()?.takeIf { it.isNotEmpty() },
+                    sourceName = srcName,
+                    destinationName = dstName
                 )
             }
+        }
+    }
+
+    suspend fun updateTransaction(
+        id: Long,
+        type: TransactionType,
+        accountId: Long,
+        destinationAccountId: Long?,
+        amountMinor: Long,
+        categoryKey: String?,
+        merchant: String?,
+        note: String?,
+        excludeFromSpending: Boolean
+    ) {
+        val accounts = accountDao.getAll().associateBy { it.id }
+        val srcName = accounts[accountId]?.name ?: "Chase"
+        val dstName = destinationAccountId?.let { accounts[it]?.name } ?: "HSBC"
+        val isTransfer = type == TransactionType.TRANSFER || categoryKey == "INTERNAL_TRANSFER"
+
+        if (isTransfer) {
+            val targetDestId = destinationAccountId ?: accounts.values.firstOrNull { it.id != accountId }?.id ?: accountId
+            transactionDao.updateTransferPair(
+                sourceTxId = id,
+                sourceAccountId = accountId,
+                destinationAccountId = targetDestId,
+                amountMinor = amountMinor,
+                note = note?.trim()?.takeIf { it.isNotEmpty() },
+                sourceName = srcName,
+                destinationName = dstName
+            )
+        } else {
+            val existing = transactionDao.getById(id) ?: return
+            if (existing.pairedTransactionId != null) {
+                transactionDao.deleteWithPair(existing.pairedTransactionId)
+            }
+            val signed = if (type == TransactionType.EXPENSE) -amountMinor else amountMinor
+            transactionDao.update(
+                existing.copy(
+                    accountId = accountId,
+                    amount = signed,
+                    category = categoryKey ?: "OTHER_EXPENSE",
+                    note = note?.trim()?.takeIf { it.isNotEmpty() },
+                    type = type,
+                    destinationAccountId = null,
+                    pairedTransactionId = null,
+                    excludeFromSpending = excludeFromSpending,
+                    merchant = merchant?.trim()?.takeIf { it.isNotEmpty() },
+                    source = srcName
+                )
+            )
         }
     }
 
@@ -156,85 +262,99 @@ class SpendRepository(
         transactionDao.deleteAll()
         val now = System.currentTimeMillis()
         val day = 86_400_000L
+
+        val accMap = accountDao.getAll().associateBy { it.name.lowercase() }
+        val chaseId = accMap["chase"]?.id ?: 1L
+        val hsbcId = accMap["hsbc"]?.id ?: 2L
+
         val initialSeeds = listOf(
             TransactionEntity(
-                accountId = 1,
+                accountId = hsbcId,
                 amount = -1480,
                 category = "GROCERIES",
                 merchant = "Tesco Express",
                 note = "Weekly lunch items",
                 timestamp = now - 3_600_000L,
-                type = TransactionType.EXPENSE
+                type = TransactionType.EXPENSE,
+                source = "HSBC"
             ),
             TransactionEntity(
-                accountId = 1,
+                accountId = hsbcId,
                 amount = -420,
                 category = "DINING",
                 merchant = "Costa Coffee",
                 note = "Flat white",
                 timestamp = now - 18_000_000L,
-                type = TransactionType.EXPENSE
+                type = TransactionType.EXPENSE,
+                source = "HSBC"
             ),
             TransactionEntity(
-                accountId = 1,
+                accountId = chaseId,
                 amount = -1099,
                 category = "SUBSCRIPTIONS",
                 merchant = "Netflix Subscription",
                 note = null,
                 timestamp = now - day * 2,
-                type = TransactionType.EXPENSE
+                type = TransactionType.EXPENSE,
+                source = "Chase"
             ),
             TransactionEntity(
-                accountId = 1,
+                accountId = chaseId,
                 amount = -1850,
                 category = "TRANSPORT",
                 merchant = "Uber Ride",
                 note = "Airport terminal",
                 timestamp = now - day * 3,
-                type = TransactionType.EXPENSE
+                type = TransactionType.EXPENSE,
+                source = "Chase"
             ),
             TransactionEntity(
-                accountId = 1,
+                accountId = hsbcId,
                 amount = -6500,
                 category = "UTILITIES",
                 merchant = "British Gas DD",
                 note = "Monthly statement",
                 timestamp = now - day * 5,
-                type = TransactionType.EXPENSE
+                type = TransactionType.EXPENSE,
+                source = "HSBC"
             ),
             TransactionEntity(
-                accountId = 1,
+                accountId = chaseId,
                 amount = -3250,
                 category = null,
                 merchant = "Apex Hardware",
                 note = "Lightbulbs & paint",
                 timestamp = now - day * 6,
-                type = TransactionType.EXPENSE
+                type = TransactionType.EXPENSE,
+                source = "Chase"
             ),
             TransactionEntity(
-                accountId = 1,
+                accountId = chaseId,
                 amount = 285000,
                 category = "SALARY",
                 merchant = "TechCorp Payroll",
                 note = "Salary credit",
                 timestamp = now - day * 7,
-                type = TransactionType.INCOME
+                type = TransactionType.INCOME,
+                source = "Chase"
             )
         )
         transactionDao.insertAll(initialSeeds)
-        // Add a demo transfer:
+        // Add a demo transfer: Chase ➔ HSBC (Nullified from spending)
         transactionDao.insertTransferPair(
-            sourceAccountId = 1,
-            destinationAccountId = 2,
+            sourceAccountId = chaseId,
+            destinationAccountId = hsbcId,
             amountMinor = 25000,
             timestamp = now - day,
-            note = "Savings buffer"
+            note = "Savings buffer",
+            sourceName = "Chase",
+            destinationName = "HSBC"
         )
     }
 
     suspend fun exportJson(): String {
         val txs = transactionDao.getAllTransactions()
-        val accounts = accountDao.observeAll()
+        val accMap = accountDao.getAll().associateBy { it.id }
         val categories = catalogDao.getCategories().associateBy { it.key }
         val groups = catalogDao.getGroups().associateBy { it.id }
         val rules = catalogDao.getRules()
@@ -244,14 +364,15 @@ class SpendRepository(
         val rows = txs.map { t ->
             val cat = categories[t.category]
             val grp = cat?.let { groups[it.groupId] }
+            val accName = accMap[t.accountId]?.name ?: (t.source ?: "Account #${t.accountId}")
             ExportRow(
                 id = t.id,
                 date = dtf.format(Instant.ofEpochMilli(t.timestamp)),
                 type = t.type.name,
-                account = "Account #${t.accountId}",
+                account = accName,
                 merchant = t.merchant,
-                category = cat?.name ?: "Uncategorized",
-                group = grp?.name ?: "Other",
+                category = if (t.type == TransactionType.TRANSFER) "Internal Transfer" else cat?.name ?: "Uncategorized",
+                group = if (t.type == TransactionType.TRANSFER) "Transfers" else grp?.name ?: "Other",
                 amountMinor = t.amount,
                 note = t.note
             )
@@ -265,6 +386,7 @@ class SpendRepository(
 
     suspend fun exportCsv(): String {
         val txs = transactionDao.getAllTransactions()
+        val accMap = accountDao.getAll().associateBy { it.id }
         val categories = catalogDao.getCategories().associateBy { it.key }
         val groups = catalogDao.getGroups().associateBy { it.id }
 
@@ -273,14 +395,15 @@ class SpendRepository(
         val rows = txs.map { t ->
             val cat = categories[t.category]
             val grp = cat?.let { groups[it.groupId] }
+            val accName = accMap[t.accountId]?.name ?: (t.source ?: "Account #${t.accountId}")
             ExportRow(
                 id = t.id,
                 date = dtf.format(Instant.ofEpochMilli(t.timestamp)),
                 type = t.type.name,
-                account = "Account #${t.accountId}",
+                account = accName,
                 merchant = t.merchant,
-                category = cat?.name ?: "Uncategorized",
-                group = grp?.name ?: "Other",
+                category = if (t.type == TransactionType.TRANSFER) "Internal Transfer" else cat?.name ?: "Uncategorized",
+                group = if (t.type == TransactionType.TRANSFER) "Transfers" else grp?.name ?: "Other",
                 amountMinor = t.amount,
                 note = t.note
             )

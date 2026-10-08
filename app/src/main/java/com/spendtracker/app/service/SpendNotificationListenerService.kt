@@ -69,53 +69,105 @@ class SpendNotificationListenerService : NotificationListenerService() {
                 try {
                     val roomDb = AppDatabase.get(applicationContext)
 
-                    // Auto-categorize using rules from Room database
-                    val rules = roomDb.catalogDao().getRules().mapNotNull { r ->
-                        runCatching {
-                            MerchantRule(
-                                id = r.id,
-                                matchType = MatchType.valueOf(r.matchType),
-                                pattern = r.pattern,
-                                categoryKey = r.categoryKey
-                            )
-                        }.getOrNull()
+                    // Ensure Chase & HSBC accounts exist
+                    val chaseAcc = roomDb.accountDao().findByName("Chase") ?: run {
+                        val id = roomDb.accountDao().insert(com.spendtracker.app.data.AccountEntity(name = "Chase"))
+                        com.spendtracker.app.data.AccountEntity(id = id, name = "Chase")
                     }
-                    val categories = roomDb.catalogDao().getCategories()
-                    val validKeys = categories.filter { !it.isHidden }.map { it.key }.toSet()
+                    val hsbcAcc = roomDb.accountDao().findByName("HSBC") ?: run {
+                        val id = roomDb.accountDao().insert(com.spendtracker.app.data.AccountEntity(name = "HSBC"))
+                        com.spendtracker.app.data.AccountEntity(id = id, name = "HSBC")
+                    }
 
-                    val classification = CategorizationEngine.classify(
-                        merchant = parsed.merchant,
-                        rules = rules,
-                        history = emptyList(),
-                        validKeys = validKeys
-                    )
-
-                    val resolvedCategoryKey = when (classification) {
-                        is Classification.Matched -> classification.categoryKey
-                        else -> {
-                            // Map parsed category or fallback
-                            val normalizedParsed = parsed.category.uppercase().replace(" ", "_")
-                            if (normalizedParsed in validKeys) normalizedParsed else "OTHER_EXPENSE"
+                    val sourceAccount = when {
+                        parsed.source.equals("Chase", ignoreCase = true) -> chaseAcc
+                        parsed.source.equals("HSBC", ignoreCase = true) -> hsbcAcc
+                        else -> roomDb.accountDao().findByName(parsed.source) ?: run {
+                            val id = roomDb.accountDao().insert(com.spendtracker.app.data.AccountEntity(name = parsed.source))
+                            com.spendtracker.app.data.AccountEntity(id = id, name = parsed.source)
                         }
                     }
 
-                    val txType = if (parsed.type.equals("IN", ignoreCase = true)) TransactionType.INCOME else TransactionType.EXPENSE
+                    val fullAlertText = "${title.orEmpty()} ${content.orEmpty()} ${parsed.merchant}".lowercase(java.util.Locale.ROOT)
+                    val mentionsOtherBank = (parsed.source.equals("Chase", ignoreCase = true) && fullAlertText.contains("hsbc")) ||
+                        (parsed.source.equals("HSBC", ignoreCase = true) && fullAlertText.contains("chase"))
+                    val isInternalTransfer = mentionsOtherBank ||
+                        fullAlertText.contains("internal transfer") ||
+                        fullAlertText.contains("transfer between accounts") ||
+                        ((fullAlertText.contains("transfer to") || fullAlertText.contains("transfer from") || fullAlertText.contains("sent to")) &&
+                            (fullAlertText.contains("chase") || fullAlertText.contains("hsbc") || fullAlertText.contains("savings")))
+
+                    val destinationAccount = if (isInternalTransfer) {
+                        if (sourceAccount.id == chaseAcc.id) hsbcAcc else chaseAcc
+                    } else null
+
                     val minorAmount = (parsed.amount * 100.0).roundToLong().coerceAtLeast(1L)
-                    val signedAmount = if (txType == TransactionType.EXPENSE) -minorAmount else minorAmount
 
-                    val transaction = TransactionEntity(
-                        accountId = 1L,
-                        amount = signedAmount,
-                        category = resolvedCategoryKey,
-                        note = "Captured from ${parsed.source} alert",
-                        timestamp = if (sbn.postTime > 0) sbn.postTime else System.currentTimeMillis(),
-                        type = txType,
-                        excludeFromSpending = false,
-                        merchant = parsed.merchant
-                    )
+                    if (isInternalTransfer && destinationAccount != null) {
+                        val isOutflow = !parsed.type.equals("IN", ignoreCase = true)
+                        val srcId = if (isOutflow) sourceAccount.id else destinationAccount.id
+                        val dstId = if (isOutflow) destinationAccount.id else sourceAccount.id
+                        val srcName = if (isOutflow) sourceAccount.name else destinationAccount.name
+                        val dstName = if (isOutflow) destinationAccount.name else sourceAccount.name
 
-                    val insertedId = roomDb.transactionDao().insert(transaction)
-                    Log.i(TAG, "Successfully inserted transaction into Room db (id=$insertedId, merchant=${parsed.merchant}, cat=$resolvedCategoryKey)")
+                        val transferPair = roomDb.transactionDao().insertTransferPair(
+                            sourceAccountId = srcId,
+                            destinationAccountId = dstId,
+                            amountMinor = minorAmount,
+                            timestamp = if (sbn.postTime > 0) sbn.postTime else System.currentTimeMillis(),
+                            note = "Captured from ${parsed.source} alert",
+                            sourceName = srcName,
+                            destinationName = dstName
+                        )
+                        Log.i(TAG, "Successfully inserted INTERNAL TRANSFER pair (source=$srcName, dest=$dstName, amount=$minorAmount, nullified from spending)")
+                    } else {
+                        // Auto-categorize using rules from Room database
+                        val rules = roomDb.catalogDao().getRules().mapNotNull { r ->
+                            runCatching {
+                                MerchantRule(
+                                    id = r.id,
+                                    matchType = MatchType.valueOf(r.matchType),
+                                    pattern = r.pattern,
+                                    categoryKey = r.categoryKey
+                                )
+                            }.getOrNull()
+                        }
+                        val categories = roomDb.catalogDao().getCategories()
+                        val validKeys = categories.filter { !it.isHidden }.map { it.key }.toSet()
+
+                        val classification = CategorizationEngine.classify(
+                            merchant = parsed.merchant,
+                            rules = rules,
+                            history = emptyList(),
+                            validKeys = validKeys
+                        )
+
+                        val resolvedCategoryKey = when (classification) {
+                            is Classification.Matched -> classification.categoryKey
+                            else -> {
+                                val normalizedParsed = parsed.category.uppercase().replace(" ", "_")
+                                if (normalizedParsed in validKeys) normalizedParsed else "OTHER_EXPENSE"
+                            }
+                        }
+
+                        val txType = if (parsed.type.equals("IN", ignoreCase = true)) TransactionType.INCOME else TransactionType.EXPENSE
+                        val signedAmount = if (txType == TransactionType.EXPENSE) -minorAmount else minorAmount
+
+                        val transaction = TransactionEntity(
+                            accountId = sourceAccount.id,
+                            amount = signedAmount,
+                            category = resolvedCategoryKey,
+                            note = "Captured from ${sourceAccount.name} alert",
+                            timestamp = if (sbn.postTime > 0) sbn.postTime else System.currentTimeMillis(),
+                            type = txType,
+                            excludeFromSpending = false,
+                            merchant = parsed.merchant,
+                            source = sourceAccount.name
+                        )
+
+                        val insertedId = roomDb.transactionDao().insert(transaction)
+                        Log.i(TAG, "Successfully inserted transaction into Room db (id=$insertedId, source=${sourceAccount.name}, merchant=${parsed.merchant}, cat=$resolvedCategoryKey)")
+                    }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to insert parsed notification into Room: ${e.message}", e)
                 }

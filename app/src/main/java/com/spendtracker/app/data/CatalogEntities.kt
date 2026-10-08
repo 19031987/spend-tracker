@@ -163,6 +163,9 @@ object CatalogSeed {
     private fun income(key: String, name: String, emoji: String, color: String) =
         CategoryEntity(key, 5, name, emoji, color, TransactionType.INCOME, true, false)
 
+    private fun transfer(key: String, group: Long, name: String, emoji: String, color: String) =
+        CategoryEntity(key, group, name, emoji, color, TransactionType.TRANSFER, true, false)
+
     val categories = listOf(
         expense("GROCERIES", 1, "Groceries", "\uD83D\uDED2", "#D1FAE5"),
         expense("DINING", 1, "Dining", "\uD83C\uDF7D\uFE0F", "#FFEDD5"),
@@ -180,7 +183,8 @@ object CatalogSeed {
         income("FREELANCE", "Freelance", "\uD83D\uDCBB", "#CFFAFE"),
         income("INVESTMENT", "Investment", "\uD83D\uDCC8", "#DDD6FE"),
         income("GIFT", "Gift", "\uD83C\uDF81", "#FCE7F3"),
-        income("OTHER_INCOME", "Other income", "\uD83D\uDCB0", "#E2E8F0")
+        income("OTHER_INCOME", "Other income", "\uD83D\uDCB0", "#E2E8F0"),
+        transfer("INTERNAL_TRANSFER", OTHER_GROUP_ID, "Internal Transfer", "\uD83D\uDD04", "#EDE9FE")
     )
 
     /** Used by Room's onCreate / migration, where only raw SQL is available. */

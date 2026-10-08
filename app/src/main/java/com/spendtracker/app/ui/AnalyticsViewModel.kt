@@ -180,3 +180,61 @@ class AddTransactionViewModel(private val repository: SpendRepository) : ViewMod
         _state.update { it.copy(error = null) }
     }
 }
+
+class TransactionsViewModel(private val repository: SpendRepository) : ViewModel() {
+    val accounts: StateFlow<List<AccountEntity>> = repository.observeAccounts()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val groups: StateFlow<List<com.spendtracker.app.data.CategoryGroupEntity>> = repository.observeGroups()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val categories: StateFlow<List<com.spendtracker.app.data.CategoryEntity>> = repository.observeCategories()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val transactions: StateFlow<List<com.spendtracker.app.domain.TransactionItem>> = repository.observeTransactionItems()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun updateTransaction(
+        id: Long,
+        type: com.spendtracker.app.data.TransactionType,
+        accountId: Long,
+        destinationAccountId: Long?,
+        amountMinor: Long,
+        categoryKey: String?,
+        merchant: String?,
+        note: String?,
+        excludeFromSpending: Boolean,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                repository.updateTransaction(
+                    id = id,
+                    type = type,
+                    accountId = accountId,
+                    destinationAccountId = destinationAccountId,
+                    amountMinor = amountMinor,
+                    categoryKey = categoryKey,
+                    merchant = merchant,
+                    note = note,
+                    excludeFromSpending = excludeFromSpending
+                )
+                onSuccess()
+            } catch (e: Exception) {
+                // handle error
+            }
+        }
+    }
+
+    fun deleteTransaction(id: Long, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                repository.delete(id)
+                onSuccess()
+            } catch (e: Exception) {
+                // handle error
+            }
+        }
+    }
+}
+

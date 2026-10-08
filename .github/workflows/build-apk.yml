@@ -55,16 +55,15 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.2.0
-        name: "SpendTracker Release v1.2.0 (Smart Auto-Categorization & Period Comparison)"
+        tag_name: v1.3.0
+        name: "SpendTracker Release v1.3.0 (Nullified Internal Transfers, Chase & HSBC Account Sources, & Edit Support)"
         body: |
-          ### SpendTracker v1.2.0 - Monarch Money Features & Period Comparison
-          - ⚡ **3-Tier Smart Auto-Categorization**: Automatic payee evaluation (User Custom Rules ➔ Historical Memory ➔ Built-in Dictionary) with live auto-assigned badges.
-          - ⚙️ **Monarch-Style Settings Modal**: 4 dedicated tabs for Categories & Groups, Merchant Rules, App Preferences (currencies, timeframes, theme), and Data Actions (CSV/JSON export, demo reset).
-          - ➕ **Custom Category & Group Creator**: Create subcategories and groups with custom emojis, pastel color swatches, and automatic merchant rule persistence.
-          - 🔔 **Room-Powered Notification Listener**: Intercepts bank spend alerts directly into Room database with in-app permission banner.
-          - 📈 **Period Comparison Screen (M3)**: Week, Month, and Year comparison view with `SingleChoiceSegmentedButtonRow`, elevated overview card, trend badges, and dual-track progress breakdown.
-          - 🧪 **Interactive Simulator & Verification Studio**: Browser harness with push simulator, bank presets, and automated test suite.
+          ### SpendTracker v1.3.0 - Nullified Internal Transfers & Account Sources
+          - 🔄 **Nullified Internal Transactions**: Transfers between accounts (Chase ➔ HSBC) are strictly excluded from spending totals, cash flow calculations, and period analytics.
+          - 🏛️ **Explicit Chase & HSBC Sources**: Added first-class Chase and HSBC accounts, source badges on all transactions, and dedicated Chase & HSBC breakdown cards (eliminating generic "others").
+          - ✏️ **Edit From / To Accounts**: Full Material 3 edit modal allowing editing of transaction types, "From account" and "To account", amounts, payees, categories, and exclusion toggles.
+          - 🏷️ **Automatic "Internal Transfer" Category**: Transfer transactions automatically apply the dedicated "Internal Transfer" category and are marked as nullified from spend calculations.
+          - 📋 **Integrated Transactions Screen**: 3-tab layout (Transactions, Analytics, Compare) with account breakdown cards, filter chips (All, Outflow, Inflow, Transfers), and clickable list items.
         files: dist/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

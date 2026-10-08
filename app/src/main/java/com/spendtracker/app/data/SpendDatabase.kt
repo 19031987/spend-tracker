@@ -267,11 +267,11 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
         return cal.timeInMillis
     }
 
-    // Money Out (Expenses) for current month
+    // Money Out (Expenses) for current month - nullifies internal transfers
     fun getTotalMoneyOutMonth(): Double {
         val db = readableDatabase
         val cursor = db.rawQuery(
-            "SELECT SUM($COL_AMOUNT) FROM $TABLE_NAME WHERE $COL_TYPE = 'OUT' AND $COL_TIMESTAMP >= ?",
+            "SELECT SUM($COL_AMOUNT) FROM $TABLE_NAME WHERE $COL_TYPE = 'OUT' AND $COL_CATEGORY != 'Internal Transfer' AND $COL_CATEGORY != 'INTERNAL_TRANSFER' AND $COL_TIMESTAMP >= ?",
             arrayOf(getStartOfMonth().toString())
         )
         var total = 0.0
@@ -282,11 +282,11 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
         return total
     }
 
-    // Money In (Income) for current month
+    // Money In (Income) for current month - nullifies internal transfers
     fun getTotalMoneyInMonth(): Double {
         val db = readableDatabase
         val cursor = db.rawQuery(
-            "SELECT SUM($COL_AMOUNT) FROM $TABLE_NAME WHERE $COL_TYPE = 'IN' AND $COL_TIMESTAMP >= ?",
+            "SELECT SUM($COL_AMOUNT) FROM $TABLE_NAME WHERE $COL_TYPE = 'IN' AND $COL_CATEGORY != 'Internal Transfer' AND $COL_CATEGORY != 'INTERNAL_TRANSFER' AND $COL_TIMESTAMP >= ?",
             arrayOf(getStartOfMonth().toString())
         )
         var total = 0.0
@@ -302,11 +302,11 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
         return getTotalMoneyInMonth() - getTotalMoneyOutMonth()
     }
 
-    // Money Out today
+    // Money Out today - nullifies internal transfers
     fun getTotalMoneyOutToday(): Double {
         val db = readableDatabase
         val cursor = db.rawQuery(
-            "SELECT SUM($COL_AMOUNT) FROM $TABLE_NAME WHERE $COL_TYPE = 'OUT' AND $COL_TIMESTAMP >= ?",
+            "SELECT SUM($COL_AMOUNT) FROM $TABLE_NAME WHERE $COL_TYPE = 'OUT' AND $COL_CATEGORY != 'Internal Transfer' AND $COL_CATEGORY != 'INTERNAL_TRANSFER' AND $COL_TIMESTAMP >= ?",
             arrayOf(getStartOfDay().toString())
         )
         var total = 0.0
@@ -317,11 +317,11 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
         return total
     }
 
-    // Money In today
+    // Money In today - nullifies internal transfers
     fun getTotalMoneyInToday(): Double {
         val db = readableDatabase
         val cursor = db.rawQuery(
-            "SELECT SUM($COL_AMOUNT) FROM $TABLE_NAME WHERE $COL_TYPE = 'IN' AND $COL_TIMESTAMP >= ?",
+            "SELECT SUM($COL_AMOUNT) FROM $TABLE_NAME WHERE $COL_TYPE = 'IN' AND $COL_CATEGORY != 'Internal Transfer' AND $COL_CATEGORY != 'INTERNAL_TRANSFER' AND $COL_TIMESTAMP >= ?",
             arrayOf(getStartOfDay().toString())
         )
         var total = 0.0

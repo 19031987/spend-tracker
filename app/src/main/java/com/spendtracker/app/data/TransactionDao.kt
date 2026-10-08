@@ -11,13 +11,19 @@ data class CategoryTotal(val category: String, val total: Long)
 data class TransferIds(val sourceId: Long, val destinationId: Long)
 
 private const val SPEND_WHERE =
-    "type = 'EXPENSE' AND excludeFromSpending = 0 AND timestamp >= :start AND timestamp < :end"
+    "type = 'EXPENSE' AND excludeFromSpending = 0 AND (category IS NULL OR category != 'INTERNAL_TRANSFER') AND timestamp >= :start AND timestamp < :end"
 
 @Dao
 abstract class TransactionDao {
 
     @Insert
     abstract suspend fun insert(transaction: TransactionEntity): Long
+
+    @androidx.room.Update
+    abstract suspend fun update(transaction: TransactionEntity)
+
+    @Query("SELECT * FROM transactions WHERE id = :id")
+    abstract suspend fun getById(id: Long): TransactionEntity?
 
     @Query("UPDATE transactions SET pairedTransactionId = :pairedId WHERE id = :id")
     abstract suspend fun setPairedId(id: Long, pairedId: Long)
@@ -36,40 +42,113 @@ abstract class TransactionDao {
         destinationAccountId: Long,
         amountMinor: Long,
         timestamp: Long,
-        note: String?
+        note: String?,
+        sourceName: String? = null,
+        destinationName: String? = null
     ): TransferIds {
         require(amountMinor > 0) { "Transfer amount must be positive" }
         require(sourceAccountId != destinationAccountId) { "Source and destination must differ" }
 
+        val desc = "${sourceName ?: "Chase"} ➔ ${destinationName ?: "HSBC"}"
         val sourceId = insert(
             TransactionEntity(
                 accountId = sourceAccountId,
                 amount = -amountMinor,
-                category = null,
+                category = "INTERNAL_TRANSFER",
                 note = note,
                 timestamp = timestamp,
                 type = TransactionType.TRANSFER,
                 destinationAccountId = destinationAccountId,
                 pairedTransactionId = null,
-                excludeFromSpending = true
+                excludeFromSpending = true,
+                merchant = desc,
+                source = sourceName ?: "Chase"
             )
         )
         val destinationId = insert(
             TransactionEntity(
                 accountId = destinationAccountId,
                 amount = amountMinor,
-                category = null,
+                category = "INTERNAL_TRANSFER",
                 note = note,
                 timestamp = timestamp,
                 type = TransactionType.TRANSFER,
                 destinationAccountId = destinationAccountId,
                 pairedTransactionId = sourceId,
-                excludeFromSpending = true
+                excludeFromSpending = true,
+                merchant = desc,
+                source = destinationName ?: "HSBC"
             )
         )
         setPairedId(sourceId, destinationId)
         return TransferIds(sourceId, destinationId)
     }
+
+    @Transaction
+    open suspend fun updateTransferPair(
+        sourceTxId: Long,
+        sourceAccountId: Long,
+        destinationAccountId: Long,
+        amountMinor: Long,
+        note: String?,
+        sourceName: String?,
+        destinationName: String?
+    ) {
+        val existingSource = getById(sourceTxId) ?: return
+        val pairedId = existingSource.pairedTransactionId
+
+        val desc = "${sourceName ?: "Chase"} ➔ ${destinationName ?: "HSBC"}"
+        val updatedSource = existingSource.copy(
+            accountId = sourceAccountId,
+            destinationAccountId = destinationAccountId,
+            amount = -amountMinor,
+            category = "INTERNAL_TRANSFER",
+            note = note,
+            type = TransactionType.TRANSFER,
+            excludeFromSpending = true,
+            merchant = desc,
+            source = sourceName ?: "Chase"
+        )
+        update(updatedSource)
+
+        if (pairedId != null) {
+            val existingDest = getById(pairedId)
+            if (existingDest != null) {
+                val updatedDest = existingDest.copy(
+                    accountId = destinationAccountId,
+                    destinationAccountId = destinationAccountId,
+                    amount = amountMinor,
+                    category = "INTERNAL_TRANSFER",
+                    note = note,
+                    type = TransactionType.TRANSFER,
+                    excludeFromSpending = true,
+                    merchant = desc,
+                    source = destinationName ?: "HSBC"
+                )
+                update(updatedDest)
+            }
+        } else {
+            val destId = insert(
+                TransactionEntity(
+                    accountId = destinationAccountId,
+                    amount = amountMinor,
+                    category = "INTERNAL_TRANSFER",
+                    note = note,
+                    timestamp = existingSource.timestamp,
+                    type = TransactionType.TRANSFER,
+                    destinationAccountId = destinationAccountId,
+                    pairedTransactionId = sourceTxId,
+                    excludeFromSpending = true,
+                    merchant = desc,
+                    source = destinationName ?: "HSBC"
+                )
+            )
+            setPairedId(sourceTxId, destId)
+        }
+    }
+
+    @Query("SELECT * FROM transactions ORDER BY timestamp DESC")
+    abstract fun observeAll(): Flow<List<TransactionEntity>>
 
     @Query("SELECT COALESCE(-SUM(amount), 0) FROM transactions WHERE $SPEND_WHERE")
     abstract fun observeTotalSpend(start: Long, end: Long): Flow<Long>

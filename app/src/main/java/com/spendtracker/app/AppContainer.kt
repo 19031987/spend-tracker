@@ -9,6 +9,7 @@ import com.spendtracker.app.data.UserPreferences
 import com.spendtracker.app.ui.AddTransactionViewModel
 import com.spendtracker.app.ui.AnalyticsViewModel
 import com.spendtracker.app.ui.SettingsViewModel
+import com.spendtracker.app.ui.TransactionsViewModel
 
 class AppContainer(context: Context) {
     val db = AppDatabase.get(context)
@@ -19,5 +20,6 @@ class AppContainer(context: Context) {
         initializer { AnalyticsViewModel(repository) }
         initializer { AddTransactionViewModel(repository) }
         initializer { SettingsViewModel(repository, preferences) }
+        initializer { TransactionsViewModel(repository) }
     }
 }

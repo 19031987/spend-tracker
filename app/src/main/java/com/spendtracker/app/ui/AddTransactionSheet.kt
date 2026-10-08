@@ -92,8 +92,11 @@ fun AddTransactionSheet(
     var autoAssignedCategory by rememberSaveable { mutableStateOf<String?>(null) }
     var showCategoryPicker by rememberSaveable { mutableStateOf(false) }
 
-    val effectiveSource = accounts.firstOrNull { it.id == sourceId } ?: accounts.firstOrNull()
+    val effectiveSource = accounts.firstOrNull { it.id == sourceId }
+        ?: accounts.firstOrNull { it.name.equals("Chase", ignoreCase = true) }
+        ?: accounts.firstOrNull()
     val effectiveDestination = accounts.firstOrNull { it.id == destinationId && it.id != effectiveSource?.id }
+        ?: accounts.firstOrNull { it.id != effectiveSource?.id && it.name.equals("HSBC", ignoreCase = true) }
         ?: accounts.firstOrNull { it.id != effectiveSource?.id }
 
     val activeCategory = categories.firstOrNull { it.key == selectedCategoryKey }
@@ -117,13 +120,24 @@ fun AddTransactionSheet(
                         selected = type == t,
                         onClick = {
                             type = t
-                            selectedCategoryKey = null
+                            if (t == TransactionType.TRANSFER) {
+                                selectedCategoryKey = "INTERNAL_TRANSFER"
+                            } else {
+                                selectedCategoryKey = null
+                            }
                             autoAssignedCategory = null
                             localError = null
                         },
                         shape = SegmentedButtonDefaults.itemShape(index, types.size)
                     ) {
-                        Text(t.name.lowercase().replaceFirstChar { it.uppercase() }, maxLines = 1)
+                        Text(
+                            when (t) {
+                                TransactionType.EXPENSE -> "Expense"
+                                TransactionType.INCOME -> "Income"
+                                TransactionType.TRANSFER -> "🔄 Transfer"
+                            },
+                            maxLines = 1
+                        )
                     }
                 }
             }
@@ -207,6 +221,43 @@ fun AddTransactionSheet(
                     selected = effectiveDestination,
                     onSelected = { destinationId = it.id }
                 )
+            }
+
+            AnimatedVisibility(visible = type == TransactionType.TRANSFER) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFFEDE9FE))
+                        .border(1.dp, Color(0xFFDDD6FE), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFFDDD6FE)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("🔄", fontSize = 18.sp)
+                    }
+                    Column {
+                        Text(
+                            "Category: Internal Transfer",
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF5B21B6),
+                            fontSize = 13.sp
+                        )
+                        Text(
+                            "Nullified from spending calculations (excluded from net spend)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF6D28D9),
+                            fontSize = 11.sp
+                        )
+                    }
+                }
             }
 
             // Category Picker Row with Uncategorized fallback pill
@@ -317,7 +368,17 @@ fun AddTransactionSheet(
                                 localError = "Create a second account to transfer between"
                             } else {
                                 localError = null
-                                onSubmit(NewTransaction.Transfer(source.id, dest.id, amount, note, now))
+                                onSubmit(
+                                    NewTransaction.Transfer(
+                                        sourceAccountId = source.id,
+                                        destinationAccountId = dest.id,
+                                        amountMinor = amount,
+                                        note = note,
+                                        timestamp = now,
+                                        sourceName = source.name,
+                                        destinationName = dest.name
+                                    )
+                                )
                             }
                         }
                         else -> {

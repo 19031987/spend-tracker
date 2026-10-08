@@ -622,12 +622,34 @@ html_content = '''<!DOCTYPE html>
             display: inline-flex;
             align-items: center;
             gap: 3px;
-            background: var(--accent-indigo-bg);
-            color: var(--accent-indigo);
+            background: #EDE9FE;
+            color: #6D28D9;
             padding: 1px 6px;
             border-radius: 6px;
             font-size: 10px;
             font-weight: 700;
+        }
+
+        .badge-source-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 700;
+        }
+        .source-chase {
+            background: rgba(29, 78, 216, 0.12);
+            color: #1E40AF;
+        }
+        .source-hsbc {
+            background: rgba(220, 38, 38, 0.12);
+            color: #991B1B;
+        }
+        .source-transfer {
+            background: #EDE9FE;
+            color: #6D28D9;
         }
 
         .tx-amount {
@@ -638,7 +660,7 @@ html_content = '''<!DOCTYPE html>
         }
         .tx-amount.amount-out { color: var(--text-pure); }
         .tx-amount.amount-in { color: var(--money-in-green); }
-        .tx-amount.amount-transfer { color: var(--accent-indigo); }
+        .tx-amount.amount-transfer { color: #7C3AED; }
 
         /* Right Panel: Studio & Test Bench */
         .simulator-control-panel {
@@ -1260,6 +1282,30 @@ html_content = '''<!DOCTYPE html>
                     </div>
                 </div>
 
+                <!-- Bank Accounts (Sources: Chase & HSBC) -->
+                <div class="section-header">
+                    <span class="section-title">Bank Accounts (Sources)</span>
+                    <span class="section-badge" style="background: #EDE9FE; color: #6D28D9;">Chase &amp; HSBC</span>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px;">
+                    <div style="background: rgba(29, 78, 216, 0.06); border: 1px solid rgba(29, 78, 216, 0.15); border-radius: 12px; padding: 10px 12px;">
+                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                            <span style="font-size: 14px;">🏛️</span>
+                            <span style="font-size: 12px; font-weight: 700; color: #1E40AF;">Chase</span>
+                        </div>
+                        <div style="font-size: 13px; font-weight: 700; color: var(--text-pure);" id="chaseSpentVal">Spent: £0.00</div>
+                        <div style="font-size: 11px; font-weight: 600; color: var(--money-in-green);" id="chaseInVal">In: +£0.00</div>
+                    </div>
+                    <div style="background: rgba(220, 38, 38, 0.06); border: 1px solid rgba(220, 38, 38, 0.15); border-radius: 12px; padding: 10px 12px;">
+                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                            <span style="font-size: 14px;">🏦</span>
+                            <span style="font-size: 12px; font-weight: 700; color: #991B1B;">HSBC</span>
+                        </div>
+                        <div style="font-size: 13px; font-weight: 700; color: var(--text-pure);" id="hsbcSpentVal">Spent: £0.00</div>
+                        <div style="font-size: 11px; font-weight: 600; color: var(--money-in-green);" id="hsbcInVal">In: +£0.00</div>
+                    </div>
+                </div>
+
                 <!-- Category Spending Section -->
                 <div class="section-header">
                     <span class="section-title">Category Spending</span>
@@ -1456,8 +1502,35 @@ html_content = '''<!DOCTYPE html>
                         </div>
                     </div>
 
+                    <!-- Account Picker Row -->
+                    <div class="form-row" style="margin-bottom: 8px;">
+                        <div style="flex: 1;">
+                            <label style="font-size: 11px; font-weight: 700; color: var(--text-mid); display: block; margin-bottom: 4px;" id="recordAccountLabel">Account</label>
+                            <select id="recordSourceAccount" class="form-control">
+                                <option value="Chase">Chase</option>
+                                <option value="HSBC">HSBC</option>
+                            </select>
+                        </div>
+                        <div style="flex: 1; display: none;" id="recordDestAccountCol">
+                            <label style="font-size: 11px; font-weight: 700; color: var(--text-mid); display: block; margin-bottom: 4px;">To Account</label>
+                            <select id="recordDestAccount" class="form-control">
+                                <option value="HSBC">HSBC</option>
+                                <option value="Chase">Chase</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div id="recordTransferBanner" style="display: none; background: #EDE9FE; border: 1px solid #DDD6FE; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;">
+                        <div style="font-size: 12px; font-weight: 700; color: #5B21B6; display: flex; align-items: center; gap: 6px;">
+                            <span>🔄</span> Category: Internal Transfer
+                        </div>
+                        <div style="font-size: 11px; color: #6D28D9; margin-top: 2px;">
+                            Nullified from spending totals (excluded from net spend)
+                        </div>
+                    </div>
+
                     <div class="form-row" id="transferNoteRow" style="display: none;">
-                        <input type="text" id="recordTransferNote" class="form-control" placeholder="Transfer Note (e.g. Checking ➔ Savings Buffer)">
+                        <input type="text" id="recordTransferNote" class="form-control" placeholder="Transfer Note (e.g. Card payoff, Savings)">
                     </div>
 
                     <button type="submit" class="btn-primary-action">Confirm &amp; Record Transaction</button>
@@ -1479,6 +1552,91 @@ html_content = '''<!DOCTYPE html>
 
         </div>
 
+    </div>
+
+    <!-- MODAL 0: EDIT TRANSACTION MODAL -->
+    <div id="editTransactionModal" class="modal-overlay">
+        <div class="modal-container" style="max-width: 440px;">
+            <div class="modal-header">
+                <div class="modal-title-row">
+                    <span style="font-size: 22px;">✏️</span>
+                    <div>
+                        <div class="modal-title">Edit Transaction</div>
+                        <div class="modal-subtitle" id="editModalDateSubtitle">Modify accounts, type, amount &amp; category</div>
+                    </div>
+                </div>
+                <button class="modal-close-btn" onclick="closeEditTransactionModal()">✕</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <form id="editTxForm" onsubmit="handleEditTxSubmit(event)">
+                    <input type="hidden" id="editTxId">
+                    
+                    <!-- Type selector -->
+                    <div class="form-row" style="margin-bottom: 12px;">
+                        <button type="button" class="type-toggle-btn active type-out" id="editTypeExpense" onclick="setEditTxType('EXPENSE')">↓ Expense</button>
+                        <button type="button" class="type-toggle-btn" id="editTypeIncome" onclick="setEditTxType('INCOME')">↑ Income</button>
+                        <button type="button" class="type-toggle-btn" id="editTypeTransfer" onclick="setEditTxType('TRANSFER')">🔄 Transfer</button>
+                    </div>
+
+                    <!-- Payee / Vendor (for non-transfer) -->
+                    <div class="form-row" id="editMerchantRow" style="flex-direction: column; gap: 4px; margin-bottom: 12px;">
+                        <label style="font-size: 11px; font-weight: 700; color: var(--text-mid);">PAYEE / MERCHANT</label>
+                        <input type="text" id="editMerchantInput" class="form-control" required>
+                    </div>
+
+                    <!-- Accounts -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+                        <div>
+                            <label style="font-size: 11px; font-weight: 700; color: var(--text-mid); display: block; margin-bottom: 4px;" id="editFromAccountLabel">ACCOUNT</label>
+                            <select id="editSourceAccount" class="form-control">
+                                <option value="Chase">Chase</option>
+                                <option value="HSBC">HSBC</option>
+                            </select>
+                        </div>
+                        <div id="editToAccountCol" style="display: none;">
+                            <label style="font-size: 11px; font-weight: 700; color: var(--text-mid); display: block; margin-bottom: 4px;">TO ACCOUNT</label>
+                            <select id="editDestAccount" class="form-control">
+                                <option value="HSBC">HSBC</option>
+                                <option value="Chase">Chase</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Transfer info pill -->
+                    <div id="editTransferNotice" style="display: none; background: #EDE9FE; border: 1px solid #DDD6FE; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px;">
+                        <div style="font-size: 12px; font-weight: 700; color: #5B21B6; display: flex; align-items: center; gap: 6px;">
+                            <span>🔄</span> Category: Internal Transfer
+                        </div>
+                        <div style="font-size: 11px; color: #6D28D9; margin-top: 2px;">
+                            Nullified from spending totals (excluded from net spend)
+                        </div>
+                    </div>
+
+                    <!-- Amount & Category -->
+                    <div class="form-row" style="margin-bottom: 12px;">
+                        <div style="flex: 1;">
+                            <label style="font-size: 11px; font-weight: 700; color: var(--text-mid); display: block; margin-bottom: 4px;">AMOUNT</label>
+                            <input type="number" id="editAmountInput" class="form-control" step="0.01" min="0.01" required>
+                        </div>
+                        <div id="editCatPickerRow" style="flex: 1;">
+                            <label style="font-size: 11px; font-weight: 700; color: var(--text-mid); display: block; margin-bottom: 4px;">CATEGORY</label>
+                            <select id="editCategorySelect" class="form-control"></select>
+                        </div>
+                    </div>
+
+                    <!-- Note -->
+                    <div class="form-row" style="flex-direction: column; gap: 4px; margin-bottom: 16px;">
+                        <label style="font-size: 11px; font-weight: 700; color: var(--text-mid);">NOTE (OPTIONAL)</label>
+                        <input type="text" id="editNoteInput" class="form-control" placeholder="Optional notes...">
+                    </div>
+
+                    <div style="display: flex; gap: 10px;">
+                        <button type="button" class="btn-nav" onclick="deleteActiveEditTx()" style="background: rgba(239, 68, 68, 0.1); color: #EF4444; border: 1px solid rgba(239, 68, 68, 0.2); justify-content: center; width: 100px;">Delete</button>
+                        <button type="submit" class="btn-primary-action" style="flex: 1;">Save Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
     </div>
 
     <!-- MODAL 1: MONARCH SETTINGS MODAL (4 TABS) -->
@@ -1712,14 +1870,14 @@ html_content = '''<!DOCTYPE html>
         ];
 
         const INITIAL_TRANSACTIONS = [
-            { id: 1, merchant: 'Tesco Express', amount: 14.80, type: 'EXPENSE', categoryId: 'cat_groceries', date: 'Today, 14:20' },
-            { id: 2, merchant: 'Costa Coffee', amount: 4.20, type: 'EXPENSE', categoryId: 'cat_coffee', date: 'Today, 09:15' },
-            { id: 3, merchant: 'Checking ➔ Savings', amount: 250.00, type: 'TRANSFER', categoryId: 'cat_transfer', date: 'Yesterday' },
-            { id: 4, merchant: 'Netflix Subscription', amount: 10.99, type: 'EXPENSE', categoryId: 'cat_subs', date: '04 Oct' },
-            { id: 5, merchant: 'Uber Ride', amount: 18.50, type: 'EXPENSE', categoryId: 'cat_transport', date: '03 Oct' },
-            { id: 6, merchant: 'British Gas DD', amount: 65.00, type: 'EXPENSE', categoryId: 'cat_utilities', date: '02 Oct' },
-            { id: 7, merchant: 'Apex Hardware', amount: 32.50, type: 'EXPENSE', categoryId: 'cat_uncategorized', date: '01 Oct' },
-            { id: 8, merchant: 'TechCorp Payroll', amount: 2850.00, type: 'INCOME', categoryId: 'cat_salary', date: '28 Sep' }
+            { id: 1, merchant: 'Tesco Express', amount: 14.80, type: 'EXPENSE', categoryId: 'cat_groceries', date: 'Today, 14:20', source: 'Chase' },
+            { id: 2, merchant: 'Costa Coffee', amount: 4.20, type: 'EXPENSE', categoryId: 'cat_coffee', date: 'Today, 09:15', source: 'Chase' },
+            { id: 3, merchant: 'Chase ➔ HSBC', amount: 250.00, type: 'TRANSFER', categoryId: 'cat_transfer', date: 'Yesterday', source: 'Chase', destination: 'HSBC', excludeFromSpending: true },
+            { id: 4, merchant: 'Netflix Subscription', amount: 10.99, type: 'EXPENSE', categoryId: 'cat_subs', date: '04 Oct', source: 'Chase' },
+            { id: 5, merchant: 'Uber Ride', amount: 18.50, type: 'EXPENSE', categoryId: 'cat_transport', date: '03 Oct', source: 'HSBC' },
+            { id: 6, merchant: 'British Gas DD', amount: 65.00, type: 'EXPENSE', categoryId: 'cat_utilities', date: '02 Oct', source: 'HSBC' },
+            { id: 7, merchant: 'Apex Hardware', amount: 32.50, type: 'EXPENSE', categoryId: 'cat_uncategorized', date: '01 Oct', source: 'HSBC' },
+            { id: 8, merchant: 'TechCorp Payroll', amount: 2850.00, type: 'INCOME', categoryId: 'cat_salary', date: '28 Sep', source: 'Chase' }
         ];
 
         const EMOJI_PALETTE = ['🛒', '☕', '🍽️', '🛍️', '🎮', '🍿', '🏠', '⚡', '🚇', '⛽', '🚗', '💰', '🏋️', '📚', '💊', '✈️', '🏷️', '🔧'];
@@ -1730,6 +1888,18 @@ html_content = '''<!DOCTYPE html>
         let categories = JSON.parse(localStorage.getItem('monarch_categories')) || INITIAL_CATEGORIES;
         let rules = JSON.parse(localStorage.getItem('monarch_rules')) || INITIAL_RULES;
         let transactions = JSON.parse(localStorage.getItem('monarch_transactions')) || INITIAL_TRANSACTIONS;
+
+        // Upgrade legacy cached transactions to have Chase/HSBC sources
+        transactions.forEach(t => {
+            if (!t.source) {
+                t.source = (t.merchant && t.merchant.toLowerCase().includes('hsbc')) ? 'HSBC' : 'Chase';
+            }
+            if (t.type === 'TRANSFER') {
+                t.excludeFromSpending = true;
+                if (!t.destination) t.destination = t.source === 'Chase' ? 'HSBC' : 'Chase';
+                if (t.merchant === 'Checking ➔ Savings') t.merchant = `${t.source} ➔ ${t.destination}`;
+            }
+        });
         let payeeMemory = JSON.parse(localStorage.getItem('monarch_payee_memory')) || {
             'costacoffee': 'cat_coffee',
             'uberride': 'cat_transport'
@@ -1978,12 +2148,13 @@ html_content = '''<!DOCTYPE html>
         }
 
         function renderTotals() {
-            // Transfers are excluded from spending!
-            const expenses = transactions
+            // Transfers and excludeFromSpending transactions are strictly excluded from spending!
+            const nonTransferTxs = transactions.filter(t => !t.excludeFromSpending && t.type !== 'TRANSFER' && t.categoryId !== 'cat_transfer');
+            const expenses = nonTransferTxs
                 .filter(t => t.type === 'EXPENSE')
                 .reduce((sum, t) => sum + t.amount, 0);
 
-            const income = transactions
+            const income = nonTransferTxs
                 .filter(t => t.type === 'INCOME')
                 .reduce((sum, t) => sum + t.amount, 0);
 
@@ -2013,6 +2184,31 @@ html_content = '''<!DOCTYPE html>
             document.getElementById('ratioBarFill').style.width = `${spentPercent}%`;
             document.getElementById('tvRatioText').textContent = `${spentPercent}% of income spent`;
             document.getElementById('tvSavingsText').textContent = `${Math.max(0, 100 - spentPercent)}% saved`;
+
+            // Bank Accounts (Chase & HSBC) breakdown
+            const chaseExpenses = nonTransferTxs
+                .filter(t => t.type === 'EXPENSE' && (t.source === 'Chase' || !t.source))
+                .reduce((sum, t) => sum + t.amount, 0);
+            const chaseIncome = nonTransferTxs
+                .filter(t => t.type === 'INCOME' && (t.source === 'Chase' || !t.source))
+                .reduce((sum, t) => sum + t.amount, 0);
+
+            const hsbcExpenses = nonTransferTxs
+                .filter(t => t.type === 'EXPENSE' && t.source === 'HSBC')
+                .reduce((sum, t) => sum + t.amount, 0);
+            const hsbcIncome = nonTransferTxs
+                .filter(t => t.type === 'INCOME' && t.source === 'HSBC')
+                .reduce((sum, t) => sum + t.amount, 0);
+
+            const chaseSpentEl = document.getElementById('chaseSpentVal');
+            const chaseInEl = document.getElementById('chaseInVal');
+            const hsbcSpentEl = document.getElementById('hsbcSpentVal');
+            const hsbcInEl = document.getElementById('hsbcInVal');
+
+            if (chaseSpentEl) chaseSpentEl.textContent = `Spent: ${activeCurrency}${chaseExpenses.toFixed(2)}`;
+            if (chaseInEl) chaseInEl.textContent = `In: +${activeCurrency}${chaseIncome.toFixed(2)}`;
+            if (hsbcSpentEl) hsbcSpentEl.textContent = `Spent: ${activeCurrency}${hsbcExpenses.toFixed(2)}`;
+            if (hsbcInEl) hsbcInEl.textContent = `In: +${activeCurrency}${hsbcIncome.toFixed(2)}`;
         }
 
         function renderTransactionsList() {
@@ -2029,11 +2225,13 @@ html_content = '''<!DOCTYPE html>
 
             list.forEach(tx => {
                 const cat = categories.find(c => c.id === tx.categoryId) || categories.find(c => c.id === 'cat_uncategorized');
-                const isTransfer = tx.type === 'TRANSFER';
+                const isTransfer = tx.type === 'TRANSFER' || tx.categoryId === 'cat_transfer' || tx.excludeFromSpending;
                 const isIncome = tx.type === 'INCOME';
 
                 const card = document.createElement('div');
                 card.className = 'tx-card';
+                card.style.cursor = 'pointer';
+                card.title = 'Click to edit transaction';
 
                 let amountClass = 'amount-out';
                 let amountPrefix = `-${activeCurrency}`;
@@ -2042,32 +2240,41 @@ html_content = '''<!DOCTYPE html>
                     amountPrefix = `+${activeCurrency}`;
                 } else if (isTransfer) {
                     amountClass = 'amount-transfer';
-                    amountPrefix = `🔄 ${activeCurrency}`;
+                    amountPrefix = `${activeCurrency}`;
                 }
+
+                const sourceClass = isTransfer ? 'source-transfer' : (tx.source === 'HSBC' ? 'source-hsbc' : 'source-chase');
+                const sourceLabel = isTransfer ? `${tx.source || 'Chase'} ➔ ${tx.destination || 'HSBC'}` : (tx.source || 'Chase');
 
                 card.innerHTML = `
                     <div class="tx-left">
-                        <div class="tx-avatar" style="background-color: ${cat.color};">
-                            ${cat.emoji}
+                        <div class="tx-avatar" style="background-color: ${isTransfer ? '#EDE9FE' : cat.color};">
+                            ${isTransfer ? '🔄' : cat.emoji}
                         </div>
                         <div class="tx-details">
                             <div class="tx-merchant">${tx.merchant}</div>
                             <div class="tx-meta">
-                                <span>${tx.date}</span>
+                                <span class="badge-source-pill ${sourceClass}">${sourceLabel}</span>
                                 <span>•</span>
-                                ${cat.id === 'cat_uncategorized'
-                                    ? '<span class="badge-uncat-pill">❓ Uncategorized</span>'
-                                    : isTransfer
+                                ${isTransfer
                                     ? '<span class="badge-transfer-pill">🔄 Internal Transfer</span>'
+                                    : cat.id === 'cat_uncategorized'
+                                    ? '<span class="badge-uncat-pill">❓ Uncategorized</span>'
                                     : `<span>${cat.name}</span>`}
+                                <span>•</span>
+                                <span>${tx.date}</span>
                             </div>
                         </div>
                     </div>
-                    <div class="tx-amount ${amountClass}">
-                        ${amountPrefix}${tx.amount.toFixed(2)}
+                    <div style="text-align: right;">
+                        <div class="tx-amount ${amountClass}">
+                            ${amountPrefix}${tx.amount.toFixed(2)}
+                        </div>
+                        ${isTransfer ? '<div style="font-size: 9px; font-weight: 800; color: #6D28D9; text-transform: uppercase;">Nullified</div>' : ''}
                     </div>
                 `;
 
+                card.onclick = () => openEditTransactionModal(tx.id);
                 feed.appendChild(card);
             });
         }
@@ -2134,13 +2341,22 @@ html_content = '''<!DOCTYPE html>
 
             const noteRow = document.getElementById('transferNoteRow');
             const hintBanner = document.getElementById('recordAutoHint');
+            const destCol = document.getElementById('recordDestAccountCol');
+            const transferBanner = document.getElementById('recordTransferBanner');
+            const fromLabel = document.getElementById('recordAccountLabel');
 
             if (type === 'TRANSFER') {
                 noteRow.style.display = 'flex';
                 hintBanner.style.display = 'none';
+                if (destCol) destCol.style.display = 'block';
+                if (transferBanner) transferBanner.style.display = 'block';
+                if (fromLabel) fromLabel.textContent = 'From Account';
                 selectedRecordCategoryId = 'cat_transfer';
             } else {
                 noteRow.style.display = 'none';
+                if (destCol) destCol.style.display = 'none';
+                if (transferBanner) transferBanner.style.display = 'none';
+                if (fromLabel) fromLabel.textContent = 'Account';
                 if (selectedRecordCategoryId === 'cat_transfer') selectedRecordCategoryId = 'cat_groceries';
             }
             updateRecordCategoryPillDisplay(categories.find(c => c.id === selectedRecordCategoryId));
@@ -2151,16 +2367,22 @@ html_content = '''<!DOCTYPE html>
             const merchant = document.getElementById('recordMerchant').value.trim();
             const amount = parseFloat(document.getElementById('recordAmount').value);
             const note = document.getElementById('recordTransferNote').value.trim();
+            const srcAcc = document.getElementById('recordSourceAccount')?.value || 'Chase';
+            const dstAcc = document.getElementById('recordDestAccount')?.value || 'HSBC';
+            const isTransfer = currentFormType === 'TRANSFER';
 
             if (!merchant || isNaN(amount) || amount <= 0) return;
 
             const newTx = {
                 id: Date.now(),
-                merchant: currentFormType === 'TRANSFER' && note ? note : merchant,
+                merchant: isTransfer ? (note || `${srcAcc} ➔ ${dstAcc}`) : merchant,
                 amount: amount,
                 type: currentFormType,
-                categoryId: selectedRecordCategoryId,
-                date: 'Just now'
+                categoryId: isTransfer ? 'cat_transfer' : selectedRecordCategoryId,
+                date: 'Just now',
+                source: srcAcc,
+                destination: isTransfer ? dstAcc : undefined,
+                excludeFromSpending: isTransfer
             };
 
             transactions.unshift(newTx);
@@ -2173,12 +2395,142 @@ html_content = '''<!DOCTYPE html>
 
             persistState();
             initDashboard();
-            logMessage(`[SAVED] Transaction recorded: ${newTx.merchant} (${activeCurrency}${newTx.amount.toFixed(2)})`, 'success');
+            logMessage(`[SAVED] Transaction recorded: ${newTx.merchant} (${activeCurrency}${newTx.amount.toFixed(2)}) · Source: ${newTx.source}`, 'success');
 
             // Reset Form
             document.getElementById('recordMerchant').value = '';
             document.getElementById('recordAmount').value = '';
             document.getElementById('recordAutoHint').style.display = 'none';
+            if (document.getElementById('recordTransferNote')) document.getElementById('recordTransferNote').value = '';
+        }
+
+        // ========================================================
+        // EDIT TRANSACTION MODAL HANDLERS
+        // ========================================================
+        let activeEditTxId = null;
+        let activeEditTxType = 'EXPENSE';
+
+        function openEditTransactionModal(id) {
+            const tx = transactions.find(t => t.id === id);
+            if (!tx) return;
+
+            activeEditTxId = id;
+            activeEditTxType = tx.type;
+
+            document.getElementById('editTxId').value = tx.id;
+            document.getElementById('editMerchantInput').value = tx.merchant || '';
+            document.getElementById('editAmountInput').value = tx.amount.toFixed(2);
+            document.getElementById('editNoteInput').value = tx.note || '';
+            document.getElementById('editModalDateSubtitle').textContent = `Transaction from ${tx.date || 'earlier'}`;
+
+            const srcSelect = document.getElementById('editSourceAccount');
+            if (srcSelect) srcSelect.value = tx.source || 'Chase';
+
+            const dstSelect = document.getElementById('editDestAccount');
+            if (dstSelect) dstSelect.value = tx.destination || (tx.source === 'Chase' ? 'HSBC' : 'Chase');
+
+            // Populate Category dropdown
+            const catSelect = document.getElementById('editCategorySelect');
+            catSelect.innerHTML = '';
+            categories.forEach(cat => {
+                const opt = document.createElement('option');
+                opt.value = cat.id;
+                opt.textContent = `${cat.emoji} ${cat.name}`;
+                if (cat.id === tx.categoryId) opt.selected = true;
+                catSelect.appendChild(opt);
+            });
+
+            setEditTxType(tx.type);
+
+            document.getElementById('editTransactionModal').classList.add('active');
+        }
+
+        function closeEditTransactionModal() {
+            document.getElementById('editTransactionModal').classList.remove('active');
+            activeEditTxId = null;
+        }
+
+        function setEditTxType(type) {
+            activeEditTxType = type;
+            ['Expense', 'Income', 'Transfer'].forEach(t => {
+                const btn = document.getElementById('editType' + t);
+                btn.className = 'type-toggle-btn';
+            });
+            const activeBtn = document.getElementById('editType' + (type === 'EXPENSE' ? 'Expense' : type === 'INCOME' ? 'Income' : 'Transfer'));
+            activeBtn.className = `type-toggle-btn active type-${type.toLowerCase()}`;
+
+            const toCol = document.getElementById('editToAccountCol');
+            const notice = document.getElementById('editTransferNotice');
+            const catRow = document.getElementById('editCatPickerRow');
+            const merchantRow = document.getElementById('editMerchantRow');
+            const fromLabel = document.getElementById('editFromAccountLabel');
+
+            if (type === 'TRANSFER') {
+                if (toCol) toCol.style.display = 'block';
+                if (notice) notice.style.display = 'block';
+                if (catRow) catRow.style.display = 'none';
+                if (merchantRow) merchantRow.style.display = 'none';
+                if (fromLabel) fromLabel.textContent = 'FROM ACCOUNT';
+                const catSelect = document.getElementById('editCategorySelect');
+                if (catSelect) catSelect.value = 'cat_transfer';
+            } else {
+                if (toCol) toCol.style.display = 'none';
+                if (notice) notice.style.display = 'none';
+                if (catRow) catRow.style.display = 'block';
+                if (merchantRow) merchantRow.style.display = 'flex';
+                if (fromLabel) fromLabel.textContent = 'ACCOUNT';
+                const catSelect = document.getElementById('editCategorySelect');
+                if (catSelect && catSelect.value === 'cat_transfer') {
+                    catSelect.value = 'cat_groceries';
+                }
+            }
+        }
+
+        function handleEditTxSubmit(e) {
+            e.preventDefault();
+            const tx = transactions.find(t => t.id === activeEditTxId);
+            if (!tx) return;
+
+            const amount = parseFloat(document.getElementById('editAmountInput').value);
+            if (isNaN(amount) || amount <= 0) return;
+
+            const src = document.getElementById('editSourceAccount').value;
+            const dst = document.getElementById('editDestAccount').value;
+            const note = document.getElementById('editNoteInput').value.trim();
+            const isTransfer = activeEditTxType === 'TRANSFER';
+
+            tx.type = activeEditTxType;
+            tx.amount = amount;
+            tx.source = src;
+            tx.note = note || undefined;
+
+            if (isTransfer) {
+                tx.destination = dst;
+                tx.merchant = `${src} ➔ ${dst}`;
+                tx.categoryId = 'cat_transfer';
+                tx.excludeFromSpending = true;
+            } else {
+                tx.destination = undefined;
+                tx.merchant = document.getElementById('editMerchantInput').value.trim() || 'Transaction';
+                tx.categoryId = document.getElementById('editCategorySelect').value;
+                tx.excludeFromSpending = false;
+            }
+
+            persistState();
+            initDashboard();
+            closeEditTransactionModal();
+            logMessage(`[EDITED] Transaction updated: ${tx.merchant} (${activeCurrency}${tx.amount.toFixed(2)}) · Source: ${tx.source}`, 'success');
+        }
+
+        function deleteActiveEditTx() {
+            if (!activeEditTxId) return;
+            const idx = transactions.findIndex(t => t.id === activeEditTxId);
+            if (idx !== -1) {
+                const deleted = transactions.splice(idx, 1)[0];
+                persistState();
+                initDashboard();
+                closeEditTransactionModal();
+                logMessage(`[DELETED] Transaction removed: ${deleted.merchant} (${activeCurrency}${deleted.amount.toFixed(2)})`, 'warn');
         }
 
         function openAddTransactionModal() {

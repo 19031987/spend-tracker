@@ -71,6 +71,10 @@ object MerchantDictionary {
         ),
         "UTILITIES" to listOf(
             "british gas", "octopus", "edison", "water", "broadband", "edf", "virgin media"
+        ),
+        "INTERNAL_TRANSFER" to listOf(
+            "internal transfer", "transfer to chase", "transfer to hsbc", "transfer from chase",
+            "transfer from hsbc", "transfer between accounts", "savings buffer"
         )
     )
 
