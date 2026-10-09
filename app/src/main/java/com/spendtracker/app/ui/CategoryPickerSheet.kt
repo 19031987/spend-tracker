@@ -1,5 +1,7 @@
 package com.spendtracker.app.ui
 
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border

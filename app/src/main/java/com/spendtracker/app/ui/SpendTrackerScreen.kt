@@ -1,5 +1,7 @@
 package com.spendtracker.app.ui
 
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
@@ -77,7 +79,9 @@ import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.material3.ExperimentalMaterial3Api
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SpendTrackerScreen(container: AppContainer) {
     val context = LocalContext.current
@@ -348,6 +352,7 @@ fun SpendTrackerScreen(container: AppContainer) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TransactionsFeed(
     transactions: List<TransactionItem>,
@@ -380,6 +385,8 @@ private fun TransactionsFeed(
         "TRANSFER" -> transactions.filter { it.type == TransactionType.TRANSFER || it.categoryKey == "INTERNAL_TRANSFER" || it.excludeFromSpending }
         else -> transactions
     }
+
+    val dayGroups = remember(filtered) { groupTransactionsByDay(filtered) }
 
     LazyColumn(
         modifier = modifier.fillMaxWidth(),
@@ -583,7 +590,6 @@ private fun TransactionsFeed(
         }
 
         // Transaction list items grouped by Day
-        val dayGroups = remember(filtered) { groupTransactionsByDay(filtered) }
         if (dayGroups.isEmpty()) {
             item {
                 Box(
