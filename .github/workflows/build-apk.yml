@@ -55,15 +55,15 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.3.0
-        name: "SpendTracker Release v1.3.0 (Nullified Internal Transfers, Chase & HSBC Account Sources, & Edit Support)"
+        tag_name: v1.4.0
+        name: "SpendTracker Release v1.4.0 (Vendor Identification, Day Grouping, Category Picker Dialog & Transfer Clarifications)"
         body: |
-          ### SpendTracker v1.3.0 - Nullified Internal Transfers & Account Sources
-          - 🔄 **Nullified Internal Transactions**: Transfers between accounts (Chase ➔ HSBC) are strictly excluded from spending totals, cash flow calculations, and period analytics.
-          - 🏛️ **Explicit Chase & HSBC Sources**: Added first-class Chase and HSBC accounts, source badges on all transactions, and dedicated Chase & HSBC breakdown cards (eliminating generic "others").
-          - ✏️ **Edit From / To Accounts**: Full Material 3 edit modal allowing editing of transaction types, "From account" and "To account", amounts, payees, categories, and exclusion toggles.
-          - 🏷️ **Automatic "Internal Transfer" Category**: Transfer transactions automatically apply the dedicated "Internal Transfer" category and are marked as nullified from spend calculations.
-          - 📋 **Integrated Transactions Screen**: 3-tab layout (Transactions, Analytics, Compare) with account breakdown cards, filter chips (All, Outflow, Inflow, Transfers), and clickable list items.
+          ### SpendTracker v1.4.0 - Key Fixes & Enhancements
+          - 🏢 **Vendor Identification (Issue 1)**: Enhanced parser with `paid <Vendor>` and leading retailer patterns; eliminates generic "Chase Payment" fallbacks. Transactions with missing vendors display a prominent `Unknown Vendor` badge with `✏️ Tap to set`.
+          - 📅 **Day Grouping & Totals (Issue 2)**: Transactions are clearly grouped by day (e.g. `Today · 9 Oct`, `Yesterday · 8 Oct`, `Monday, 6 Oct`) with daily spend totals. Prominent amount display (`−£14.80`, `+£2,850.00`, `£250.00`) and transaction timestamps (`14:20`).
+          - 🏷️ **Reliable Category Selection (Issue 3)**: Fixed category selection by replacing nested bottom sheets with `CategoryPickerDialog` in Compose Dialog. Tapping the category pill directly on any transaction allows instant re-categorization.
+          - 🔄 **Option A Transfer Rules (Issue 4)**: Internal transfers between user's own accounts (Chase ↔ HSBC) are strictly nullified and excluded from spend calculations. Payments/transfers to third parties (landlord, friends) count as spending.
+          - ↕️ **3-Way Direction & Day Picker in Add Sheet (Issue 5)**: Clear 3-way toggle (`↓ Money Out`, `↑ Money In`, `🔄 Between Accounts`), color-coded amounts (`−£`, `+£`), and day selectors (`Today`, `Yesterday`, `2 Days Ago`).
         files: dist/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

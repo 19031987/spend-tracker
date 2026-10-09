@@ -86,6 +86,8 @@ TERM = r"(?=\s+(?:on|via|using|with|ref|reference|card|was|has|is|have|and|for)\
 IN_SENT_YOU = re.compile(NAME + r"\s+(?:has\s+)?sent you\b", I)
 IN_FROM = re.compile(r"\bfrom\s+" + NAME + TERM, I)
 OUT_DD = re.compile(r"\b(?:direct debit|standing order|payment|transfer)\s+to\s+" + NAME + r"(?=\s+(?:of|for)\b)", I)
+OUT_PAID_VENDOR = re.compile(r"\bpaid\s+" + NAME + r"(?=\s+(?:(?:" + CUR_ALT + r")?\s*" + NUM + r"))", I)
+OUT_VENDOR_AMOUNT = re.compile(r"^(?:(?:Chase|HSBC|Monzo|Revolut|Barclays|Amex)\s+)?" + NAME + r"(?=\s+(?:(?:" + CUR_ALT + r")\s*" + NUM + r"))", I)
 OUT_AT_TO = re.compile(r"\b(?:at|to)\s+" + NAME + TERM, I)
 
 GENERIC_TITLE = re.compile(
@@ -153,6 +155,14 @@ def find_first_money(text: str):
     return min(found) if found else None
 
 
+ACTION_WORDS = {
+    "you", "your", "card", "cards", "account", "accounts", "make", "payment", "payments",
+    "direct debit", "standing order", "transfer", "transfers", "alert", "alerts", "notification",
+    "chase", "hsbc", "monzo", "revolut", "barclays", "paypal", "amex", "sent", "spend", "spent",
+    "charge", "charges", "transaction", "transactions", "ending", "approved"
+}
+
+
 def is_usable_name(c) -> bool:
     if c is None:
         return False
@@ -160,9 +170,19 @@ def is_usable_name(c) -> bool:
     if len(c) < 2:
         return False
     low = c.lower()
-    if low in ("you", "your") or low.startswith("your ") or low.startswith("you "):
+    for s in KNOWN_SOURCES:
+        if low.startswith(s.lower() + " ") or low.startswith(s.lower() + ":"):
+            low = low[len(s):].strip(" :-\t")
+    if len(low) < 2:
         return False
-    if re.fullmatch(r"[0-9:./ -]+", c):
+    if low in ACTION_WORDS:
+        return False
+    words = set(re.findall(r"[a-z0-9]+", low))
+    if words.intersection(ACTION_WORDS):
+        return False
+    if low.startswith("your ") or low.startswith("you ") or low.startswith("card ending") or low.startswith("make "):
+        return False
+    if re.fullmatch(r"[0-9:./ -]+", low):
         return False
     return True
 
@@ -192,7 +212,7 @@ def clean_merchant(raw: str, source: str = "") -> str:
             return name
     words = [w for w in clean.split(" ") if w]
     if not words:
-        return ("%s Account" % source) if source else "Retailer"
+        return ""
     return " ".join(w.lower()[:1].upper() + w.lower()[1:] for w in words)
 
 
@@ -218,19 +238,28 @@ def extract_merchant(tx_type, text, amount_end, title, source):
             if is_usable_name(m.group(1)):
                 return m.group(1).strip(), False
     else:
+        # Prefer merchant after amount ("£4.20 at Costa")
+        tail = text[amount_end:] if 0 <= amount_end <= len(text) else ""
+        for m in OUT_AT_TO.finditer(tail):
+            if is_usable_name(m.group(1)):
+                return m.group(1).strip(), False
         m = OUT_DD.search(text)
         if m and is_usable_name(m.group(1)):
             return m.group(1).strip(), False
-        tail = text[amount_end:] if 0 <= amount_end <= len(text) else ""
-        for scope in (tail, text):
-            for m in OUT_AT_TO.finditer(scope):
-                if is_usable_name(m.group(1)):
-                    return m.group(1).strip(), False
+        for m in OUT_AT_TO.finditer(text):
+            if is_usable_name(m.group(1)):
+                return m.group(1).strip(), False
+        m = OUT_PAID_VENDOR.search(text)
+        if m and is_usable_name(m.group(1)):
+            return m.group(1).strip(), False
+        m = OUT_VENDOR_AMOUNT.search(text)
+        if m and is_usable_name(m.group(1)):
+            return m.group(1).strip(), False
     t = (title or "").strip()
     if t and not GENERIC_TITLE.search(t) and find_first_money(t) is None \
             and not any(r.search(t) for r, _ in BANK_CONTENT_WORDS) and is_usable_name(t):
         return t, False
-    return ("%s Deposit" % source if tx_type == TYPE_IN else "%s Payment" % source), True
+    return "", True
 
 
 def parse_spend(pkg: str, title, text):
@@ -270,9 +299,12 @@ def parse_spend(pkg: str, title, text):
         tx_type = TYPE_OUT
     source = detect_source(pkg, content)
     raw, fallback = extract_merchant(tx_type, scrubbed, end, title, source)
-    merchant = raw if fallback else clean_merchant(raw, source)
+    cleaned = "" if fallback or not raw.strip() else clean_merchant(raw, source)
+    final_merchant = cleaned if cleaned else ""
+    final_fallback = fallback or not final_merchant
     return {"type": tx_type, "source": source, "amount": amount, "currency": currency,
-            "merchant": merchant, "category": categorize("%s %s" % (merchant, content), tx_type)}
+            "merchant": final_merchant, "merchantIsFallback": final_fallback,
+            "category": categorize("%s %s" % (final_merchant, content), tx_type)}
 
 
 HSBC = "uk.co.hsbc.hsbcukmobilebanking"
@@ -423,6 +455,18 @@ class TestSpendParser(unittest.TestCase):
 
     def test_amount_without_currency_ignored(self):
         self.assertIsNone(parse_spend(HSBC, "HSBC", "Card ending 1650.99 activity"))
+
+    def test_paid_vendor_patterns(self):
+        self.check(parse_spend(CHASE, "Chase", "You paid Tesco £14.80"), TYPE_OUT, 14.80, "Tesco Stores")
+        self.check(parse_spend(CHASE, "Chase", "You paid John £50.00"), TYPE_OUT, 50.00, "John")
+        self.check(parse_spend(HSBC, "HSBC", "You paid Landlord £850.00"), TYPE_OUT, 850.00, "Landlord")
+        self.check(parse_spend(HSBC, "HSBC", "Tesco £14.80"), TYPE_OUT, 14.80, "Tesco Stores")
+
+    def test_fallback_merchant_is_empty(self):
+        res = parse_spend(HSBC, "HSBC Alert", "£14.80 payment made")
+        self.assertIsNotNone(res)
+        self.assertEqual(res["merchant"], "")
+        self.assertTrue(res["merchantIsFallback"])
 
     # --- Source detection ---
     def test_purchase_is_not_chase(self):

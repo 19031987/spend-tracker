@@ -80,7 +80,8 @@ fun EditTransactionSheet(
         categoryKey: String?,
         merchant: String?,
         note: String?,
-        excludeFromSpending: Boolean
+        excludeFromSpending: Boolean,
+        ruleMerchant: String?
     ) -> Unit,
     onDelete: (Long) -> Unit
 ) {
@@ -99,6 +100,7 @@ fun EditTransactionSheet(
     var note by rememberSaveable { mutableStateOf(transaction.note ?: "") }
     var excludeFromSpending by rememberSaveable { mutableStateOf(transaction.excludeFromSpending) }
     var localError by rememberSaveable { mutableStateOf<String?>(null) }
+    var autoRuleChecked by rememberSaveable { mutableStateOf(false) }
     var showCategoryPicker by rememberSaveable { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
@@ -301,6 +303,25 @@ fun EditTransactionSheet(
                             }
                         }
                     }
+
+                    if (merchantText.isNotBlank() && activeCategory != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = autoRuleChecked,
+                                onCheckedChange = { autoRuleChecked = it }
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "Always categorize \"${merchantText.trim()}\" as ${activeCategory.name}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
                 }
 
                 // Nullify / Exclude toggle for non-transfers
@@ -374,7 +395,8 @@ fun EditTransactionSheet(
                             "INTERNAL_TRANSFER",
                             "${source.name} ➔ ${dest.name}",
                             note.trim().takeIf { it.isNotEmpty() },
-                            true // Transfer is ALWAYS nullified from spend!
+                            true, // Transfer is ALWAYS nullified from spend!
+                            null
                         )
                     } else {
                         onSave(
@@ -386,7 +408,8 @@ fun EditTransactionSheet(
                             selectedCategoryKey,
                             merchantText.trim().takeIf { it.isNotEmpty() },
                             note.trim().takeIf { it.isNotEmpty() },
-                            excludeFromSpending || selectedCategoryKey == "INTERNAL_TRANSFER"
+                            excludeFromSpending || selectedCategoryKey == "INTERNAL_TRANSFER",
+                            if (autoRuleChecked && merchantText.isNotBlank()) merchantText.trim() else null
                         )
                     }
                 }
@@ -421,7 +444,7 @@ fun EditTransactionSheet(
     }
 
     if (showCategoryPicker) {
-        CategoryPickerSheet(
+        CategoryPickerDialog(
             groups = groups,
             categories = categories,
             selectedCategoryKey = selectedCategoryKey,

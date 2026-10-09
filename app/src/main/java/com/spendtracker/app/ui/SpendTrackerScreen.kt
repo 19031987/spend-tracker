@@ -116,6 +116,8 @@ fun SpendTrackerScreen(container: AppContainer) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    var quickCategoryTx by remember { mutableStateOf<TransactionItem?>(null) }
+
     Scaffold(
         topBar = {
             HeaderBar(
@@ -225,6 +227,7 @@ fun SpendTrackerScreen(container: AppContainer) {
                         filterType = filterType,
                         onFilterChange = { filterType = it },
                         onTransactionClick = { editingTransaction = it },
+                        onCategoryPillClick = { quickCategoryTx = it },
                         contentPadding = PaddingValues(bottom = padding.calculateBottomPadding() + 16.dp),
                         modifier = Modifier.weight(1f)
                     )
@@ -274,7 +277,7 @@ fun SpendTrackerScreen(container: AppContainer) {
             groups = groups,
             categories = categories,
             onDismiss = { editingTransaction = null },
-            onSave = { id, type, accountId, destinationAccountId, amountMinor, categoryKey, merchant, note, excludeFromSpending ->
+            onSave = { id, type, accountId, destinationAccountId, amountMinor, categoryKey, merchant, note, excludeFromSpending, ruleMerchant ->
                 transactionsVm.updateTransaction(
                     id = id,
                     type = type,
@@ -284,7 +287,8 @@ fun SpendTrackerScreen(container: AppContainer) {
                     categoryKey = categoryKey,
                     merchant = merchant,
                     note = note,
-                    excludeFromSpending = excludeFromSpending
+                    excludeFromSpending = excludeFromSpending,
+                    ruleMerchant = ruleMerchant
                 ) {
                     editingTransaction = null
                 }
@@ -293,6 +297,25 @@ fun SpendTrackerScreen(container: AppContainer) {
                 transactionsVm.deleteTransaction(id) {
                     editingTransaction = null
                 }
+            }
+        )
+    }
+
+    quickCategoryTx?.let { tx ->
+        CategoryPickerDialog(
+            groups = groups,
+            categories = categories,
+            selectedCategoryKey = tx.categoryKey,
+            currentMerchant = tx.merchant?.takeIf { it.isNotEmpty() },
+            transactionType = tx.type,
+            onDismiss = { quickCategoryTx = null },
+            onCategorySelected = { cat ->
+                transactionsVm.quickSetCategory(tx.id, cat.key, tx.merchant?.takeIf { it.isNotEmpty() })
+                quickCategoryTx = null
+            },
+            onCreateCategory = { name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant ->
+                settingsVm.addCategory(name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant)
+                quickCategoryTx = null
             }
         )
     }
@@ -331,6 +354,7 @@ private fun TransactionsFeed(
     filterType: String,
     onFilterChange: (String) -> Unit,
     onTransactionClick: (TransactionItem) -> Unit,
+    onCategoryPillClick: (TransactionItem) -> Unit,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier
 ) {
@@ -558,8 +582,9 @@ private fun TransactionsFeed(
             }
         }
 
-        // Transaction list items
-        if (filtered.isEmpty()) {
+        // Transaction list items grouped by Day
+        val dayGroups = remember(filtered) { groupTransactionsByDay(filtered) }
+        if (dayGroups.isEmpty()) {
             item {
                 Box(
                     modifier = Modifier
@@ -575,24 +600,111 @@ private fun TransactionsFeed(
                 }
             }
         } else {
-            items(filtered, key = { it.id }) { tx ->
-                TransactionRowItem(
-                    tx = tx,
-                    onClick = { onTransactionClick(tx) }
-                )
+            dayGroups.forEach { group ->
+                item(key = "day_header_${group.dayKey}") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = group.dayTitle,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (group.daySpendTotal > 0) {
+                            Text(
+                                text = "Spent: ${formatMoney(group.daySpendTotal)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                items(group.items, key = { it.id }) { tx ->
+                    TransactionRowItem(
+                        tx = tx,
+                        onClick = { onTransactionClick(tx) },
+                        onCategoryClick = { onCategoryPillClick(tx) }
+                    )
+                }
             }
         }
+    }
+}
+
+private data class DayGroup(
+    val dayKey: String,
+    val dayTitle: String,
+    val daySpendTotal: Long,
+    val items: List<TransactionItem>
+)
+
+private fun groupTransactionsByDay(transactions: List<TransactionItem>): List<DayGroup> {
+    if (transactions.isEmpty()) return emptyList()
+
+    val calNow = java.util.Calendar.getInstance()
+    val todayYear = calNow.get(java.util.Calendar.YEAR)
+    val todayDayOfYear = calNow.get(java.util.Calendar.DAY_OF_YEAR)
+
+    calNow.add(java.util.Calendar.DAY_OF_YEAR, -1)
+    val yestYear = calNow.get(java.util.Calendar.YEAR)
+    val yestDayOfYear = calNow.get(java.util.Calendar.DAY_OF_YEAR)
+
+    val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    val headerDateFormat = SimpleDateFormat("d MMM", Locale.getDefault())
+    val fullDateFormat = SimpleDateFormat("EEEE, d MMM", Locale.getDefault())
+
+    val grouped = linkedMapOf<String, MutableList<TransactionItem>>()
+    for (tx in transactions) {
+        val key = if (tx.timestamp > 0) dateFormat.format(Date(tx.timestamp)) else "unknown"
+        grouped.getOrPut(key) { mutableListOf() }.add(tx)
+    }
+
+    return grouped.map { (key, items) ->
+        val firstTimestamp = items.firstOrNull()?.timestamp ?: 0L
+        val dayTitle = if (firstTimestamp > 0) {
+            val calTx = java.util.Calendar.getInstance().apply { timeInMillis = firstTimestamp }
+            val txYear = calTx.get(java.util.Calendar.YEAR)
+            val txDayOfYear = calTx.get(java.util.Calendar.DAY_OF_YEAR)
+            when {
+                txYear == todayYear && txDayOfYear == todayDayOfYear -> "Today · ${headerDateFormat.format(Date(firstTimestamp))}"
+                txYear == yestYear && txDayOfYear == yestDayOfYear -> "Yesterday · ${headerDateFormat.format(Date(firstTimestamp))}"
+                else -> fullDateFormat.format(Date(firstTimestamp))
+            }
+        } else {
+            "Other Transactions"
+        }
+
+        val daySpend = items
+            .filter { it.type == TransactionType.EXPENSE && !it.excludeFromSpending && it.categoryKey != "INTERNAL_TRANSFER" }
+            .sumOf { it.amountMinor }
+
+        DayGroup(
+            dayKey = key,
+            dayTitle = dayTitle,
+            daySpendTotal = daySpend,
+            items = items
+        )
     }
 }
 
 @Composable
 private fun TransactionRowItem(
     tx: TransactionItem,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onCategoryClick: () -> Unit
 ) {
     val isTransfer = tx.type == TransactionType.TRANSFER || tx.categoryKey == "INTERNAL_TRANSFER" || tx.excludeFromSpending
-    val dateStr = if (tx.timestamp > 0) {
-        SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()).format(Date(tx.timestamp))
+    val isUnknownVendor = !isTransfer && (tx.merchant.isNullOrBlank() || tx.merchant.equals("Chase Payment", ignoreCase = true) || tx.merchant.equals("HSBC Payment", ignoreCase = true))
+
+    val timeStr = if (tx.timestamp > 0) {
+        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(tx.timestamp))
     } else ""
 
     Card(
@@ -634,16 +746,43 @@ private fun TransactionRowItem(
             // Transaction Details
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(
-                    text = tx.merchant?.takeIf { it.isNotEmpty() }
-                        ?: if (isTransfer) "${tx.source} ➔ ${tx.destinationAccountName ?: "HSBC"}" else "Transaction",
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                if (isUnknownVendor) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Unknown Vendor",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onClick() }
+                        ) {
+                            Text(
+                                "✏️ Tap to set",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        text = tx.merchant?.takeIf { it.isNotEmpty() }
+                            ?: if (isTransfer) "${tx.source} ➔ ${tx.destinationAccountName ?: "HSBC"}" else "Transaction",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -674,25 +813,35 @@ private fun TransactionRowItem(
                         )
                     }
 
-                    // Category pill
-                    Box(
+                    // Tappable Category pill
+                    Surface(
+                        color = if (isTransfer) Color(0xFFEDE9FE) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(6.dp),
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(if (isTransfer) Color(0xFFEDE9FE) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
-                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { if (!isTransfer) onCategoryClick() else onClick() }
                     ) {
-                        Text(
-                            text = if (isTransfer) "Internal Transfer" else tx.categoryName,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = if (isTransfer) Color(0xFF6D28D9) else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Text(
+                                text = if (isTransfer) "🔄 Internal Transfer" else "${tx.categoryEmoji} ${tx.categoryName}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isTransfer) Color(0xFF6D28D9) else MaterialTheme.colorScheme.onSurface
+                            )
+                            if (!isTransfer) {
+                                Text("▼", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
                     }
 
-                    if (dateStr.isNotEmpty()) {
+                    if (timeStr.isNotEmpty()) {
                         Text(
-                            text = "· $dateStr",
-                            fontSize = 10.sp,
+                            text = "· $timeStr",
+                            fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -708,14 +857,14 @@ private fun TransactionRowItem(
                     text = when {
                         isTransfer -> formatMoney(tx.amountMinor)
                         tx.type == TransactionType.INCOME -> "+${formatMoney(tx.amountMinor)}"
-                        else -> "-${formatMoney(tx.amountMinor)}"
+                        else -> "−${formatMoney(tx.amountMinor)}"
                     },
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = when {
                         isTransfer -> Color(0xFF7C3AED)
                         tx.type == TransactionType.INCOME -> Color(0xFF059669)
-                        else -> MaterialTheme.colorScheme.onSurface
+                        else -> Color(0xFFDC2626)
                     }
                 )
 
@@ -724,7 +873,7 @@ private fun TransactionRowItem(
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
                             .background(Color(0xFFEDE9FE))
-                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                            .padding(horizontal = 5.dp, vertical = 1.dp)
                     ) {
                         Text(
                             "Nullified",

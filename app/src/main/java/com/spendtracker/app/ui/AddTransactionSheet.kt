@@ -81,6 +81,7 @@ fun AddTransactionSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     var type by rememberSaveable { mutableStateOf(TransactionType.EXPENSE) }
+    var selectedDayOffset by rememberSaveable { mutableStateOf(0) }
     var merchantText by rememberSaveable { mutableStateOf("") }
     var amountText by rememberSaveable { mutableStateOf("") }
     var sourceId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -113,9 +114,14 @@ fun AddTransactionSheet(
         ) {
             Text("Record Transaction", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
 
-            val types = TransactionType.values()
+            // 3-way Direction Selector: Money Out vs Money In vs Between Accounts
+            val types = listOf(
+                TransactionType.EXPENSE to "↓ Money Out",
+                TransactionType.INCOME to "↑ Money In",
+                TransactionType.TRANSFER to "🔄 Between Accounts"
+            )
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                types.forEachIndexed { index, t ->
+                types.forEachIndexed { index, (t, label) ->
                     SegmentedButton(
                         selected = type == t,
                         onClick = {
@@ -131,13 +137,45 @@ fun AddTransactionSheet(
                         shape = SegmentedButtonDefaults.itemShape(index, types.size)
                     ) {
                         Text(
-                            when (t) {
-                                TransactionType.EXPENSE -> "Expense"
-                                TransactionType.INCOME -> "Income"
-                                TransactionType.TRANSFER -> "🔄 Transfer"
-                            },
-                            maxLines = 1
+                            text = label,
+                            maxLines = 1,
+                            fontSize = 11.sp,
+                            fontWeight = if (type == t) FontWeight.Bold else FontWeight.Medium
                         )
+                    }
+                }
+            }
+
+            // Day / Date Selector (Today, Yesterday, 2 Days Ago)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Day", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val days = listOf(0 to "Today", 1 to "Yesterday", 2 to "2 Days Ago")
+                    days.forEach { (offset, label) ->
+                        val isSelected = selectedDayOffset == offset
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { selectedDayOffset = offset },
+                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -200,6 +238,21 @@ fun AddTransactionSheet(
                 value = amountText,
                 onValueChange = { amountText = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
                 label = { Text("Amount") },
+                prefix = {
+                    Text(
+                        text = when (type) {
+                            TransactionType.EXPENSE -> "−£ "
+                            TransactionType.INCOME -> "+£ "
+                            TransactionType.TRANSFER -> "£ "
+                        },
+                        fontWeight = FontWeight.Bold,
+                        color = when (type) {
+                            TransactionType.EXPENSE -> Color(0xFFDC2626)
+                            TransactionType.INCOME -> Color(0xFF059669)
+                            TransactionType.TRANSFER -> Color(0xFF7C3AED)
+                        }
+                    )
+                },
                 placeholder = { Text("0.00") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -358,7 +411,11 @@ fun AddTransactionSheet(
                 onClick = {
                     val amount = parseMinorUnits(amountText)
                     val source = effectiveSource
-                    val now = System.currentTimeMillis()
+                    val cal = java.util.Calendar.getInstance()
+                    if (selectedDayOffset > 0) {
+                        cal.add(java.util.Calendar.DAY_OF_YEAR, -selectedDayOffset)
+                    }
+                    val txTimestamp = cal.timeInMillis
                     when {
                         amount == null -> localError = "Enter a valid amount (max 2 decimals)"
                         source == null -> localError = "Select an account"
@@ -374,7 +431,7 @@ fun AddTransactionSheet(
                                         destinationAccountId = dest.id,
                                         amountMinor = amount,
                                         note = note,
-                                        timestamp = now,
+                                        timestamp = txTimestamp,
                                         sourceName = source.name,
                                         destinationName = dest.name
                                     )
@@ -392,7 +449,7 @@ fun AddTransactionSheet(
                                     categoryKey = selectedCategoryKey,
                                     merchant = merchantText.trim().takeIf { it.isNotEmpty() },
                                     note = note,
-                                    timestamp = now
+                                    timestamp = txTimestamp
                                 )
                             )
                         }
@@ -405,7 +462,7 @@ fun AddTransactionSheet(
     }
 
     if (showCategoryPicker) {
-        CategoryPickerSheet(
+        CategoryPickerDialog(
             groups = groups,
             categories = categories,
             selectedCategoryKey = selectedCategoryKey,
@@ -415,9 +472,11 @@ fun AddTransactionSheet(
             onCategorySelected = { cat ->
                 selectedCategoryKey = cat.key
                 autoAssignedCategory = null
+                showCategoryPicker = false
             },
             onCreateCategory = { name, groupId, newGroupName, emoji, colorHex, cType, ruleMerchant ->
                 onCreateCategory(name, groupId, newGroupName, emoji, colorHex, cType, ruleMerchant)
+                showCategoryPicker = false
             }
         )
     }

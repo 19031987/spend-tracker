@@ -204,6 +204,7 @@ class TransactionsViewModel(private val repository: SpendRepository) : ViewModel
         merchant: String?,
         note: String?,
         excludeFromSpending: Boolean,
+        ruleMerchant: String? = null,
         onSuccess: () -> Unit
     ) {
         viewModelScope.launch {
@@ -219,7 +220,38 @@ class TransactionsViewModel(private val repository: SpendRepository) : ViewModel
                     note = note,
                     excludeFromSpending = excludeFromSpending
                 )
+                if (!ruleMerchant.isNullOrBlank() && !categoryKey.isNullOrBlank()) {
+                    repository.addRule("EXACT", ruleMerchant.trim(), categoryKey)
+                }
                 onSuccess()
+            } catch (e: Exception) {
+                // handle error
+            }
+        }
+    }
+
+    fun quickSetCategory(
+        id: Long,
+        categoryKey: String,
+        ruleMerchant: String? = null
+    ) {
+        viewModelScope.launch {
+            try {
+                val current = transactions.value.firstOrNull { it.id == id } ?: return@launch
+                repository.updateTransaction(
+                    id = id,
+                    type = current.type,
+                    accountId = current.accountId,
+                    destinationAccountId = current.destinationAccountId,
+                    amountMinor = current.amountMinor,
+                    categoryKey = categoryKey,
+                    merchant = current.merchant,
+                    note = current.note,
+                    excludeFromSpending = current.excludeFromSpending || categoryKey == "INTERNAL_TRANSFER"
+                )
+                if (!ruleMerchant.isNullOrBlank()) {
+                    repository.addRule("EXACT", ruleMerchant.trim(), categoryKey)
+                }
             } catch (e: Exception) {
                 // handle error
             }

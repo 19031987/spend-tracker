@@ -152,6 +152,7 @@ class SpendNotificationListenerService : NotificationListenerService() {
 
                         val txType = if (parsed.type.equals("IN", ignoreCase = true)) TransactionType.INCOME else TransactionType.EXPENSE
                         val signedAmount = if (txType == TransactionType.EXPENSE) -minorAmount else minorAmount
+                        val merchantName = if (parsed.merchantIsFallback || parsed.merchant.isBlank()) null else parsed.merchant
 
                         val transaction = TransactionEntity(
                             accountId = sourceAccount.id,
@@ -161,7 +162,7 @@ class SpendNotificationListenerService : NotificationListenerService() {
                             timestamp = if (sbn.postTime > 0) sbn.postTime else System.currentTimeMillis(),
                             type = txType,
                             excludeFromSpending = false,
-                            merchant = parsed.merchant,
+                            merchant = merchantName,
                             source = sourceAccount.name
                         )
 

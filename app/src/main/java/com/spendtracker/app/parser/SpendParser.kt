@@ -153,6 +153,8 @@ object SpendParser {
     private val IN_SENT_YOU = Regex("$NAME\\s+(?:has\\s+)?sent you\\b", IC)
     private val IN_FROM = Regex("\\bfrom\\s+$NAME$TERM", IC)
     private val OUT_DD = Regex("\\b(?:direct debit|standing order|payment|transfer)\\s+to\\s+$NAME(?=\\s+(?:of|for)\\b)", IC)
+    private val OUT_PAID_VENDOR = Regex("\\bpaid\\s+$NAME(?=\\s+(?:$CUR_ALT)?\\s*$NUM)", IC)
+    private val OUT_VENDOR_AMOUNT = Regex("^(?:(?:Chase|HSBC|Monzo|Revolut|Barclays|Amex)\\s+)?$NAME(?=\\s+(?:$CUR_ALT)\\s*$NUM)", IC)
     private val OUT_AT_TO = Regex("\\b(?:at|to)\\s+$NAME$TERM", IC)
 
     private val GENERIC_TITLE = Regex(
@@ -236,17 +238,19 @@ object SpendParser {
 
         val source = detectSource(pkg, content)
         val (merchantRaw, isFallback) = extractMerchant(type, scrubbed, money.end, title, source)
-        val merchant = if (isFallback) merchantRaw else cleanMerchantName(merchantRaw, source)
+        val cleaned = if (isFallback || merchantRaw.isBlank()) "" else cleanMerchantName(merchantRaw, source)
+        val finalMerchant = cleaned.ifBlank { "" }
+        val finalFallback = isFallback || finalMerchant.isBlank()
 
         return ParsedExpense(
             type = type,
             amount = money.amount,
             currency = money.currency,
-            merchant = merchant,
-            category = categorize("$merchant $content", type),
+            merchant = finalMerchant,
+            category = categorize("$finalMerchant $content", type),
             source = source,
             rawText = content,
-            merchantIsFallback = isFallback
+            merchantIsFallback = finalFallback
         )
     }
 
@@ -289,7 +293,7 @@ object SpendParser {
         }
 
         val words = clean.split(" ").filter { it.isNotEmpty() }
-        if (words.isEmpty()) return if (source.isNotEmpty()) "$source Account" else "Retailer"
+        if (words.isEmpty()) return ""
 
         return words.joinToString(" ") { word ->
             word.lowercase(Locale.ROOT).replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
@@ -343,12 +347,29 @@ object SpendParser {
         else -> raw
     }
 
+    private val ACTION_WORDS = setOf(
+        "you", "your", "card", "cards", "account", "accounts", "make", "payment", "payments",
+        "direct debit", "standing order", "transfer", "transfers", "alert", "alerts", "notification",
+        "chase", "hsbc", "monzo", "revolut", "barclays", "paypal", "amex", "sent", "spend", "spent",
+        "charge", "charges", "transaction", "transactions", "ending", "approved"
+    )
+
     private fun isUsableName(candidate: String?): Boolean {
         val c = candidate?.trim() ?: return false
         if (c.length < 2) return false
-        val lower = c.lowercase(Locale.ROOT)
-        if (lower == "you" || lower == "your" || lower.startsWith("your ") || lower.startsWith("you ")) return false
-        if (Regex("^[0-9:./ -]+$").matches(c)) return false
+        var lower = c.lowercase(Locale.ROOT)
+        for (s in KNOWN_SOURCES) {
+            val sLow = s.lowercase(Locale.ROOT)
+            if (lower.startsWith("$sLow ") || lower.startsWith("$sLow:")) {
+                lower = lower.removePrefix(sLow).trim(' ', ':', '-', '\t')
+            }
+        }
+        if (lower.length < 2) return false
+        if (lower in ACTION_WORDS) return false
+        val words = Regex("[a-z0-9]+").findAll(lower).map { it.value }.toSet()
+        if (words.intersect(ACTION_WORDS).isNotEmpty()) return false
+        if (lower.startsWith("your ") || lower.startsWith("you ") || lower.startsWith("card ending") || lower.startsWith("make ")) return false
+        if (Regex("^[0-9:./ -]+$").matches(lower)) return false
         return true
     }
 
@@ -357,12 +378,14 @@ object SpendParser {
             IN_SENT_YOU.find(text)?.groupValues?.get(1)?.takeIf { isUsableName(it) }?.let { return it.trim() to false }
             IN_FROM.findAll(text).map { it.groupValues[1] }.firstOrNull { isUsableName(it) }?.let { return it.trim() to false }
         } else {
-            OUT_DD.find(text)?.groupValues?.get(1)?.takeIf { isUsableName(it) }?.let { return it.trim() to false }
             // Prefer a merchant that appears AFTER the amount ("£4.20 at Costa")...
             val tail = if (amountEnd in 0..text.length) text.substring(amountEnd) else ""
             OUT_AT_TO.findAll(tail).map { it.groupValues[1] }.firstOrNull { isUsableName(it) }?.let { return it.trim() to false }
+            OUT_DD.find(text)?.groupValues?.get(1)?.takeIf { isUsableName(it) }?.let { return it.trim() to false }
             // ...then anywhere ("Payment to Netflix: £8.99").
             OUT_AT_TO.findAll(text).map { it.groupValues[1] }.firstOrNull { isUsableName(it) }?.let { return it.trim() to false }
+            OUT_PAID_VENDOR.find(text)?.groupValues?.get(1)?.takeIf { isUsableName(it) }?.let { return it.trim() to false }
+            OUT_VENDOR_AMOUNT.find(text)?.groupValues?.get(1)?.takeIf { isUsableName(it) }?.let { return it.trim() to false }
         }
 
         // Wallet apps (Google Wallet etc.) put the merchant in the title: "Tesco" / "£4.00 with Visa ••1234".
@@ -373,6 +396,6 @@ object SpendParser {
             return t to false
         }
 
-        return (if (type == TYPE_IN) "$source Deposit" else "$source Payment") to true
+        return "" to true
     }
 }

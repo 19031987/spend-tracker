@@ -58,6 +58,10 @@ import com.spendtracker.app.data.CategoryEntity
 import com.spendtracker.app.data.CategoryGroupEntity
 import com.spendtracker.app.data.TransactionType
 
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.layout.fillMaxSize
+
 val DEFAULT_EMOJIS = listOf("🛒", "☕", "🍽️", "🛍️", "🎮", "🍿", "🏠", "⚡", "🚇", "⛽", "🚗", "💰", "🏋️", "📚", "💊", "✈️", "🏷️", "🔧")
 val DEFAULT_PASTEL_COLORS = listOf("#FED7AA", "#FBCFE8", "#DBEAFE", "#D1FAE5", "#DDD6FE", "#FDE68A", "#E2E8F0", "#CFFAFE", "#FCE7F3")
 
@@ -70,7 +74,54 @@ fun parseColorHex(hex: String): Color {
     }.getOrDefault(Color(0xFFFED7AA))
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun CategoryPickerDialog(
+    groups: List<CategoryGroupEntity>,
+    categories: List<CategoryEntity>,
+    selectedCategoryKey: String?,
+    currentMerchant: String?,
+    transactionType: TransactionType,
+    onDismiss: () -> Unit,
+    onCategorySelected: (CategoryEntity) -> Unit,
+    onCreateCategory: (
+        name: String,
+        groupId: Long?,
+        newGroupName: String?,
+        emoji: String,
+        colorHex: String,
+        type: TransactionType,
+        ruleMerchant: String?
+    ) -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .fillMaxHeight(0.86f),
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            shadowElevation = 12.dp
+        ) {
+            CategoryPickerContent(
+                groups = groups,
+                categories = categories,
+                selectedCategoryKey = selectedCategoryKey,
+                currentMerchant = currentMerchant,
+                transactionType = transactionType,
+                onDismiss = onDismiss,
+                onCategorySelected = onCategorySelected,
+                onCreateCategory = onCreateCategory,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CategoryPickerSheet(
     groups: List<CategoryGroupEntity>,
@@ -91,6 +142,46 @@ fun CategoryPickerSheet(
     ) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        CategoryPickerContent(
+            groups = groups,
+            categories = categories,
+            selectedCategoryKey = selectedCategoryKey,
+            currentMerchant = currentMerchant,
+            transactionType = transactionType,
+            onDismiss = onDismiss,
+            onCategorySelected = onCategorySelected,
+            onCreateCategory = onCreateCategory,
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.88f)
+                .imePadding()
+                .navigationBarsPadding()
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun CategoryPickerContent(
+    groups: List<CategoryGroupEntity>,
+    categories: List<CategoryEntity>,
+    selectedCategoryKey: String?,
+    currentMerchant: String?,
+    transactionType: TransactionType,
+    onDismiss: () -> Unit,
+    onCategorySelected: (CategoryEntity) -> Unit,
+    onCreateCategory: (
+        name: String,
+        groupId: Long?,
+        newGroupName: String?,
+        emoji: String,
+        colorHex: String,
+        type: TransactionType,
+        ruleMerchant: String?
+    ) -> Unit,
+    modifier: Modifier = Modifier
+) {
     var isCreateMode by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
 
@@ -103,14 +194,7 @@ fun CategoryPickerSheet(
     var selectedColorHex by rememberSaveable { mutableStateOf("#FED7AA") }
     var autoRuleChecked by rememberSaveable { mutableStateOf(true) }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.88f)
-                .imePadding()
-                .navigationBarsPadding()
-        ) {
+    Column(modifier = modifier) {
             // Header
             Row(
                 modifier = Modifier
@@ -433,4 +517,4 @@ fun CategoryPickerSheet(
             }
         }
     }
-}
+
