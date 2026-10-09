@@ -1,6 +1,6 @@
-package com.spendtracker.app.ui
-
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
+package com.spendtracker.app.ui
 
 import android.content.Intent
 import android.provider.Settings
