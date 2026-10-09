@@ -10,6 +10,11 @@ import java.util.Locale
  *  - [type] == [SpendParser.TYPE_OUT] -> outflow (purchase, bill, transfer out)    -> shown as "−£x"
  * The sign is derived from [type] at display/aggregation time, never from the stored amount.
  */
+enum class Direction {
+    INCOMING,
+    OUTGOING
+}
+
 data class ParsedExpense(
     val type: String, // "IN" for Money In (green), "OUT" for Money Out
     val amount: Double,
@@ -19,7 +24,8 @@ data class ParsedExpense(
     val source: String,
     val rawText: String,
     /** True when no merchant could be extracted and a generic "<Source> Payment" label was used. */
-    val merchantIsFallback: Boolean = false
+    val merchantIsFallback: Boolean = false,
+    val direction: Direction = if (type == SpendParser.TYPE_IN) Direction.INCOMING else Direction.OUTGOING
 )
 
 object SpendParser {
@@ -125,16 +131,16 @@ object SpendParser {
     // Precedence: explicit +/- sign > strong IN > strong OUT > weak IN > weak OUT.
     // ---------------------------------------------------------------------------------------
     private val STRONG_IN = Regex(
-        "\\b(?:received from|you(?:'ve|’ve| have)? received|sent you|refund(?:ed)?|salary|wages|payroll|" +
+        "\\b(?:received from|you(?:'ve|’ve| have)? received|received|sent you|paid you|refund(?:ed)?|cashback|salary|wages|payroll|" +
             "paid in|paid into|credited|deposit(?:ed)?|top(?:ped)?[ -]?up|added to your|has been added|" +
             "have been added|you(?:'ve|’ve| have)? added|added money|money in|reimburs(?:ed|ement)|" +
             "transfer from|reversal|reversed|incoming payment|incoming transfer)\\b",
         IC
     )
     private val STRONG_OUT = Regex(
-        "\\b(?:you(?:'ve|’ve| have)? (?:spent|paid|sent|bought|made a payment)|spent|paid to|payment to|" +
+        "\\b(?:you(?:'ve|’ve| have)? (?:spent|paid|sent|bought|made a payment)|spent|paid to|payment to|paid|" +
             "direct debit|standing order|purchase[ds]?|charged|debited|withdrawal|withdrawn|withdrew|" +
-            "card payment|sent to|transfer to)\\b",
+            "card payment|sent to|sent|transfer to)\\b",
         IC
     )
     private val WEAK_IN = Regex("\\b(?:received|incoming|has arrived|arrived|cashback|interest|credit)\\b(?!\\s*card)", IC)
@@ -151,6 +157,7 @@ object SpendParser {
         "(?=\\s+(?:on|via|using|with|ref|reference|card|was|has|is|have|and|for)\\b|\\s+at\\s+[0-9]|\\s+-\\s|[.,;:!?\\n•*()|]|\\s*$)"
 
     private val IN_SENT_YOU = Regex("$NAME\\s+(?:has\\s+)?sent you\\b", IC)
+    private val IN_PAID_YOU = Regex("$NAME\\s+(?:has\\s+)?paid you\\b", IC)
     private val IN_FROM = Regex("\\bfrom\\s+$NAME$TERM", IC)
     private val OUT_DD = Regex("\\b(?:direct debit|standing order|payment|transfer)\\s+to\\s+$NAME(?=\\s+(?:of|for)\\b)", IC)
     private val OUT_PAID_VENDOR = Regex("\\bpaid\\s+$NAME(?=\\s+(?:$CUR_ALT)?\\s*$NUM)", IC)
@@ -376,6 +383,7 @@ object SpendParser {
     private fun extractMerchant(type: String, text: String, amountEnd: Int, title: String?, source: String): Pair<String, Boolean> {
         if (type == TYPE_IN) {
             IN_SENT_YOU.find(text)?.groupValues?.get(1)?.takeIf { isUsableName(it) }?.let { return it.trim() to false }
+            IN_PAID_YOU.find(text)?.groupValues?.get(1)?.takeIf { isUsableName(it) }?.let { return it.trim() to false }
             IN_FROM.findAll(text).map { it.groupValues[1] }.firstOrNull { isUsableName(it) }?.let { return it.trim() to false }
         } else {
             // Prefer a merchant that appears AFTER the amount ("£4.20 at Costa")...

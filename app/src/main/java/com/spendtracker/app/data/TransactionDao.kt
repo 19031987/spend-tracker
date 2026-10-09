@@ -25,6 +25,28 @@ abstract class TransactionDao {
     @Query("SELECT * FROM transactions WHERE id = :id")
     abstract suspend fun getById(id: Long): TransactionEntity?
 
+    /**
+     * Time-window fingerprinting deduplication:
+     * isDuplicate = exists where |t_new - t_existing| <= delta_t AND amount matches AND source bank matches.
+     */
+    @Query(
+        """
+        SELECT * FROM transactions
+        WHERE ABS(amount) = :absAmountMinor
+          AND (LOWER(source) = LOWER(:sourceName) OR accountId = :accountId)
+          AND ABS(timestamp - :timestamp) <= :windowMillis
+        ORDER BY ABS(timestamp - :timestamp) ASC
+        LIMIT 1
+        """
+    )
+    abstract suspend fun findDuplicate(
+        absAmountMinor: Long,
+        sourceName: String,
+        accountId: Long,
+        timestamp: Long,
+        windowMillis: Long = 60_000L
+    ): TransactionEntity?
+
     @Query("UPDATE transactions SET pairedTransactionId = :pairedId WHERE id = :id")
     abstract suspend fun setPairedId(id: Long, pairedId: Long)
 

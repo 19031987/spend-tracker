@@ -21,5 +21,6 @@ class AppContainer(context: Context) {
         initializer { AddTransactionViewModel(repository) }
         initializer { SettingsViewModel(repository, preferences) }
         initializer { TransactionsViewModel(repository) }
+        initializer { com.spendtracker.app.ui.ComparisonViewModel(repository) }
     }
 }

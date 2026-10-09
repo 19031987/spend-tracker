@@ -55,15 +55,14 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.4.0
-        name: "SpendTracker Release v1.4.0 (Vendor Identification, Day Grouping, Category Picker Dialog & Transfer Clarifications)"
+        tag_name: v1.5.0
+        name: "SpendTracker Release v1.5.0 (Deduplication, Directional Parsing, Baseline Guard, Dynamic Banks)"
         body: |
-          ### SpendTracker v1.4.0 - Key Fixes & Enhancements
-          - 🏢 **Vendor Identification (Issue 1)**: Enhanced parser with `paid <Vendor>` and leading retailer patterns; eliminates generic "Chase Payment" fallbacks. Transactions with missing vendors display a prominent `Unknown Vendor` badge with `✏️ Tap to set`.
-          - 📅 **Day Grouping & Totals (Issue 2)**: Transactions are clearly grouped by day (e.g. `Today · 9 Oct`, `Yesterday · 8 Oct`, `Monday, 6 Oct`) with daily spend totals. Prominent amount display (`−£14.80`, `+£2,850.00`, `£250.00`) and transaction timestamps (`14:20`).
-          - 🏷️ **Reliable Category Selection (Issue 3)**: Fixed category selection by replacing nested bottom sheets with `CategoryPickerDialog` in Compose Dialog. Tapping the category pill directly on any transaction allows instant re-categorization.
-          - 🔄 **Option A Transfer Rules (Issue 4)**: Internal transfers between user's own accounts (Chase ↔ HSBC) are strictly nullified and excluded from spend calculations. Payments/transfers to third parties (landlord, friends) count as spending.
-          - ↕️ **3-Way Direction & Day Picker in Add Sheet (Issue 5)**: Clear 3-way toggle (`↓ Money Out`, `↑ Money In`, `🔄 Between Accounts`), color-coded amounts (`−£`, `+£`), and day selectors (`Today`, `Yesterday`, `2 Days Ago`).
+          ### SpendTracker v1.5.0 - Key Fixes & Enhancements
+          - ⏱️ **Time-Window Fingerprinting (Deduplication)**: Deduplication window (±60 seconds) matching amount and bank source. Subsequent rapid notifications enrich the existing record with vendor/type details rather than duplicating rows.
+          - ↕️ **Strict Directional Parsing**: Money In ("received", "refund", "cashback", "paid you", "deposit") is recorded under income; Money Out ("paid", "spent", "purchase", "card payment") is recorded under spend; internal transfers between own accounts are safely nullified.
+          - 📊 **Baseline Guard for First Load Comparisons**: Replaces misleading percentage deltas (+100% on fresh installs) with an onboarding state ("Building your baseline: comparisons will appear after your first week/month").
+          - 🏦 **Dynamic Bank Discovery**: Automatically extracts bank app identifiers and dynamically registers new banks in the accounts list, making them immediately available in filters and editors.
         files: dist/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

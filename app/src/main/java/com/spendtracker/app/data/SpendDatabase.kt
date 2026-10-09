@@ -93,46 +93,101 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
     }
 
     /**
-     * Checks if a duplicate transaction was already recorded in the last [windowMillis] (default 3 mins).
-     * Prevents Android notification service re-post loops from adding duplicate values.
+     * Time-Window Fingerprinting:
+     * isDuplicate = exists where |t_new - t_existing| < delta_t (e.g. 30-60s) AND amount matches AND source bank matches.
      */
-    fun isDuplicate(expense: ParsedExpense, timestamp: Long = System.currentTimeMillis(), windowMillis: Long = 180_000L): Boolean {
+    fun findDuplicate(
+        amount: Double,
+        source: String,
+        timestamp: Long = System.currentTimeMillis(),
+        windowMillis: Long = 60_000L
+    ): TransactionRecord? {
         val db = readableDatabase
         val minTs = timestamp - windowMillis
         val maxTs = timestamp + windowMillis
 
         val cursor = db.rawQuery(
             """
-            SELECT 1 FROM $TABLE_NAME 
-            WHERE ABS($COL_AMOUNT - ?) < 0.001 
-              AND $COL_TYPE = ? 
-              AND $COL_SOURCE = ? 
-              AND ($COL_MERCHANT = ? OR $COL_RAW_TEXT = ?)
+            SELECT $COL_ID, $COL_TYPE, $COL_AMOUNT, $COL_CURRENCY, $COL_MERCHANT, $COL_CATEGORY, $COL_SOURCE, $COL_TIMESTAMP, $COL_RAW_TEXT
+            FROM $TABLE_NAME 
+            WHERE ABS($COL_AMOUNT - ?) < 0.005 
+              AND LOWER($COL_SOURCE) = LOWER(?) 
               AND $COL_TIMESTAMP BETWEEN ? AND ? 
+            ORDER BY ABS($COL_TIMESTAMP - ?) ASC
             LIMIT 1
             """.trimIndent(),
             arrayOf(
-                expense.amount.toString(),
-                expense.type,
-                expense.source,
-                expense.merchant,
-                expense.rawText,
+                amount.toString(),
+                source,
                 minTs.toString(),
-                maxTs.toString()
+                maxTs.toString(),
+                timestamp.toString()
             )
         )
-        val exists = cursor.moveToFirst()
-        cursor.close()
-        return exists
+        return if (cursor.moveToFirst()) {
+            val record = TransactionRecord(
+                id = cursor.getLong(0),
+                type = cursor.getString(1),
+                amount = cursor.getDouble(2),
+                currency = cursor.getString(3),
+                merchant = cursor.getString(4),
+                category = cursor.getString(5),
+                source = cursor.getString(6),
+                timestamp = cursor.getLong(7),
+                formattedTime = "",
+                rawText = cursor.getString(8)
+            )
+            cursor.close()
+            record
+        } else {
+            cursor.close()
+            null
+        }
+    }
+
+    fun isDuplicate(expense: ParsedExpense, timestamp: Long = System.currentTimeMillis(), windowMillis: Long = 60_000L): Boolean {
+        return findDuplicate(expense.amount, expense.source, timestamp, windowMillis) != null
     }
 
     /**
-     * Inserts a parsed transaction, safely rejecting duplicate notification events.
-     * Returns the new row ID, or -1 if skipped as duplicate.
+     * Inserts a parsed transaction, safely updating/enriching duplicate notification events
+     * arriving within the deduplication window (30-60s) rather than creating duplicate rows.
+     * Returns the existing or new row ID.
      */
-    fun insertExpense(expense: ParsedExpense, timestamp: Long = System.currentTimeMillis()): Long {
-        if (isDuplicate(expense, timestamp)) {
-            return -1L
+    fun insertExpense(expense: ParsedExpense, timestamp: Long = System.currentTimeMillis(), windowMillis: Long = 60_000L): Long {
+        val existing = findDuplicate(expense.amount, expense.source, timestamp, windowMillis)
+        if (existing != null) {
+            // Update the existing record with vendor/reference enrichment rather than creating a duplicate row
+            val db = writableDatabase
+            val values = ContentValues()
+            var hasUpdates = false
+
+            if ((existing.merchant.isBlank() || 
+                 existing.merchant.equals(existing.source, ignoreCase = true) ||
+                 existing.merchant.equals("Card Payment", ignoreCase = true) ||
+                 existing.merchant.equals("Payment", ignoreCase = true)) && 
+                expense.merchant.isNotBlank()) {
+                values.put(COL_MERCHANT, expense.merchant)
+                hasUpdates = true
+            }
+            if ((existing.category == "General Spend" || existing.category == "Other" || existing.category == "OTHER_EXPENSE") && 
+                expense.category != "General Spend") {
+                values.put(COL_CATEGORY, expense.category)
+                hasUpdates = true
+            }
+            if (expense.rawText.isNotBlank() && (existing.rawText.isNullOrBlank() || expense.rawText.length > (existing.rawText?.length ?: 0))) {
+                values.put(COL_RAW_TEXT, expense.rawText)
+                hasUpdates = true
+            }
+            if (existing.type == "OUT" && expense.type == "IN") {
+                values.put(COL_TYPE, expense.type)
+                hasUpdates = true
+            }
+
+            if (hasUpdates) {
+                db.update(TABLE_NAME, values, "$COL_ID = ?", arrayOf(existing.id.toString()))
+            }
+            return existing.id
         }
 
         val db = writableDatabase

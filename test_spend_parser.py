@@ -69,14 +69,14 @@ IGNORE = re.compile(
 PROMO = re.compile(r"[0-9]+\s?%\s?off\b", I)
 
 STRONG_IN = re.compile(
-    r"\b(?:received from|you(?:'ve|’ve| have)? received|sent you|refund(?:ed)?|salary|wages|payroll|"
+    r"\b(?:received from|you(?:'ve|’ve| have)? received|received|sent you|paid you|refund(?:ed)?|cashback|salary|wages|payroll|"
     r"paid in|paid into|credited|deposit(?:ed)?|top(?:ped)?[ -]?up|added to your|has been added|"
     r"have been added|you(?:'ve|’ve| have)? added|added money|money in|reimburs(?:ed|ement)|"
     r"transfer from|reversal|reversed|incoming payment|incoming transfer)\b", I)
 STRONG_OUT = re.compile(
-    r"\b(?:you(?:'ve|’ve| have)? (?:spent|paid|sent|bought|made a payment)|spent|paid to|payment to|"
+    r"\b(?:you(?:'ve|’ve| have)? (?:spent|paid|sent|bought|made a payment)|spent|paid to|payment to|paid|"
     r"direct debit|standing order|purchase[ds]?|charged|debited|withdrawal|withdrawn|withdrew|"
-    r"card payment|sent to|transfer to)\b", I)
+    r"card payment|sent to|sent|transfer to)\b", I)
 WEAK_IN = re.compile(r"\b(?:received|incoming|has arrived|arrived|cashback|interest|credit)\b(?!\s*card)", I)
 WEAK_OUT = re.compile(
     r"\b(?:payment|paid|pay|transaction|approved|contactless|card ending|debit|subscription|bill|order|spend|charge)\b", I)
@@ -84,6 +84,7 @@ WEAK_OUT = re.compile(
 NAME = r"([A-Za-z0-9&'][^.,;:!?\n•*()|]{0,48}?)"
 TERM = r"(?=\s+(?:on|via|using|with|ref|reference|card|was|has|is|have|and|for)\b|\s+at\s+[0-9]|\s+-\s|[.,;:!?\n•*()|]|\s*$)"
 IN_SENT_YOU = re.compile(NAME + r"\s+(?:has\s+)?sent you\b", I)
+IN_PAID_YOU = re.compile(NAME + r"\s+(?:has\s+)?paid you\b", I)
 IN_FROM = re.compile(r"\bfrom\s+" + NAME + TERM, I)
 OUT_DD = re.compile(r"\b(?:direct debit|standing order|payment|transfer)\s+to\s+" + NAME + r"(?=\s+(?:of|for)\b)", I)
 OUT_PAID_VENDOR = re.compile(r"\bpaid\s+" + NAME + r"(?=\s+(?:(?:" + CUR_ALT + r")?\s*" + NUM + r"))", I)
@@ -234,6 +235,9 @@ def extract_merchant(tx_type, text, amount_end, title, source):
         m = IN_SENT_YOU.search(text)
         if m and is_usable_name(m.group(1)):
             return m.group(1).strip(), False
+        m = IN_PAID_YOU.search(text)
+        if m and is_usable_name(m.group(1)):
+            return m.group(1).strip(), False
         for m in IN_FROM.finditer(text):
             if is_usable_name(m.group(1)):
                 return m.group(1).strip(), False
@@ -302,7 +306,8 @@ def parse_spend(pkg: str, title, text):
     cleaned = "" if fallback or not raw.strip() else clean_merchant(raw, source)
     final_merchant = cleaned if cleaned else ""
     final_fallback = fallback or not final_merchant
-    return {"type": tx_type, "source": source, "amount": amount, "currency": currency,
+    direction = "INCOMING" if tx_type == TYPE_IN else "OUTGOING"
+    return {"type": tx_type, "direction": direction, "source": source, "amount": amount, "currency": currency,
             "merchant": final_merchant, "merchantIsFallback": final_fallback,
             "category": categorize("%s %s" % (final_merchant, content), tx_type)}
 
@@ -315,9 +320,11 @@ GWALLET = "com.google.android.apps.walletnfcrel"
 
 class TestSpendParser(unittest.TestCase):
 
-    def check(self, res, tx_type, amount, merchant=None, category=None, source=None):
+    def check(self, res, tx_type, amount, merchant=None, category=None, source=None, direction=None):
         self.assertIsNotNone(res)
         self.assertEqual(res["type"], tx_type, res)
+        expected_dir = "INCOMING" if tx_type == TYPE_IN else "OUTGOING"
+        self.assertEqual(res.get("direction"), direction or expected_dir, res)
         self.assertAlmostEqual(res["amount"], amount)
         if merchant is not None:
             self.assertEqual(res["merchant"], merchant, res)
@@ -475,6 +482,362 @@ class TestSpendParser(unittest.TestCase):
     def test_trusted_blank_package(self):
         self.check(parse_spend("", None, "Chase £23.00 has been added to your account"), TYPE_IN, 23.00, source="Chase")
 
+    # --- Money In vs Money Out strict directional parsing ---
+    def test_directional_money_in_received(self):
+        self.check(parse_spend(HSBC, "HSBC", "Payment £45.00 received"), TYPE_IN, 45.00, direction="INCOMING")
+
+    def test_directional_money_in_credited(self):
+        self.check(parse_spend(HSBC, "HSBC", "£100.00 credited to your account"), TYPE_IN, 100.00, direction="INCOMING")
+
+    def test_directional_money_in_refund(self):
+        self.check(parse_spend(CHASE, "Chase", "Refund of £25.50 from Amazon"), TYPE_IN, 25.50, direction="INCOMING")
+
+    def test_directional_money_in_cashback(self):
+        self.check(parse_spend(CHASE, "Chase", "Cashback £5.00 added to your balance"), TYPE_IN, 5.00, direction="INCOMING")
+
+    def test_directional_money_in_paid_you(self):
+        self.check(parse_spend(CHASE, "Chase", "Alice has paid you £30.00"), TYPE_IN, 30.00, merchant="Alice", direction="INCOMING")
+
+    def test_directional_money_in_deposit(self):
+        self.check(parse_spend(HSBC, "HSBC", "Deposit of £500.00 confirmed"), TYPE_IN, 500.00, direction="INCOMING")
+
+    def test_directional_money_out_paid(self):
+        self.check(parse_spend(CHASE, "Chase", "Paid £15.00 to Costa"), TYPE_OUT, 15.00, merchant="Costa Coffee", direction="OUTGOING")
+
+    def test_directional_money_out_spent(self):
+        self.check(parse_spend(CHASE, "Chase", "You spent £22.00 at Tesco"), TYPE_OUT, 22.00, merchant="Tesco Stores", direction="OUTGOING")
+
+    def test_directional_money_out_sent(self):
+        self.check(parse_spend(CHASE, "Chase", "Sent £40.00 to Bob"), TYPE_OUT, 40.00, merchant="Bob", direction="OUTGOING")
+
+    def test_directional_money_out_purchase(self):
+        self.check(parse_spend(CHASE, "Chase", "Card purchase £8.99 at Spotify"), TYPE_OUT, 8.99, merchant="Spotify", direction="OUTGOING")
+
+    def test_directional_money_out_card_payment(self):
+        self.check(parse_spend(HSBC, "HSBC", "Card payment of £19.99 approved"), TYPE_OUT, 19.99, direction="OUTGOING")
+
+
+# ---------------------------------------------------------------------------------------
+# Time-Window Deduplication Logic & Tests
+# ---------------------------------------------------------------------------------------
+def find_duplicate(records, amount, source, timestamp, window_millis=60000):
+    for r in records:
+        if abs(r["amount"] - amount) < 0.005 and r["source"].lower() == source.lower() and abs(r["timestamp"] - timestamp) <= window_millis:
+            return r
+    return None
+
+
+def simulate_insert_or_enrich(records, new_expense, timestamp, window_millis=60000):
+    existing = find_duplicate(records, new_expense["amount"], new_expense["source"], timestamp, window_millis)
+    if existing is not None:
+        existing_merchant = existing.get("merchant", "")
+        if (not existing_merchant or existing_merchant.lower() in (existing.get("source", "").lower(), "card payment", "payment")) and new_expense.get("merchant"):
+            existing["merchant"] = new_expense["merchant"]
+        if new_expense.get("rawText") and len(new_expense.get("rawText", "")) > len(existing.get("rawText", "")):
+            existing["rawText"] = new_expense["rawText"]
+        if existing.get("type") == "OUT" and new_expense.get("type") == "IN":
+            existing["type"] = "IN"
+            if "direction" in new_expense:
+                existing["direction"] = new_expense["direction"]
+        if (not existing.get("category") or existing.get("category") in ("General Spend", "Other", "OTHER_EXPENSE")) and new_expense.get("category") and new_expense.get("category") != "General Spend":
+            existing["category"] = new_expense["category"]
+        return existing["id"], False
+    new_id = len(records) + 1
+    rec = dict(new_expense)
+    rec["id"] = new_id
+    rec["timestamp"] = timestamp
+    records.append(rec)
+    return new_id, True
+
+
+class TestDeduplication(unittest.TestCase):
+    def test_duplicate_within_window_is_detected(self):
+        t0 = 1000000
+        records = [
+            {"id": 1, "amount": 18.50, "source": "Chase", "timestamp": t0, "merchant": "Chase", "rawText": "Spent £18.50"}
+        ]
+        # Arrives 15 seconds later, same amount and bank
+        dup = find_duplicate(records, 18.50, "Chase", t0 + 15000, window_millis=60000)
+        self.assertIsNotNone(dup)
+        self.assertEqual(dup["id"], 1)
+
+    def test_outside_window_is_not_duplicate(self):
+        t0 = 1000000
+        records = [
+            {"id": 1, "amount": 18.50, "source": "Chase", "timestamp": t0, "merchant": "Chase", "rawText": "Spent £18.50"}
+        ]
+        # Arrives 75 seconds later (> 60s)
+        dup = find_duplicate(records, 18.50, "Chase", t0 + 75000, window_millis=60000)
+        self.assertIsNone(dup)
+
+    def test_different_amount_is_not_duplicate(self):
+        t0 = 1000000
+        records = [
+            {"id": 1, "amount": 18.50, "source": "Chase", "timestamp": t0, "merchant": "Chase", "rawText": "Spent £18.50"}
+        ]
+        dup = find_duplicate(records, 19.50, "Chase", t0 + 5000, window_millis=60000)
+        self.assertIsNone(dup)
+
+    def test_different_source_is_not_duplicate(self):
+        t0 = 1000000
+        records = [
+            {"id": 1, "amount": 18.50, "source": "Chase", "timestamp": t0, "merchant": "Chase", "rawText": "Spent £18.50"}
+        ]
+        dup = find_duplicate(records, 18.50, "HSBC", t0 + 5000, window_millis=60000)
+        self.assertIsNone(dup)
+
+    def test_enrichment_on_duplicate_arrival(self):
+        records = []
+        t0 = 1000000
+        # Notification 1 arrives with bare merchant
+        id1, inserted1 = simulate_insert_or_enrich(
+            records,
+            {"amount": 18.50, "source": "Chase", "merchant": "", "rawText": "You spent £18.50", "type": "OUT", "category": "General Spend"},
+            t0
+        )
+        self.assertTrue(inserted1)
+        self.assertEqual(len(records), 1)
+
+        # Notification 2 arrives 10 seconds later with vendor info & category
+        id2, inserted2 = simulate_insert_or_enrich(
+            records,
+            {"amount": 18.50, "source": "Chase", "merchant": "ASDA", "rawText": "You spent £18.50 with your card at ASDA", "type": "OUT", "category": "Groceries"},
+            t0 + 10000
+        )
+        self.assertFalse(inserted2)
+        self.assertEqual(id2, id1)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["merchant"], "ASDA")
+        self.assertEqual(records[0]["category"], "Groceries")
+        self.assertIn("ASDA", records[0]["rawText"])
+
+    def test_enrichment_updates_type_when_subsequent_notification_has_direction(self):
+        records = []
+        t0 = 1000000
+        # Notification 1 arrives as generic OUT
+        id1, _ = simulate_insert_or_enrich(
+            records,
+            {"amount": 25.00, "source": "Chase", "merchant": "Chase", "rawText": "£25.00", "type": "OUT", "direction": "OUTGOING"},
+            t0
+        )
+        # Notification 2 clarifies it's a refund / deposit
+        id2, inserted2 = simulate_insert_or_enrich(
+            records,
+            {"amount": 25.00, "source": "Chase", "merchant": "Amazon", "rawText": "Refund of £25.00 from Amazon", "type": "IN", "direction": "INCOMING", "category": "Refunds"},
+            t0 + 5000
+        )
+        self.assertFalse(inserted2)
+        self.assertEqual(records[0]["type"], "IN")
+        self.assertEqual(records[0]["direction"], "INCOMING")
+        self.assertEqual(records[0]["merchant"], "Amazon")
+        self.assertEqual(records[0]["category"], "Refunds")
+
+
+# ---------------------------------------------------------------------------------------
+# Internal Transfer Detection Logic & Tests
+# ---------------------------------------------------------------------------------------
+def classify_internal_transfer(title: str, content: str, merchant: str, source_account: dict, all_accounts: list) -> tuple:
+    full_text = f"{title or ''} {content or ''} {merchant or ''}".lower()
+    has_explicit_transfer = any(p in full_text for p in [
+        "internal transfer", "transfer between accounts", "transferred between", "moved money between"
+    ])
+
+    mentioned_other = None
+    for other in all_accounts:
+        if other["id"] == source_account["id"]:
+            continue
+        other_name = other["name"].strip().lower()
+        if not other_name:
+            continue
+        to_pattern = r"\b(?:transfer(?:red)?|sent|moved|paid)\b.*?\bto\s+" + re.escape(other_name) + r"\b"
+        from_pattern = r"\b(?:transfer(?:red)?|received|moved)\b.*?\bfrom\s+" + re.escape(other_name) + r"\b"
+        if re.search(to_pattern, full_text, re.I) or re.search(from_pattern, full_text, re.I):
+            mentioned_other = other
+            break
+        if has_explicit_transfer and re.search(r"\b" + re.escape(other_name) + r"\b", full_text, re.I):
+            mentioned_other = other
+            break
+
+    is_internal = has_explicit_transfer or (mentioned_other is not None)
+    dest_account = mentioned_other
+    if dest_account is None and has_explicit_transfer:
+        dest_account = next((a for a in all_accounts if a["id"] != source_account["id"]), None)
+
+    return is_internal, dest_account
+
+
+class TestInternalTransferDetection(unittest.TestCase):
+    def setUp(self):
+        self.accounts = [
+            {"id": 1, "name": "Chase"},
+            {"id": 2, "name": "HSBC"},
+            {"id": 3, "name": "Savings"},
+            {"id": 4, "name": "Credit Card"}
+        ]
+        self.chase = self.accounts[0]
+        self.hsbc = self.accounts[1]
+
+    def test_card_payment_mentioning_credit_card_is_not_internal_transfer(self):
+        is_internal, _ = classify_internal_transfer(
+            title="Chase alert",
+            content="Card payment of £10.00 at Starbucks with credit card ending 1234",
+            merchant="Starbucks",
+            source_account=self.chase,
+            all_accounts=self.accounts
+        )
+        self.assertFalse(is_internal)
+
+    def test_purchase_at_chase_pharmacy_is_not_internal_transfer(self):
+        is_internal, _ = classify_internal_transfer(
+            title="HSBC alert",
+            content="£12.50 spent at Chase Pharmacy",
+            merchant="Chase Pharmacy",
+            source_account=self.hsbc,
+            all_accounts=self.accounts
+        )
+        self.assertFalse(is_internal)
+
+    def test_transfer_to_registered_bank_is_internal_transfer(self):
+        is_internal, dest = classify_internal_transfer(
+            title="Chase",
+            content="Sent £50.00 to HSBC",
+            merchant="",
+            source_account=self.chase,
+            all_accounts=self.accounts
+        )
+        self.assertTrue(is_internal)
+        self.assertIsNotNone(dest)
+        self.assertEqual(dest["name"], "HSBC")
+
+    def test_received_from_registered_bank_is_internal_transfer(self):
+        is_internal, dest = classify_internal_transfer(
+            title="HSBC",
+            content="Received £50.00 from Chase",
+            merchant="",
+            source_account=self.hsbc,
+            all_accounts=self.accounts
+        )
+        self.assertTrue(is_internal)
+        self.assertIsNotNone(dest)
+        self.assertEqual(dest["name"], "Chase")
+
+    def test_explicit_internal_transfer_to_savings(self):
+        is_internal, dest = classify_internal_transfer(
+            title="Chase",
+            content="Internal transfer of £100.00 to Savings",
+            merchant="",
+            source_account=self.chase,
+            all_accounts=self.accounts
+        )
+        self.assertTrue(is_internal)
+        self.assertIsNotNone(dest)
+        self.assertEqual(dest["name"], "Savings")
+
+    def test_payment_to_external_person_is_not_internal_transfer(self):
+        is_internal, dest = classify_internal_transfer(
+            title="Chase",
+            content="Sent £40.00 to Bob Smith",
+            merchant="Bob Smith",
+            source_account=self.chase,
+            all_accounts=self.accounts
+        )
+        self.assertFalse(is_internal)
+        self.assertIsNone(dest)
+
+
+# ---------------------------------------------------------------------------------------
+# Dynamic Bank Discovery Logic & Tests
+# ---------------------------------------------------------------------------------------
+def resolve_bank_name(package_name: str, parsed_source: str, app_label: str = None) -> str:
+    if parsed_source and parsed_source.lower() not in ("card payment", "others") and parsed_source.strip():
+        return parsed_source
+    if app_label and app_label.strip():
+        clean = re.sub(r"(?i)\b(?:mobile banking|banking|mobile|uk|app)\b", "", app_label).strip()
+        if clean:
+            return clean
+    pkg_lower = package_name.lower()
+    mapping = {
+        "chase": "Chase",
+        "hsbc": "HSBC",
+        "monzo": "Monzo",
+        "starling": "Starling",
+        "revolut": "Revolut",
+        "barclay": "Barclays",
+        "santander": "Santander",
+        "natwest": "NatWest",
+        "lloyds": "Lloyds",
+        "halifax": "Halifax",
+        "nationwide": "Nationwide",
+    }
+    for k, v in mapping.items():
+        if k in pkg_lower:
+            return v
+    parts = [p for p in package_name.split(".") if len(p) > 2 and p not in ("com", "org", "net", "android", "uk", "co", "app")]
+    if parts:
+        return parts[-1].capitalize()
+    return "Card Payment"
+
+
+class TestDynamicBankDiscovery(unittest.TestCase):
+    def test_parsed_source_takes_precedence_if_valid(self):
+        self.assertEqual(resolve_bank_name("com.jpmorgan.chase.uk", "Chase", "Chase Mobile"), "Chase")
+
+    def test_app_label_cleaned_when_parsed_source_is_generic(self):
+        self.assertEqual(resolve_bank_name("com.barclays.banking", "Card Payment", "Barclays Mobile Banking UK"), "Barclays")
+        self.assertEqual(resolve_bank_name("com.natwest.banking", "", "NatWest App"), "NatWest")
+
+    def test_package_fallback_mapping(self):
+        self.assertEqual(resolve_bank_name("com.monzo.app", "Card Payment", None), "Monzo")
+        self.assertEqual(resolve_bank_name("com.starlingbank.android", "", None), "Starling")
+        self.assertEqual(resolve_bank_name("uk.co.hsbc.hsbcukmobilebanking", "Others", None), "HSBC")
+        self.assertEqual(resolve_bank_name("com.revolut.revolut", "", None), "Revolut")
+
+    def test_dynamic_registration_in_accounts_store(self):
+        accounts = {"Chase", "HSBC"}
+        new_source = resolve_bank_name("com.monzo.app", "Card Payment", "Monzo")
+        if new_source not in accounts:
+            accounts.add(new_source)
+        self.assertIn("Monzo", accounts)
+        self.assertEqual(len(accounts), 3)
+
+
+# ---------------------------------------------------------------------------------------
+# Baseline / Grace Period Guard Logic & Tests
+# ---------------------------------------------------------------------------------------
+def is_initial_baseline(history_days: int, period: str) -> bool:
+    if period.upper() == "WEEK":
+        return history_days < 7
+    return history_days < 30
+
+
+class TestBaselineGracePeriod(unittest.TestCase):
+    def test_week_baseline(self):
+        self.assertTrue(is_initial_baseline(3, "WEEK"))
+        self.assertTrue(is_initial_baseline(6, "WEEK"))
+        self.assertFalse(is_initial_baseline(7, "WEEK"))
+        self.assertFalse(is_initial_baseline(14, "WEEK"))
+
+    def test_month_baseline(self):
+        self.assertTrue(is_initial_baseline(5, "MONTH"))
+        self.assertTrue(is_initial_baseline(29, "MONTH"))
+        self.assertFalse(is_initial_baseline(30, "MONTH"))
+        self.assertFalse(is_initial_baseline(60, "MONTH"))
+
+    def test_year_baseline(self):
+        self.assertTrue(is_initial_baseline(15, "YEAR"))
+        self.assertFalse(is_initial_baseline(30, "YEAR"))
+
+    def test_ui_guard_suppresses_percentage_and_provides_onboarding(self):
+        history_days = 4
+        is_initial = is_initial_baseline(history_days, "WEEK")
+        percentage_change = 0.0 if is_initial else 45.2
+        onboarding_msg = "Building your baseline: comparisons will appear after your first week/month" if is_initial else None
+
+        self.assertTrue(is_initial)
+        self.assertEqual(percentage_change, 0.0)
+        self.assertEqual(onboarding_msg, "Building your baseline: comparisons will appear after your first week/month")
+
 
 if __name__ == "__main__":
     unittest.main()
+

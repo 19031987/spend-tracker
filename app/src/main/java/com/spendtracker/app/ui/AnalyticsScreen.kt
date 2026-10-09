@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -36,6 +37,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spendtracker.app.domain.CategoryShare
 import com.spendtracker.app.domain.ChartBar
@@ -127,34 +129,89 @@ fun AnalyticsContent(
 @Composable
 private fun SummaryCard(state: AnalyticsUiState) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column(Modifier.weight(1f)) {
-                Text("Total spend", style = MaterialTheme.typography.labelLarge)
-                Text(
-                    formatMoney(state.currentTotalMinor),
-                    style = MaterialTheme.typography.headlineMedium,
-                    maxLines = 1
-                )
-                Text(
-                    "Previous: ${formatMoney(state.previousTotalMinor)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Total spend", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        formatMoney(state.currentTotalMinor),
+                        style = MaterialTheme.typography.headlineMedium,
+                        maxLines = 1
+                    )
+                    if (!state.isInitialPeriod) {
+                        Text(
+                            "Previous: ${formatMoney(state.previousTotalMinor)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Text(
+                            "Building baseline: cycle in progress",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                DeltaBadge(state.deltaPercent, state.currentTotalMinor, state.isInitialPeriod)
             }
-            DeltaBadge(state.deltaPercent, state.currentTotalMinor)
+
+            if (state.isInitialPeriod) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("🌱", fontSize = 12.sp)
+                        Text(
+                            state.onboardingMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
 /** More spending is bad (error color), less spending is good (tertiary). */
 @Composable
-fun DeltaBadge(deltaPercent: Double?, currentTotal: Long, modifier: Modifier = Modifier) {
+fun DeltaBadge(
+    deltaPercent: Double?,
+    currentTotal: Long,
+    isInitialPeriod: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    if (isInitialPeriod) {
+        Box(
+            modifier = modifier
+                .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(50))
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .semantics { contentDescription = "Building baseline" }
+        ) {
+            Text(
+                "Baseline",
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1
+            )
+        }
+        return
+    }
     val (text, container, content) = when {
         deltaPercent == null && currentTotal > 0 -> Triple(
             "New", MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer

@@ -88,6 +88,7 @@ fun SpendTrackerScreen(container: AppContainer) {
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val analyticsVm: AnalyticsViewModel = viewModel(factory = container.viewModelFactory)
+    val comparisonVm: ComparisonViewModel = viewModel(factory = container.viewModelFactory)
     val addVm: AddTransactionViewModel = viewModel(factory = container.viewModelFactory)
     val settingsVm: SettingsViewModel = viewModel(factory = container.viewModelFactory)
     val transactionsVm: TransactionsViewModel = viewModel(factory = container.viewModelFactory)
@@ -126,7 +127,7 @@ fun SpendTrackerScreen(container: AppContainer) {
         topBar = {
             HeaderBar(
                 title = "Spend Tracker",
-                subtitle = "Chase & HSBC · Nullified transfers",
+                subtitle = if (accounts.isEmpty()) "Multi-bank · Nullified transfers" else "${accounts.take(2).joinToString(" & ") { it.name }} · Nullified transfers",
                 onAddClick = { showSheet = true },
                 actions = {
                     IconButton(onClick = { showSettings = true }) {
@@ -228,6 +229,7 @@ fun SpendTrackerScreen(container: AppContainer) {
                     // Transactions Screen
                     TransactionsFeed(
                         transactions = transactionsList,
+                        accounts = accounts,
                         filterType = filterType,
                         onFilterChange = { filterType = it },
                         onTransactionClick = { editingTransaction = it },
@@ -247,6 +249,7 @@ fun SpendTrackerScreen(container: AppContainer) {
                 2 -> {
                     // Compare Screen
                     ComparisonScreen(
+                        viewModel = comparisonVm,
                         contentPadding = PaddingValues(bottom = padding.calculateBottomPadding()),
                         modifier = Modifier.weight(1f)
                     )
@@ -356,6 +359,7 @@ fun SpendTrackerScreen(container: AppContainer) {
 @Composable
 private fun TransactionsFeed(
     transactions: List<TransactionItem>,
+    accounts: List<com.spendtracker.app.data.AccountEntity>,
     filterType: String,
     onFilterChange: (String) -> Unit,
     onTransactionClick: (TransactionItem) -> Unit,
@@ -370,19 +374,17 @@ private fun TransactionsFeed(
     val transferCount = transactions.count { it.type == TransactionType.TRANSFER || it.categoryKey == "INTERNAL_TRANSFER" || it.excludeFromSpending }
     val transferVolume = transactions.filter { it.type == TransactionType.TRANSFER || it.categoryKey == "INTERNAL_TRANSFER" }.sumOf { it.amountMinor }
 
-    // Account breakdown (Chase vs HSBC)
-    val chaseTxs = nonTransferTxs.filter { it.source.contains("Chase", ignoreCase = true) || it.accountName.contains("Chase", ignoreCase = true) }
-    val chaseSpent = chaseTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
-    val chaseIncome = chaseTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
-
-    val hsbcTxs = nonTransferTxs.filter { it.source.contains("HSBC", ignoreCase = true) || it.accountName.contains("HSBC", ignoreCase = true) }
-    val hsbcSpent = hsbcTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
-    val hsbcIncome = hsbcTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
-
-    val filtered = when (filterType) {
-        "EXPENSE" -> transactions.filter { it.type == TransactionType.EXPENSE && !it.excludeFromSpending }
-        "INCOME" -> transactions.filter { it.type == TransactionType.INCOME && !it.excludeFromSpending }
-        "TRANSFER" -> transactions.filter { it.type == TransactionType.TRANSFER || it.categoryKey == "INTERNAL_TRANSFER" || it.excludeFromSpending }
+    val filtered = when {
+        filterType == "EXPENSE" -> transactions.filter { it.type == TransactionType.EXPENSE && !it.excludeFromSpending }
+        filterType == "INCOME" -> transactions.filter { it.type == TransactionType.INCOME && !it.excludeFromSpending }
+        filterType == "TRANSFER" -> transactions.filter { it.type == TransactionType.TRANSFER || it.categoryKey == "INTERNAL_TRANSFER" || it.excludeFromSpending }
+        filterType.startsWith("BANK_") -> {
+            val bankName = filterType.removePrefix("BANK_")
+            transactions.filter {
+                it.accountName.equals(bankName, ignoreCase = true) ||
+                it.source.equals(bankName, ignoreCase = true)
+            }
+        }
         else -> transactions
     }
 
@@ -456,125 +458,113 @@ private fun TransactionsFeed(
             }
         }
 
-        // Bank Source Breakdown (Chase and HSBC)
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    "Bank Accounts (Sources)",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+        // Bank Source Breakdown (Dynamically discovered and stored accounts)
+        if (accounts.isNotEmpty()) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Chase Card
-                    Card(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(14.dp)),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E3A8A).copy(alpha = 0.08f))
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF1D4ED8)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Default.AccountBalance, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                                }
-                                Text("Chase", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF1E3A8A))
-                            }
-                            Text(
-                                "Spent: ${formatMoney(chaseSpent)}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                "In: +${formatMoney(chaseIncome)}",
-                                fontSize = 11.sp,
-                                color = Color(0xFF059669),
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
+                    Text(
+                        "Bank Accounts (Sources)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
 
-                    // HSBC Card
-                    Card(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(14.dp)),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFDC2626).copy(alpha = 0.08f))
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFFDC2626)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Default.AccountBalance, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                                }
-                                Text("HSBC", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF991B1B))
+                        items(accounts, key = { it.id }) { acc ->
+                            val accTxs = nonTransferTxs.filter {
+                                it.source.equals(acc.name, ignoreCase = true) ||
+                                it.accountName.equals(acc.name, ignoreCase = true)
                             }
-                            Text(
-                                "Spent: ${formatMoney(hsbcSpent)}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                "In: +${formatMoney(hsbcIncome)}",
-                                fontSize = 11.sp,
-                                color = Color(0xFF059669),
-                                fontWeight = FontWeight.Medium
-                            )
+                            val accSpent = accTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
+                            val accIncome = accTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
+
+                            val (cardBgColor, badgeColor) = when (acc.name.lowercase(Locale.ROOT)) {
+                                "chase" -> Color(0xFF1E3A8A).copy(alpha = 0.08f) to Color(0xFF1D4ED8)
+                                "hsbc" -> Color(0xFFDC2626).copy(alpha = 0.08f) to Color(0xFFDC2626)
+                                "monzo" -> Color(0xFFF97316).copy(alpha = 0.08f) to Color(0xFFF97316)
+                                "starling" -> Color(0xFF0D9488).copy(alpha = 0.08f) to Color(0xFF0D9488)
+                                "revolut" -> Color(0xFF0284C7).copy(alpha = 0.08f) to Color(0xFF0284C7)
+                                "barclays" -> Color(0xFF0284C7).copy(alpha = 0.08f) to Color(0xFF0284C7)
+                                "santander" -> Color(0xFFDC2626).copy(alpha = 0.08f) to Color(0xFFDC2626)
+                                else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f) to MaterialTheme.colorScheme.primary
+                            }
+
+                            Card(
+                                modifier = Modifier
+                                    .width(160.dp)
+                                    .clip(RoundedCornerShape(14.dp)),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(containerColor = cardBgColor)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .clip(CircleShape)
+                                                .background(badgeColor),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(Icons.Default.AccountBalance, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                        }
+                                        Text(acc.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    Text(
+                                        "Spent: ${formatMoney(accSpent)}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        "In: +${formatMoney(accIncome)}",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF059669),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Filter Pills
+        // Filter Pills (Dynamically includes newly discovered and active bank sources)
         item {
             LazyRow(
                 modifier = Modifier.fillMaxWidth(),
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                val filters = listOf(
+                val baseFilters = listOf(
                     "ALL" to "All (${transactions.size})",
                     "EXPENSE" to "Outflow",
                     "INCOME" to "Inflow",
                     "TRANSFER" to "🔄 Transfers (${transferCount})"
                 )
-                items(filters) { (key, label) ->
+                val bankFilters = accounts.map { acc ->
+                    val count = transactions.count {
+                        it.accountName.equals(acc.name, ignoreCase = true) ||
+                        it.source.equals(acc.name, ignoreCase = true)
+                    }
+                    "BANK_${acc.name}" to "${acc.name} ($count)"
+                }
+                val allFilters = baseFilters + bankFilters
+
+                items(allFilters) { (key, label) ->
                     FilterChip(
                         selected = filterType == key,
                         onClick = { onFilterChange(key) },

@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
@@ -26,11 +27,13 @@ data class AnalyticsUiState(
     val isLoading: Boolean = true,
     val currentTotalMinor: Long = 0,
     val previousTotalMinor: Long = 0,
-    /** Null when the previous period had no spend (percentage undefined). */
+    /** Null when the previous period had no spend (percentage undefined) or during initial baseline period. */
     val deltaPercent: Double? = null,
     val bars: List<ChartBar> = emptyList(),
     val categories: List<CategoryShare> = emptyList(),
-    val error: String? = null
+    val error: String? = null,
+    val isInitialPeriod: Boolean = false,
+    val onboardingMessage: String = "Building your baseline: comparisons will appear after your first week/month"
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -40,21 +43,38 @@ class AnalyticsViewModel(private val repository: SpendRepository) : ViewModel() 
 
     val uiState: StateFlow<AnalyticsUiState> = selectedPeriod
         .flatMapLatest { period ->
-            repository.observeAnalytics(period)
-                .map { snapshot ->
-                    val delta = if (snapshot.previousTotal > 0) {
-                        (snapshot.currentTotal - snapshot.previousTotal) * 100.0 / snapshot.previousTotal
-                    } else null
-                    AnalyticsUiState(
-                        period = period,
-                        isLoading = false,
-                        currentTotalMinor = snapshot.currentTotal,
-                        previousTotalMinor = snapshot.previousTotal,
-                        deltaPercent = delta,
-                        bars = snapshot.bars,
-                        categories = snapshot.categories
-                    )
+            combine(
+                repository.observeAnalytics(period),
+                repository.observeTransactions()
+            ) { snapshot, transactions ->
+                val oldestTs = transactions.minOfOrNull { it.timestamp }
+                val historyDays = if (oldestTs != null) {
+                    val diff = System.currentTimeMillis() - oldestTs
+                    maxOf(0L, diff / (24L * 60 * 60 * 1000L))
+                } else 0L
+
+                val requiredDays = when (period) {
+                    Period.WEEK -> 7L
+                    Period.MONTH -> 30L
+                    Period.YEAR -> 30L
                 }
+                val isInitial = (historyDays < requiredDays) || (snapshot.previousTotal <= 0L && historyDays < 30L)
+
+                val delta = if (!isInitial && snapshot.previousTotal > 0) {
+                    (snapshot.currentTotal - snapshot.previousTotal) * 100.0 / snapshot.previousTotal
+                } else null
+
+                AnalyticsUiState(
+                    period = period,
+                    isLoading = false,
+                    currentTotalMinor = snapshot.currentTotal,
+                    previousTotalMinor = snapshot.previousTotal,
+                    deltaPercent = delta,
+                    bars = snapshot.bars,
+                    categories = snapshot.categories,
+                    isInitialPeriod = isInitial
+                )
+            }
                 .onStart { emit(AnalyticsUiState(period = period, isLoading = true)) }
                 .catch { e ->
                     emit(

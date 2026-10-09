@@ -110,6 +110,8 @@ fun EditTransactionSheet(
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     val effectiveSource = accounts.firstOrNull { it.id == sourceId }
+        ?: accounts.firstOrNull { it.name.equals(transaction.source, ignoreCase = true) }
+        ?: accounts.firstOrNull { it.name.equals(transaction.accountName, ignoreCase = true) }
         ?: accounts.firstOrNull { it.name.equals("Chase", ignoreCase = true) }
         ?: accounts.firstOrNull()
 

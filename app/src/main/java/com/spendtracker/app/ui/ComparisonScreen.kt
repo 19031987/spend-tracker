@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -103,19 +104,76 @@ data class ComparisonUiState(
     val percentageChange: Double = 0.0,
     val isIncrease: Boolean = false,
     val breakdownItems: List<DataPoint> = emptyList(),
-    val isLoading: Boolean = false
+    val isLoading: Boolean = false,
+    /** Guard against misleading comparisons when history is insufficient (< 7 or < 30 days) */
+    val isInitialPeriod: Boolean = false,
+    val historyDays: Long = 0L,
+    val onboardingMessage: String = "Building your baseline: comparisons will appear after your first week/month"
 )
 
 /**
  * ViewModel managing reactive calculation and period switching.
  */
-class ComparisonViewModel : ViewModel() {
+class ComparisonViewModel(
+    private val repository: com.spendtracker.app.data.SpendRepository? = null
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ComparisonUiState(isLoading = true))
     val uiState: StateFlow<ComparisonUiState> = _uiState.asStateFlow()
+    private var initialPeriodOverride: Boolean? = null
 
     init {
+        if (repository != null) {
+            viewModelScope.launch {
+                repository.observeTransactions().collect { txs ->
+                    val historyDays = calculateHistoryDays(txs)
+                    _uiState.update { current ->
+                        val isInitial = initialPeriodOverride ?: isInitialBaseline(historyDays, current.selectedPeriod)
+                        val pctChange = when {
+                            isInitial -> 0.0
+                            current.previousPeriodTotal > 0.0 -> ((current.currentPeriodTotal - current.previousPeriodTotal) / current.previousPeriodTotal) * 100.0
+                            current.currentPeriodTotal > 0.0 -> 100.0
+                            else -> 0.0
+                        }
+                        current.copy(
+                            historyDays = historyDays,
+                            isInitialPeriod = isInitial,
+                            percentageChange = pctChange
+                        )
+                    }
+                }
+            }
+        }
         selectPeriod(ComparisonPeriod.WEEK)
+    }
+
+    fun setInitialPeriod(isInitial: Boolean) {
+        initialPeriodOverride = isInitial
+        _uiState.update { current ->
+            val pctChange = when {
+                isInitial -> 0.0
+                current.previousPeriodTotal > 0.0 -> ((current.currentPeriodTotal - current.previousPeriodTotal) / current.previousPeriodTotal) * 100.0
+                current.currentPeriodTotal > 0.0 -> 100.0
+                else -> 0.0
+            }
+            current.copy(isInitialPeriod = isInitial, percentageChange = pctChange)
+        }
+    }
+
+    fun isInitialBaseline(historyDays: Long, period: ComparisonPeriod): Boolean {
+        val requiredDays = when (period) {
+            ComparisonPeriod.WEEK -> 7L
+            ComparisonPeriod.MONTH -> 30L
+            ComparisonPeriod.YEAR -> 30L
+        }
+        return historyDays < requiredDays
+    }
+
+    fun calculateHistoryDays(transactions: List<com.spendtracker.app.data.TransactionEntity>): Long {
+        if (transactions.isEmpty()) return 0L
+        val oldest = transactions.minOfOrNull { it.timestamp } ?: return 0L
+        val diff = System.currentTimeMillis() - oldest
+        return (diff / (24L * 60 * 60 * 1000L)).coerceAtLeast(0L)
     }
 
     fun selectPeriod(period: ComparisonPeriod) {
@@ -127,7 +185,14 @@ class ComparisonViewModel : ViewModel() {
             val currentTotal = breakdown.sumOf { it.currentValue }
             val previousTotal = breakdown.sumOf { it.previousValue }
 
+            val isInitial = initialPeriodOverride ?: if (repository != null) {
+                isInitialBaseline(_uiState.value.historyDays, period)
+            } else {
+                _uiState.value.isInitialPeriod
+            }
+
             val pctChange = when {
+                isInitial -> 0.0 // Suppress delta percentages during baseline building!
                 previousTotal > 0.0 -> ((currentTotal - previousTotal) / previousTotal) * 100.0
                 currentTotal > 0.0 -> 100.0
                 else -> 0.0
@@ -141,7 +206,8 @@ class ComparisonViewModel : ViewModel() {
                     percentageChange = pctChange,
                     isIncrease = currentTotal >= previousTotal,
                     breakdownItems = breakdown,
-                    isLoading = false
+                    isLoading = false,
+                    isInitialPeriod = isInitial
                 )
             }
         }
@@ -350,24 +416,29 @@ fun SummaryComparisonCard(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header: Period Label & Comparison Pill
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "${state.selectedPeriod.label} Overview",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            if (state.isInitialPeriod) {
+                // Initial period onboarding banner replacing comparison badge
+                OnboardingBaselineBanner(message = state.onboardingMessage)
+            } else {
+                // Header: Period Label & Comparison Pill
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "${state.selectedPeriod.label} Overview",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
-                // Comparison Pill / Badge
-                ComparisonBadge(
-                    percentageChange = state.percentageChange,
-                    isIncrease = state.isIncrease,
-                    referenceContext = state.selectedPeriod.referenceContext
-                )
+                    // Comparison Pill / Badge
+                    ComparisonBadge(
+                        percentageChange = state.percentageChange,
+                        isIncrease = state.isIncrease,
+                        referenceContext = state.selectedPeriod.referenceContext
+                    )
+                }
             }
 
             // Current Total Display
@@ -378,29 +449,81 @@ fun SummaryComparisonCard(
                 color = MaterialTheme.colorScheme.onSurface
             )
 
-            // Previous Period Reference Metric
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            // Previous Period Reference Metric (guarded during initial period)
+            if (!state.isInitialPeriod) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Previous ${state.selectedPeriod.label.lowercase()}: ${formatCurrency(state.previousPeriodTotal)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    val netDifference = state.currentPeriodTotal - state.previousPeriodTotal
+                    val prefix = if (netDifference >= 0) "+" else ""
+                    Text(
+                        text = "$prefix${formatCurrency(netDifference)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                        color = if (state.isIncrease) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            successTextColor()
+                        }
+                    )
+                }
+            } else {
                 Text(
-                    text = "Previous ${state.selectedPeriod.label.lowercase()}: ${formatCurrency(state.previousPeriodTotal)}",
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = "Historical reference will populate once your first week/month baseline is recorded.",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+        }
+    }
+}
 
-                val netDifference = state.currentPeriodTotal - state.previousPeriodTotal
-                val prefix = if (netDifference >= 0) "+" else ""
+/**
+ * Onboarding baseline banner shown during initial run (< 7 or < 30 days) before historical comparisons are valid.
+ */
+@Composable
+fun OnboardingBaselineBanner(
+    message: String = "Building your baseline: comparisons will appear after your first week/month",
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("🌱", fontSize = 14.sp)
+            }
+            Column {
                 Text(
-                    text = "$prefix${formatCurrency(netDifference)}",
+                    text = "Building Baseline",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                Text(
+                    text = message,
                     style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium,
-                    color = if (state.isIncrease) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        successTextColor()
-                    }
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
                 )
             }
         }
