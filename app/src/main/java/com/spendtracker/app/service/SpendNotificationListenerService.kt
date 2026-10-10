@@ -9,6 +9,7 @@ import com.spendtracker.app.data.AppDatabase
 import com.spendtracker.app.data.SpendDatabase
 import com.spendtracker.app.data.TransactionEntity
 import com.spendtracker.app.data.TransactionType
+import com.spendtracker.app.data.normalizeBankName
 import com.spendtracker.app.domain.CategorizationEngine
 import com.spendtracker.app.domain.Classification
 import com.spendtracker.app.domain.MatchType
