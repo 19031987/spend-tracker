@@ -63,7 +63,9 @@ def normalize_bank_name(raw, fallback="Others"):
         return "Metro Bank"
     if lower in ("kroo", "kroo bank") or lower.startswith("kroo "):
         return "Kroo"
-    if lower in ("savings", "saving") or lower.startswith("savings ") or lower.startswith("saving "):
+    if lower in ("checking", "checking account", "current account") or lower.startswith("checking "):
+        return "Chase"
+    if lower in ("savings", "saving", "savings account") or lower.startswith("savings ") or lower.startswith("saving "):
         return "Savings"
     if lower in ("credit card", "creditcard") or lower.startswith("credit card") or lower.startswith("creditcard"):
         return "Credit Card"

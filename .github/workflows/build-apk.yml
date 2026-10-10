@@ -55,15 +55,18 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.5.2
-        name: "SpendTracker Release v1.5.2 (UI Timestamp & Amount Alignment)"
+        tag_name: v1.5.3
+        name: "SpendTracker Release v1.5.3 (Eliminate Checking Source & Database Consolidation)"
         body: |
-          ### SpendTracker v1.5.2 - Key Fixes & Enhancements
+          ### SpendTracker v1.5.3 - Key Fixes & Enhancements
+          - 🏦 **Eliminated Legacy "Checking" Account**:
+            - Legacy seeded "Checking" / "current account" sources are cleanly remapped and consolidated into the canonical Chase bank account.
+            - Added Room Migration 6 -> 7 and automated database startup cleanup that safely migrates any existing transactions referencing "Checking" to Chase, and permanently purges "Checking" from accounts, pickers, and filter chips.
           - ⏰ **UI Time & Timestamp Alignment**:
-            - Properly aligned the transaction timestamp (`HH:mm`) in the dedicated right-hand column directly beneath the amount, eliminating overlap, truncation, or awkward wrapping with the category and bank source badges.
-            - Enhanced transaction metadata badges with adaptive wrapping (`FlowRow`) so long vendor and category names scale seamlessly across different device screen widths.
-          - 🏦 **Bank Source Deduplication & Consolidation**:
-            - Added case-insensitive unique SQLite index on `accounts(name COLLATE NOCASE)` to prevent duplicate bank sources.
+            - Aligned transaction timestamp (`HH:mm`) in the dedicated right-hand column directly beneath the amount.
+            - Enhanced metadata badges with adaptive wrapping (`FlowRow`).
+          - ⏱️ **Notification Deduplication & Directional Parsing**:
+            - Time-window fingerprinting (±60s) and smart incoming/outgoing parsing.
             - Implemented automated database migration and `onOpen` consolidation that safely remaps existing transactions referencing duplicate account rows to the canonical account ID before removing duplicates.
             - Normalized bank names across notifications and UI (handling case differences, aliases like "Chase UK", "Barclaycard", and trailing terms like "Bank" / "Account").
             - Deduplicated account lists across filter chips, transaction editors, and transfer pickers.

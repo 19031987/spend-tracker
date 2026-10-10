@@ -39,7 +39,8 @@ fun normalizeBankName(raw: String?, fallback: String = "Others"): String {
         lower == "virgin money" || lower.startsWith("virgin money") -> "Virgin Money"
         lower == "metro bank" || lower == "metro" || lower.startsWith("metro bank") || lower.startsWith("metro ") -> "Metro Bank"
         lower == "kroo" || lower == "kroo bank" || lower.startsWith("kroo ") -> "Kroo"
-        lower == "savings" || lower == "saving" || lower.startsWith("savings ") || lower.startsWith("saving ") -> "Savings"
+        lower == "checking" || lower == "checking account" || lower == "current account" || lower.startsWith("checking ") -> "Chase"
+        lower == "savings" || lower == "saving" || lower == "savings account" || lower.startsWith("savings ") || lower.startsWith("saving ") -> "Savings"
         lower == "credit card" || lower == "creditcard" || lower.startsWith("credit card") || lower.startsWith("creditcard") -> "Credit Card"
         lower == "others" || lower == "other" || lower == "card payment" || lower == "bank alert" || lower == "unknown" || lower.startsWith("other ") || lower == "bank" || lower == "banking" || lower == "mobile banking" || lower == "mobile" || lower == "app" -> "Others"
         else -> {

@@ -1952,6 +1952,7 @@ html_content = '''<!DOCTYPE html>
             if (lower === "virgin money" || lower.startsWith("virgin money")) return "Virgin Money";
             if (lower === "metro bank" || lower === "metro" || lower.startsWith("metro bank") || lower.startsWith("metro ")) return "Metro Bank";
             if (lower === "kroo" || lower.startsWith("kroo")) return "Kroo";
+            if (lower === "checking" || lower === "checking account" || lower === "current account" || lower.startsWith("checking ")) return "Chase";
             if (lower === "savings" || lower === "saving" || lower.startsWith("savings") || lower.startsWith("saving")) return "Savings";
             if (lower === "credit card" || lower === "creditcard" || lower.startsWith("credit card")) return "Credit Card";
             if (lower === "others" || lower === "other" || lower === "card payment" || lower === "bank alert" || lower === "unknown" || lower === "bank" || lower === "banking") return "Others";
