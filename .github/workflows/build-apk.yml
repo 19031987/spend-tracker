@@ -55,10 +55,13 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.5.1
-        name: "SpendTracker Release v1.5.1 (Bank Source Deduplication & Consolidation)"
+        tag_name: v1.5.2
+        name: "SpendTracker Release v1.5.2 (UI Timestamp & Amount Alignment)"
         body: |
-          ### SpendTracker v1.5.1 - Key Fixes & Enhancements
+          ### SpendTracker v1.5.2 - Key Fixes & Enhancements
+          - ⏰ **UI Time & Timestamp Alignment**:
+            - Properly aligned the transaction timestamp (`HH:mm`) in the dedicated right-hand column directly beneath the amount, eliminating overlap, truncation, or awkward wrapping with the category and bank source badges.
+            - Enhanced transaction metadata badges with adaptive wrapping (`FlowRow`) so long vendor and category names scale seamlessly across different device screen widths.
           - 🏦 **Bank Source Deduplication & Consolidation**:
             - Added case-insensitive unique SQLite index on `accounts(name COLLATE NOCASE)` to prevent duplicate bank sources.
             - Implemented automated database migration and `onOpen` consolidation that safely remaps existing transactions referencing duplicate account rows to the canonical account ID before removing duplicates.

@@ -11,6 +11,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -797,11 +799,12 @@ private fun TransactionRowItem(
                     )
                 }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                @OptIn(ExperimentalLayoutApi::class)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    // Source badge (Chase / HSBC)
+                    // Source badge (Chase / HSBC / Monzo)
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
@@ -850,21 +853,13 @@ private fun TransactionRowItem(
                             }
                         }
                     }
-
-                    if (timeStr.isNotEmpty()) {
-                        Text(
-                            text = "· $timeStr",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                 }
             }
 
-            // Amount column
+            // Amount and Timestamp column (aligned to end)
             Column(
                 horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+                verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 Text(
                     text = when {
@@ -880,6 +875,15 @@ private fun TransactionRowItem(
                         else -> Color(0xFFDC2626)
                     }
                 )
+
+                if (timeStr.isNotEmpty()) {
+                    Text(
+                        text = timeStr,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
 
                 if (isTransfer || tx.excludeFromSpending) {
                     Box(
