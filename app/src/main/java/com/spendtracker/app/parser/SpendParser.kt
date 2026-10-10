@@ -111,17 +111,26 @@ object SpendParser {
     )
 
     // Notifications that mention money but are NOT a completed transaction
-    // (3-D Secure approvals, OTPs, declines, requests, statements, summaries, promos).
+    // (3-D Secure approvals, OTPs, declines, requests, statements, summaries, promos, adverts).
     private val IGNORE = Regex(
         "\\b(?:approve|confirm|verify|authori[sz]e|passcode|one[- ]time|otp|security code|verification|" +
             "declined|unsuccessful|failed|insufficient|requested|request|requesting|statement|" +
             "minimum payment|payment due|is due|due on|due date|offer|offers|voucher|promo|promotion|" +
-            "discount|win|chance to|earn up to|save up to|get up to|this week|this month|last week|" +
+            "discount|win|chance to|earn up to|save up to|save\\s+(?:$CUR_ALT)|get up to|this week|this month|last week|" +
             "last month|so far|summary|in total|total spend|reminder|scheduled|upcoming|" +
-            "will be taken|will be paid|will leave)\\b",
+            "will be taken|will be paid|will leave|deals?|deals?\\s+from|starting (?:at|from)|" +
+            "coupon|code\\s+[a-z0-9]+|bogo|buy\\s+\\d+\\s+get|free\\s+(?:delivery|pizza|side|drink)|" +
+            "piping hot|delicious|freshly made|order (?:now|online)|order today|taste|craving|special offer|" +
+            "limited time|deal drop|exclusive offer|use code)\\b",
         IC
     )
-    private val PROMO = Regex("[0-9]+\\s?%\\s?off\\b", IC)
+    private val PROMO = Regex(
+        "(?:[0-9]+\\s?%\\s?off\\b|" +
+            "\\b(?:save|get|enjoy|claim)\\s+(?:$CUR_ALT)\\s?$NUM\\s+(?:off|when you spend|on your order)|" +
+            "\\b(?:from|just|only)\\s+(?:$CUR_ALT)\\s?$NUM\\b|" +
+            "\\b(?:pizzas?|meals?|burgers?)\\s+(?:from|for)\\s+(?:$CUR_ALT)\\s?$NUM)",
+        IC
+    )
 
     // ---------------------------------------------------------------------------------------
     // Direction (sign) detection. FIX: inflow phrasing such as "£23.00 has been added",
@@ -145,7 +154,12 @@ object SpendParser {
     )
     private val WEAK_IN = Regex("\\b(?:received|incoming|has arrived|arrived|cashback|interest|credit)\\b(?!\\s*card)", IC)
     private val WEAK_OUT = Regex(
-        "\\b(?:payment|paid|pay|transaction|approved|contactless|card ending|debit|subscription|bill|order|spend|charge)\\b",
+        "\\b(?:payment|paid|pay|transaction|approved|contactless|card ending|debit|subscription|bill|charge)\\b",
+        IC
+    )
+    // Verbs that explicitly indicate a financial transaction occurred (required for SMS)
+    private val FINANCIAL_TX_VERB = Regex(
+        "\\b(?:spent|paid|debited|charged|withdrawal|withdrawn|purchase[ds]?|card ending|received|credited|refund(?:ed)?|cashback|top(?:ped)?[ -]?up|direct debit|standing order)\\b",
         IC
     )
 
@@ -231,6 +245,10 @@ object SpendParser {
 
         val money = findFirstMoney(scrubbed) ?: return null
         if (money.amount <= 0.0 || money.amount >= 1_000_000.0) return null
+
+        if (trust == Trust.SMS && !FINANCIAL_TX_VERB.containsMatchIn(scrubbed)) {
+            return null // SMS must have an explicit financial transaction verb (debited, spent, paid, etc.)
+        }
 
         val type = when {
             money.sign == "+" -> TYPE_IN

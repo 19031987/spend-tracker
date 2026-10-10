@@ -63,10 +63,18 @@ IGNORE = re.compile(
     r"\b(?:approve|confirm|verify|authori[sz]e|passcode|one[- ]time|otp|security code|verification|"
     r"declined|unsuccessful|failed|insufficient|requested|request|requesting|statement|"
     r"minimum payment|payment due|is due|due on|due date|offer|offers|voucher|promo|promotion|"
-    r"discount|win|chance to|earn up to|save up to|get up to|this week|this month|last week|"
+    r"discount|win|chance to|earn up to|save up to|save\s+(?:" + CUR_ALT + r")|get up to|this week|this month|last week|"
     r"last month|so far|summary|in total|total spend|reminder|scheduled|upcoming|"
-    r"will be taken|will be paid|will leave)\b", I)
-PROMO = re.compile(r"[0-9]+\s?%\s?off\b", I)
+    r"will be taken|will be paid|will leave|deals?|deals?\s+from|starting (?:at|from)|"
+    r"coupon|code\s+[a-z0-9]+|bogo|buy\s+\d+\s+get|free\s+(?:delivery|pizza|side|drink)|"
+    r"piping hot|delicious|freshly made|order (?:now|online)|order today|taste|craving|special offer|"
+    r"limited time|deal drop|exclusive offer|use code)\b", I)
+PROMO = re.compile(
+    r"(?:[0-9]+\s?%\s?off\b|"
+    r"\b(?:save|get|enjoy|claim)\s+(?:" + CUR_ALT + r")\s*" + NUM + r"\s+(?:off|when you spend|on your order)|"
+    r"\b(?:from|just|only)\s+(?:" + CUR_ALT + r")\s*" + NUM + r"\b|"
+    r"\b(?:pizzas?|meals?|burgers?)\s+(?:from|for)\s+(?:" + CUR_ALT + r")\s*" + NUM + r")",
+    I)
 
 STRONG_IN = re.compile(
     r"\b(?:received from|you(?:'ve|’ve| have)? received|received|sent you|paid you|refund(?:ed)?|cashback|salary|wages|payroll|"
@@ -79,7 +87,10 @@ STRONG_OUT = re.compile(
     r"card payment|sent to|sent|transfer to)\b", I)
 WEAK_IN = re.compile(r"\b(?:received|incoming|has arrived|arrived|cashback|interest|credit)\b(?!\s*card)", I)
 WEAK_OUT = re.compile(
-    r"\b(?:payment|paid|pay|transaction|approved|contactless|card ending|debit|subscription|bill|order|spend|charge)\b", I)
+    r"\b(?:payment|paid|pay|transaction|approved|contactless|card ending|debit|subscription|bill|charge)\b", I)
+FINANCIAL_TX_VERB = re.compile(
+    r"\b(?:spent|paid|debited|charged|withdrawal|withdrawn|purchase[ds]?|card ending|received|credited|refund(?:ed)?|cashback|top(?:ped)?[ -]?up|direct debit|standing order)\b",
+    I)
 
 NAME = r"([A-Za-z0-9&'][^.,;:!?\n•*()|]{0,48}?)"
 TERM = r"(?=\s+(?:on|via|using|with|ref|reference|card|was|has|is|have|and|for)\b|\s+at\s+[0-9]|\s+-\s|[.,;:!?\n•*()|]|\s*$)"
@@ -285,6 +296,8 @@ def parse_spend(pkg: str, title, text):
     _, sign, currency, amount, end = money
     if amount <= 0 or amount >= 1_000_000:
         return None
+    if trust == "SMS" and not FINANCIAL_TX_VERB.search(scrubbed):
+        return None
     if sign == "+":
         tx_type = TYPE_IN
     elif sign in ("-", "\u2212"):
@@ -448,10 +461,18 @@ class TestSpendParser(unittest.TestCase):
 
     def test_promo_ignored(self):
         self.assertIsNone(parse_spend(PAYPAL, "PayPal", "Get 20% off when you spend £50.00"))
+        # Domino's food deal alerts
+        self.assertIsNone(parse_spend("com.dominos.uk", "Domino's Pizza", "Save £10 when you spend £30! Piping hot pizza delivered"))
+        self.assertIsNone(parse_spend("com.google.android.apps.messaging", "Dominos", "Domino's: Any 2 large pizzas from £19.99! Use code PIZZA20 to order now"))
+        self.assertIsNone(parse_spend("com.google.android.apps.messaging", "Dominos", "Save £12 when you spend £35 on your favorite pizzas tonight!"))
+        self.assertIsNone(parse_spend("com.dominos.android", "Domino's", "Deal drop! Get any large pizza for £11.99 today only"))
+        self.assertIsNone(parse_spend("com.google.android.apps.messaging", "FoodPromo", "Special offer: Order now and save £5 on orders over £20 with code DEAL5"))
+        self.assertIsNone(parse_spend(HSBC, "HSBC Deals", "Special offer: Save up to £15 at selected retailers this month"))
 
     def test_non_bank_app_ignored(self):
         self.assertIsNone(parse_spend("com.whatsapp", "Alice", "I paid £20.00 for dinner"))
         self.assertIsNone(parse_spend("com.google.android.gm", "Amazon", "Your order of £12.99 has shipped"))
+        self.assertIsNone(parse_spend("com.dominos.uk", "Domino's", "Your order is in the oven!"))
 
     def test_unrelated_notification(self):
         self.assertIsNone(parse_spend("com.whatsapp", "Alice", "Hey, are we still meeting for lunch?"))

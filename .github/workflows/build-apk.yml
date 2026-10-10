@@ -55,10 +55,13 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.5.3
-        name: "SpendTracker Release v1.5.3 (Eliminate Checking Source & Database Consolidation)"
+        tag_name: v1.5.4
+        name: "SpendTracker Release v1.5.4 (Filter Promotional Adverts & Domino's Deal Alerts)"
         body: |
-          ### SpendTracker v1.5.3 - Key Fixes & Enhancements
+          ### SpendTracker v1.5.4 - Key Fixes & Enhancements
+          - 🍕 **Promotional & Advertisement Notification Filtering**:
+            - Added comprehensive protection against promotional deals, retail offers, and marketing notifications (e.g. Domino's "Save £10 when you spend £30", pizza deals, voucher codes, discounts).
+            - Enforced strict financial transaction verification for SMS alerts (`debited`, `spent`, `paid at`, `card ending`, etc.) so marketing messages mentioning "spend" or "order" cannot be parsed as spend.
           - 🏦 **Eliminated Legacy "Checking" Account**:
             - Legacy seeded "Checking" / "current account" sources are cleanly remapped and consolidated into the canonical Chase bank account.
             - Added Room Migration 6 -> 7 and automated database startup cleanup that safely migrates any existing transactions referencing "Checking" to Chase, and permanently purges "Checking" from accounts, pickers, and filter chips.
