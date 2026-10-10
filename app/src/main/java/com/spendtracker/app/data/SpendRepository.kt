@@ -52,6 +52,7 @@ class SpendRepository(
         transactionDao.observeAll(),
         accountDao.observeAll(),
         catalogDao.observeCategories()
+    ) { txs, accounts, cats ->
         val rawAccMap = accounts.associateBy { it.id }
         val dedupAccounts = accounts
             .map { it.copy(name = normalizeBankName(it.name)) }
