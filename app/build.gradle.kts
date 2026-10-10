@@ -12,8 +12,8 @@ android {
         applicationId = "com.spendtracker.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 14
-        versionName = "1.5.4"
+        versionCode = 15
+        versionName = "1.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -61,6 +61,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
+    implementation("androidx.biometric:biometric:1.1.0")
 
     // Jetpack Compose & Material 3
     val composeBom = platform("androidx.compose:compose-bom:2024.02.00")

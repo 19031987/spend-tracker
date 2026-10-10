@@ -49,6 +49,7 @@ class SettingsViewModel(
 
     val currencySymbol: Flow<String> = preferences.observeCurrency()
     val themeMode: Flow<String> = preferences.observeTheme()
+    val isBiometricLockEnabled: Flow<Boolean> = preferences.observeBiometricLock()
 
     fun getCurrentCurrency(): String = preferences.currencySymbol
     fun setCurrency(symbol: String) { preferences.currencySymbol = symbol }
@@ -58,6 +59,9 @@ class SettingsViewModel(
 
     fun getThemeMode(): String = preferences.themeMode
     fun setThemeMode(mode: String) { preferences.themeMode = mode }
+
+    fun isBiometricEnabled(): Boolean = preferences.isBiometricLockEnabled
+    fun setBiometricEnabled(enabled: Boolean) { preferences.isBiometricLockEnabled = enabled }
 
     fun selectTab(tab: SettingsTab) {
         _uiState.value = _uiState.value.copy(selectedTab = tab)

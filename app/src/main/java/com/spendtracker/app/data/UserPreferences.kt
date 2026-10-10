@@ -15,6 +15,7 @@ class UserPreferences(context: Context) {
         private const val KEY_CURRENCY = "pref_currency_symbol"
         private const val KEY_DEFAULT_PERIOD = "pref_default_period"
         private const val KEY_THEME = "pref_theme_mode"
+        private const val KEY_BIOMETRIC_LOCK = "pref_biometric_lock_enabled"
 
         const val THEME_SYSTEM = "SYSTEM"
         const val THEME_LIGHT = "LIGHT"
@@ -35,6 +36,10 @@ class UserPreferences(context: Context) {
         get() = prefs.getString(KEY_THEME, THEME_SYSTEM) ?: THEME_SYSTEM
         set(value) = prefs.edit().putString(KEY_THEME, value).apply()
 
+    var isBiometricLockEnabled: Boolean
+        get() = prefs.getBoolean(KEY_BIOMETRIC_LOCK, false)
+        set(value) = prefs.edit().putBoolean(KEY_BIOMETRIC_LOCK, value).apply()
+
     fun observeCurrency(): Flow<String> = callbackFlow {
         trySend(currencySymbol)
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -48,6 +53,15 @@ class UserPreferences(context: Context) {
         trySend(themeMode)
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == KEY_THEME) trySend(themeMode)
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    fun observeBiometricLock(): Flow<Boolean> = callbackFlow {
+        trySend(isBiometricLockEnabled)
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_BIOMETRIC_LOCK) trySend(isBiometricLockEnabled)
         }
         prefs.registerOnSharedPreferenceChangeListener(listener)
         awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }

@@ -55,13 +55,18 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.5.4
-        name: "SpendTracker Release v1.5.4 (Filter Promotional Adverts & Domino's Deal Alerts)"
+        tag_name: v1.6.0
+        name: "SpendTracker Release v1.6.0 (Fingerprint & Biometric App Access)"
         body: |
-          ### SpendTracker v1.5.4 - Key Fixes & Enhancements
+          ### SpendTracker v1.6.0 - Key Features & Enhancements
+          - 🔒 **Fingerprint & Biometric Authentication Access**:
+            - Added biometric fingerprint lock to protect app access and financial records.
+            - Integrated Android Jetpack `BiometricPrompt` supporting fingerprint sensors, face recognition, and fallback device credentials (PIN/Pattern).
+            - Added a dedicated "Fingerprint / Biometric Lock" toggle in **Settings > Preferences**.
+            - Built responsive `BiometricLockScreen` ensuring data stays secure until verified.
           - 🍕 **Promotional & Advertisement Notification Filtering**:
-            - Added comprehensive protection against promotional deals, retail offers, and marketing notifications (e.g. Domino's "Save £10 when you spend £30", pizza deals, voucher codes, discounts).
-            - Enforced strict financial transaction verification for SMS alerts (`debited`, `spent`, `paid at`, `card ending`, etc.) so marketing messages mentioning "spend" or "order" cannot be parsed as spend.
+            - Protection against promotional deals, retail offers, and marketing notifications (e.g. Domino's "Save £10 when you spend £30", pizza deals, voucher codes, discounts).
+            - Enforced strict financial transaction verification for SMS alerts (`debited`, `spent`, `paid at`, `card ending`, etc.).
           - 🏦 **Eliminated Legacy "Checking" Account**:
             - Legacy seeded "Checking" / "current account" sources are cleanly remapped and consolidated into the canonical Chase bank account.
             - Added Room Migration 6 -> 7 and automated database startup cleanup that safely migrates any existing transactions referencing "Checking" to Chase, and permanently purges "Checking" from accounts, pickers, and filter chips.
