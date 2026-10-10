@@ -62,6 +62,7 @@ import com.spendtracker.app.data.AccountEntity
 import com.spendtracker.app.data.CategoryEntity
 import com.spendtracker.app.data.CategoryGroupEntity
 import com.spendtracker.app.data.TransactionType
+import com.spendtracker.app.data.normalizeBankName
 import com.spendtracker.app.domain.TransactionItem
 import java.math.BigDecimal
 import java.text.SimpleDateFormat
@@ -109,15 +110,23 @@ fun EditTransactionSheet(
     var showCategoryPicker by rememberSaveable { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
-    val effectiveSource = accounts.firstOrNull { it.id == sourceId }
-        ?: accounts.firstOrNull { it.name.equals(transaction.source, ignoreCase = true) }
-        ?: accounts.firstOrNull { it.name.equals(transaction.accountName, ignoreCase = true) }
-        ?: accounts.firstOrNull { it.name.equals("Chase", ignoreCase = true) }
-        ?: accounts.firstOrNull()
+    val deduplicatedAccounts = remember(accounts) {
+        accounts
+            .map { it.copy(name = normalizeBankName(it.name)) }
+            .distinctBy { it.name.lowercase(Locale.ROOT) }
+            .sortedBy { it.name }
+    }
 
-    val effectiveDestination = accounts.firstOrNull { it.id == destinationId && it.id != effectiveSource?.id }
-        ?: accounts.firstOrNull { it.id != effectiveSource?.id && it.name.equals("HSBC", ignoreCase = true) }
-        ?: accounts.firstOrNull { it.id != effectiveSource?.id }
+    val effectiveSource = deduplicatedAccounts.firstOrNull { it.id == sourceId }
+        ?: deduplicatedAccounts.firstOrNull { it.name.trim().equals(normalizeBankName(transaction.source), ignoreCase = true) }
+        ?: deduplicatedAccounts.firstOrNull { it.name.trim().equals(normalizeBankName(transaction.accountName), ignoreCase = true) }
+        ?: deduplicatedAccounts.firstOrNull { it.name.trim().equals("Chase", ignoreCase = true) }
+        ?: deduplicatedAccounts.firstOrNull()
+
+    val effectiveDestination = deduplicatedAccounts.firstOrNull { it.id == destinationId && it.id != effectiveSource?.id }
+        ?: deduplicatedAccounts.firstOrNull { it.id != effectiveSource?.id && it.name.trim().equals(normalizeBankName(transaction.destinationAccountName), ignoreCase = true) }
+        ?: deduplicatedAccounts.firstOrNull { it.id != effectiveSource?.id && it.name.trim().equals("HSBC", ignoreCase = true) }
+        ?: deduplicatedAccounts.firstOrNull { it.id != effectiveSource?.id }
 
     val activeCategory = categories.firstOrNull { it.key == selectedCategoryKey }
 
@@ -210,7 +219,7 @@ fun EditTransactionSheet(
                 Box(modifier = Modifier.weight(1f)) {
                     AccountPicker(
                         label = if (type == TransactionType.TRANSFER) "From account" else "Account (Source)",
-                        accounts = accounts,
+                        accounts = deduplicatedAccounts,
                         selected = effectiveSource,
                         onSelected = { sourceId = it.id }
                     )
@@ -220,7 +229,7 @@ fun EditTransactionSheet(
                     Box(modifier = Modifier.weight(1f)) {
                         AccountPicker(
                             label = "To account",
-                            accounts = accounts.filter { it.id != effectiveSource?.id },
+                            accounts = deduplicatedAccounts.filter { it.id != effectiveSource?.id },
                             selected = effectiveDestination,
                             onSelected = { destinationId = it.id }
                         )
@@ -480,6 +489,12 @@ private fun AccountPicker(
     onSelected: (AccountEntity) -> Unit
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
+    val uniqueAccounts = remember(accounts) {
+        accounts
+            .map { it.copy(name = normalizeBankName(it.name)) }
+            .distinctBy { it.name.lowercase(Locale.ROOT) }
+            .sortedBy { it.name }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
         Box {
@@ -488,12 +503,12 @@ private fun AccountPicker(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Text(selected?.name ?: "Select account", maxLines = 1, modifier = Modifier.weight(1f))
+                Text(selected?.name?.trim() ?: "Select account", maxLines = 1, modifier = Modifier.weight(1f))
             }
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                accounts.forEach { account ->
+                uniqueAccounts.forEach { account ->
                     DropdownMenuItem(
-                        text = { Text(account.name) },
+                        text = { Text(account.name.trim()) },
                         onClick = {
                             onSelected(account)
                             expanded = false

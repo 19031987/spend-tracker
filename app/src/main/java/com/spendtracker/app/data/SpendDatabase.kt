@@ -155,7 +155,8 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
      * Returns the existing or new row ID.
      */
     fun insertExpense(expense: ParsedExpense, timestamp: Long = System.currentTimeMillis(), windowMillis: Long = 60_000L): Long {
-        val existing = findDuplicate(expense.amount, expense.source, timestamp, windowMillis)
+        val normalizedSource = normalizeBankName(expense.source)
+        val existing = findDuplicate(expense.amount, normalizedSource, timestamp, windowMillis)
         if (existing != null) {
             // Update the existing record with vendor/reference enrichment rather than creating a duplicate row
             val db = writableDatabase
@@ -197,7 +198,7 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
             put(COL_CURRENCY, expense.currency)
             put(COL_MERCHANT, expense.merchant)
             put(COL_CATEGORY, expense.category)
-            put(COL_SOURCE, expense.source)
+            put(COL_SOURCE, normalizedSource)
             put(COL_TIMESTAMP, timestamp)
             put(COL_RAW_TEXT, expense.rawText)
         }
@@ -220,7 +221,7 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
             put(COL_CURRENCY, currency)
             put(COL_MERCHANT, merchant)
             put(COL_CATEGORY, category)
-            put(COL_SOURCE, source)
+            put(COL_SOURCE, normalizeBankName(source))
             put(COL_TIMESTAMP, timestamp)
             put(COL_RAW_TEXT, "Manual Entry: $type $currency$amount $merchant")
         }
@@ -297,6 +298,24 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
                    OR LOWER($COL_RAW_TEXT) LIKE '%approve your%'
                    OR LOWER($COL_RAW_TEXT) LIKE '%declined%'
             """.trimIndent())
+
+            // 5. Trim and normalize bank source names
+            db.execSQL("UPDATE $TABLE_NAME SET $COL_SOURCE = TRIM($COL_SOURCE)")
+            val srcCursor = db.rawQuery("SELECT DISTINCT $COL_SOURCE FROM $TABLE_NAME WHERE $COL_SOURCE IS NOT NULL", null)
+            val distinctSources = mutableListOf<String>()
+            while (srcCursor.moveToNext()) {
+                val s = srcCursor.getString(0)
+                if (!s.isNullOrBlank()) distinctSources.add(s)
+            }
+            srcCursor.close()
+
+            for (raw in distinctSources) {
+                val normalized = normalizeBankName(raw)
+                if (normalized != raw) {
+                    val cv = ContentValues().apply { put(COL_SOURCE, normalized) }
+                    db.update(TABLE_NAME, cv, "$COL_SOURCE = ?", arrayOf(raw))
+                }
+            }
 
         } catch (e: Exception) {
             e.printStackTrace()
@@ -391,12 +410,13 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
     fun getSourceTotals(): Map<String, Pair<Double, Double>> {
         val db = readableDatabase
         val cursor = db.rawQuery(
-            "SELECT $COL_SOURCE, $COL_TYPE, SUM($COL_AMOUNT) FROM $TABLE_NAME GROUP BY $COL_SOURCE, $COL_TYPE",
+            "SELECT TRIM($COL_SOURCE), $COL_TYPE, SUM($COL_AMOUNT) FROM $TABLE_NAME GROUP BY LOWER(TRIM($COL_SOURCE)), $COL_TYPE",
             null
         )
         val map = mutableMapOf<String, Pair<Double, Double>>()
         while (cursor.moveToNext()) {
-            val source = cursor.getString(0) ?: "Card Payment"
+            val rawSource = cursor.getString(0) ?: "Chase"
+            val source = normalizeBankName(rawSource)
             val type = cursor.getString(1) ?: "OUT"
             val sum = cursor.getDouble(2)
 

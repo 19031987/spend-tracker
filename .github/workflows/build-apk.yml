@@ -55,14 +55,21 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.5.0
-        name: "SpendTracker Release v1.5.0 (Deduplication, Directional Parsing, Baseline Guard, Dynamic Banks)"
+        tag_name: v1.5.1
+        name: "SpendTracker Release v1.5.1 (Bank Source Deduplication & Consolidation)"
         body: |
-          ### SpendTracker v1.5.0 - Key Fixes & Enhancements
-          - ⏱️ **Time-Window Fingerprinting (Deduplication)**: Deduplication window (±60 seconds) matching amount and bank source. Subsequent rapid notifications enrich the existing record with vendor/type details rather than duplicating rows.
-          - ↕️ **Strict Directional Parsing**: Money In ("received", "refund", "cashback", "paid you", "deposit") is recorded under income; Money Out ("paid", "spent", "purchase", "card payment") is recorded under spend; internal transfers between own accounts are safely nullified.
-          - 📊 **Baseline Guard for First Load Comparisons**: Replaces misleading percentage deltas (+100% on fresh installs) with an onboarding state ("Building your baseline: comparisons will appear after your first week/month").
-          - 🏦 **Dynamic Bank Discovery**: Automatically extracts bank app identifiers and dynamically registers new banks in the accounts list, making them immediately available in filters and editors.
+          ### SpendTracker v1.5.1 - Key Fixes & Enhancements
+          - 🏦 **Bank Source Deduplication & Consolidation**:
+            - Added case-insensitive unique SQLite index on `accounts(name COLLATE NOCASE)` to prevent duplicate bank sources.
+            - Implemented automated database migration and `onOpen` consolidation that safely remaps existing transactions referencing duplicate account rows to the canonical account ID before removing duplicates.
+            - Normalized bank names across notifications and UI (handling case differences, aliases like "Chase UK", "Barclaycard", and trailing terms like "Bank" / "Account").
+            - Deduplicated account lists across filter chips, transaction editors, and transfer pickers.
+          - ⏱️ **Time-Window Fingerprinting (Deduplication)**:
+            - Deduplication window (±60s) matching amount and bank source with in-place record enrichment.
+          - ↕️ **Strict Directional Parsing**:
+            - Semantic Money In / Money Out classification with internal transfer nullification between own accounts.
+          - 📊 **Baseline Guard for First Load Comparisons**:
+            - Replaces premature delta percentages with onboarding guidance until baseline data is collected.
         files: dist/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

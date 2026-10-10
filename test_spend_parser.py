@@ -746,20 +746,131 @@ class TestInternalTransferDetection(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------------------
-# Dynamic Bank Discovery Logic & Tests
+# Dynamic Bank Discovery & Deduplication Logic & Tests
 # ---------------------------------------------------------------------------------------
+def normalize_bank_name(raw: str, fallback: str = "Others") -> str:
+    if not raw or not raw.strip():
+        return fallback
+    trimmed = re.sub(r"\s+", " ", raw.strip())
+    lower = trimmed.lower()
+    if lower == "chase" or lower == "chase bank" or lower == "chase uk" or lower.startswith("chase ") or lower.endswith(" chase"):
+        return "Chase"
+    if lower == "hsbc" or lower == "hsbc uk" or lower == "hsbc bank" or lower.startswith("hsbc ") or lower.endswith(" hsbc"):
+        return "HSBC"
+    if lower == "monzo" or lower == "monzo bank" or lower.startswith("monzo ") or lower.endswith(" monzo"):
+        return "Monzo"
+    if lower == "starling" or lower == "starling bank" or lower.startswith("starling ") or lower.endswith(" starling"):
+        return "Starling"
+    if lower == "revolut" or lower.startswith("revolut ") or lower.endswith(" revolut"):
+        return "Revolut"
+    if lower in ("barclays", "barclay", "barclaycard") or lower.startswith("barclays ") or lower.startswith("barclay ") or lower.endswith(" barclays"):
+        return "Barclays"
+    if lower == "santander" or lower == "santander uk" or lower.startswith("santander ") or lower.endswith(" santander"):
+        return "Santander"
+    if lower in ("natwest", "nat west") or lower.startswith("natwest ") or lower.startswith("nat west ") or lower.endswith(" natwest"):
+        return "NatWest"
+    if lower in ("lloyds", "lloyds bank") or lower.startswith("lloyds ") or lower.endswith(" lloyds"):
+        return "Lloyds"
+    if lower == "halifax" or lower == "halifax bank" or lower.startswith("halifax ") or lower.endswith(" halifax"):
+        return "Halifax"
+    if lower == "nationwide" or lower == "nationwide building society" or lower.startswith("nationwide ") or lower.endswith(" nationwide"):
+        return "Nationwide"
+    if lower == "paypal" or lower.startswith("paypal ") or lower.endswith(" paypal"):
+        return "PayPal"
+    if lower in ("google pay", "google wallet", "gpay") or lower.startswith("google pay") or lower.startswith("google wallet") or lower.startswith("gpay"):
+        return "Google Pay"
+    if lower == "apple pay" or lower.startswith("apple pay") or lower.endswith(" apple pay"):
+        return "Apple Pay"
+    if lower in ("samsung pay", "samsung wallet") or lower.startswith("samsung pay") or lower.startswith("samsung wallet"):
+        return "Samsung Pay"
+    if lower in ("amex", "american express", "americanexpress") or lower.startswith("amex ") or lower.startswith("american express"):
+        return "Amex"
+    if lower in ("tsb", "tsb bank") or lower.startswith("tsb "):
+        return "TSB"
+    if lower in ("rbs", "royal bank of scotland") or lower.startswith("rbs "):
+        return "RBS"
+    if lower in ("first direct", "firstdirect") or lower.startswith("first direct") or lower.startswith("firstdirect"):
+        return "First Direct"
+    if lower in ("virgin money",) or lower.startswith("virgin money"):
+        return "Virgin Money"
+    if lower in ("metro bank", "metro") or lower.startswith("metro bank") or lower.startswith("metro "):
+        return "Metro Bank"
+    if lower in ("kroo", "kroo bank") or lower.startswith("kroo "):
+        return "Kroo"
+    if lower in ("savings", "saving") or lower.startswith("savings ") or lower.startswith("saving "):
+        return "Savings"
+    if lower in ("credit card", "creditcard") or lower.startswith("credit card") or lower.startswith("creditcard"):
+        return "Credit Card"
+    if lower in ("others", "other", "card payment", "bank alert", "unknown", "bank", "banking", "mobile banking", "mobile", "app") or lower.startswith("other "):
+        return "Others"
+    return " ".join(w.capitalize() for w in trimmed.split(" "))
+
+
 def resolve_bank_name(package_name: str, parsed_source: str, app_label: str = None) -> str:
-    if parsed_source and parsed_source.lower() not in ("card payment", "others") and parsed_source.strip():
-        return parsed_source
+    norm_parsed = normalize_bank_name(parsed_source)
+    if norm_parsed != "Others" and norm_parsed.strip():
+        return norm_parsed
     if app_label and app_label.strip():
-        clean = re.sub(r"(?i)\b(?:mobile banking|banking|mobile|uk|app)\b", "", app_label).strip()
-        if clean:
-            return clean
+        label_lower = app_label.strip().lower()
+        if "chase" in label_lower:
+            return "Chase"
+        if "hsbc" in label_lower:
+            return "HSBC"
+        if "monzo" in label_lower:
+            return "Monzo"
+        if "starling" in label_lower:
+            return "Starling"
+        if "revolut" in label_lower:
+            return "Revolut"
+        if "barclay" in label_lower:
+            return "Barclays"
+        if "santander" in label_lower:
+            return "Santander"
+        if "natwest" in label_lower or "nat west" in label_lower:
+            return "NatWest"
+        if "lloyds" in label_lower:
+            return "Lloyds"
+        if "halifax" in label_lower:
+            return "Halifax"
+        if "nationwide" in label_lower:
+            return "Nationwide"
+        if "paypal" in label_lower:
+            return "PayPal"
+        if "google" in label_lower or "gpay" in label_lower:
+            return "Google Pay"
+        if "apple" in label_lower:
+            return "Apple Pay"
+        if "samsung" in label_lower:
+            return "Samsung Pay"
+        if "amex" in label_lower or "american express" in label_lower:
+            return "Amex"
+        if "tsb" in label_lower:
+            return "TSB"
+        if "rbs" in label_lower or "royal bank" in label_lower:
+            return "RBS"
+        if "first direct" in label_lower or "firstdirect" in label_lower:
+            return "First Direct"
+        if "virgin money" in label_lower:
+            return "Virgin Money"
+        if "metro" in label_lower:
+            return "Metro Bank"
+        if "kroo" in label_lower:
+            return "Kroo"
+
+        clean = re.sub(r"(?i)\s*[:\-•|].*", "", app_label)
+        clean = re.sub(r"(?i)\b(?:mobile banking|banking|mobile|uk|app)\b", "", clean).strip()
+        if clean and clean.lower() not in ("bank", "banking"):
+            norm = normalize_bank_name(clean)
+            if norm != "Others" and norm.strip():
+                return norm
+
     pkg_lower = package_name.lower()
     mapping = {
         "chase": "Chase",
+        "jpmorgan": "Chase",
         "hsbc": "HSBC",
         "monzo": "Monzo",
+        "getmondo": "Monzo",
         "starling": "Starling",
         "revolut": "Revolut",
         "barclay": "Barclays",
@@ -768,14 +879,82 @@ def resolve_bank_name(package_name: str, parsed_source: str, app_label: str = No
         "lloyds": "Lloyds",
         "halifax": "Halifax",
         "nationwide": "Nationwide",
+        "paypal": "PayPal",
+        "amex": "Amex",
+        "americanexpress": "Amex",
+        "tsb": "TSB",
+        "rbs": "RBS",
+        "firstdirect": "First Direct",
+        "virginmoney": "Virgin Money",
+        "metrobank": "Metro Bank",
+        "kroo": "Kroo",
+        "walletnfcrel": "Google Pay",
+        "paisa": "Google Pay",
     }
     for k, v in mapping.items():
         if k in pkg_lower:
             return v
-    parts = [p for p in package_name.split(".") if len(p) > 2 and p not in ("com", "org", "net", "android", "uk", "co", "app")]
+    if "wallet" in pkg_lower:
+        return "Google Pay"
+    if "samsung" in pkg_lower and "pay" in pkg_lower:
+        return "Samsung Pay"
+    parts = [p for p in package_name.split(".") if len(p) > 2 and p not in ("com", "org", "net", "android", "uk", "co", "app", "mobile", "banking")]
     if parts:
-        return parts[-1].capitalize()
-    return "Card Payment"
+        norm = normalize_bank_name(parts[-1])
+        if norm.lower() in ("bank", "banking"):
+            return "Others"
+        return norm
+    return "Others"
+
+
+def deduplicate_accounts(accounts_list):
+    """Mirror of AccountDao / SpendRepository / UI deduplication logic."""
+    seen = set()
+    result = []
+    for acc in accounts_list:
+        name = acc["name"] if isinstance(acc, dict) else acc
+        norm = name.strip().lower()
+        if norm not in seen:
+            seen.add(norm)
+            result.append(acc)
+    return result
+
+
+def consolidate_database_accounts(accounts, transactions):
+    """
+    Mirror of Room migration MIGRATION_4_5 & cleanupAndConsolidateAccounts.
+    Remaps transaction foreign keys to canonical MIN(id) and eliminates duplicate accounts.
+    """
+    # 1. Group accounts by lower(trim(name))
+    canonical_map = {}  # norm_name -> min_id
+    id_to_canonical = {}
+    for acc in sorted(accounts, key=lambda x: x["id"]):
+        norm = acc["name"].strip().lower()
+        if norm not in canonical_map:
+            canonical_map[norm] = acc["id"]
+        id_to_canonical[acc["id"]] = canonical_map[norm]
+
+    # 2. Re-link transactions
+    updated_txs = []
+    for tx in transactions:
+        tx_copy = dict(tx)
+        if "accountId" in tx_copy and tx_copy["accountId"] in id_to_canonical:
+            tx_copy["accountId"] = id_to_canonical[tx_copy["accountId"]]
+        if "destinationAccountId" in tx_copy and tx_copy["destinationAccountId"] in id_to_canonical:
+            tx_copy["destinationAccountId"] = id_to_canonical[tx_copy["destinationAccountId"]]
+        # Normalize source string
+        acc_obj = next((a for a in accounts if a["id"] == tx_copy.get("accountId")), None)
+        if acc_obj:
+            tx_copy["source"] = normalize_bank_name(acc_obj["name"])
+        updated_txs.append(tx_copy)
+
+    # 3. Retain only canonical MIN(id) accounts
+    cleaned_accounts = [acc for acc in accounts if acc["id"] == canonical_map[acc["name"].strip().lower()]]
+    # Normalize names in accounts
+    for acc in cleaned_accounts:
+        acc["name"] = normalize_bank_name(acc["name"])
+
+    return cleaned_accounts, updated_txs
 
 
 class TestDynamicBankDiscovery(unittest.TestCase):
@@ -799,6 +978,78 @@ class TestDynamicBankDiscovery(unittest.TestCase):
             accounts.add(new_source)
         self.assertIn("Monzo", accounts)
         self.assertEqual(len(accounts), 3)
+
+    def test_normalize_bank_name_whitespace_and_case(self):
+        self.assertEqual(normalize_bank_name("  chase  "), "Chase")
+        self.assertEqual(normalize_bank_name("CHASE"), "Chase")
+        self.assertEqual(normalize_bank_name("Chase UK"), "Chase")
+        self.assertEqual(normalize_bank_name(" hsbc "), "HSBC")
+        self.assertEqual(normalize_bank_name("HSBC UK Mobile Banking"), "HSBC")
+        self.assertEqual(normalize_bank_name("  monzo  "), "Monzo")
+        self.assertEqual(normalize_bank_name("barclays"), "Barclays")
+        self.assertEqual(normalize_bank_name("Barclaycard"), "Barclays")
+        self.assertEqual(normalize_bank_name("others"), "Others")
+        self.assertEqual(normalize_bank_name("Card Payment"), "Others")
+        self.assertEqual(normalize_bank_name("Bank Alert"), "Others")
+
+    def test_deduplicate_accounts_list(self):
+        raw_accounts = [
+            {"id": 1, "name": "Chase"},
+            {"id": 2, "name": "HSBC"},
+            {"id": 3, "name": "chase"},
+            {"id": 4, "name": " Chase "},
+            {"id": 5, "name": "HSBC"},
+            {"id": 6, "name": "Monzo"},
+            {"id": 7, "name": "Others"},
+            {"id": 8, "name": "others"},
+        ]
+        deduped = deduplicate_accounts(raw_accounts)
+        names = [a["name"].strip().lower() for a in deduped]
+        self.assertEqual(len(names), 4)
+        self.assertEqual(names, ["chase", "hsbc", "monzo", "others"])
+
+    def test_database_consolidation_and_relinking(self):
+        accounts = [
+            {"id": 1, "name": "Chase"},
+            {"id": 2, "name": "HSBC"},
+            {"id": 3, "name": "chase"},
+            {"id": 4, "name": "HSBC "},
+            {"id": 5, "name": "Others"},
+            {"id": 6, "name": "others"},
+        ]
+        transactions = [
+            {"id": 101, "accountId": 1, "destinationAccountId": 2, "source": "Chase"},
+            {"id": 102, "accountId": 3, "destinationAccountId": 4, "source": "chase"},
+            {"id": 103, "accountId": 4, "destinationAccountId": None, "source": "HSBC "},
+            {"id": 104, "accountId": 6, "destinationAccountId": None, "source": "others"},
+        ]
+        cleaned_accounts, updated_txs = consolidate_database_accounts(accounts, transactions)
+
+        # Accounts consolidated: only IDs 1 (Chase), 2 (HSBC), 5 (Others) remain
+        self.assertEqual([a["id"] for a in cleaned_accounts], [1, 2, 5])
+        self.assertEqual([a["name"] for a in cleaned_accounts], ["Chase", "HSBC", "Others"])
+
+        # Transactions re-linked: accountId 3 -> 1, destinationAccountId 4 -> 2, accountId 6 -> 5
+        self.assertEqual(updated_txs[0]["accountId"], 1)
+        self.assertEqual(updated_txs[0]["destinationAccountId"], 2)
+        self.assertEqual(updated_txs[1]["accountId"], 1)
+        self.assertEqual(updated_txs[1]["destinationAccountId"], 2)
+        self.assertEqual(updated_txs[2]["accountId"], 2)
+        self.assertEqual(updated_txs[3]["accountId"], 5)
+        self.assertEqual(updated_txs[1]["source"], "Chase")
+        self.assertEqual(updated_txs[3]["source"], "Others")
+
+    def test_ui_filter_pills_no_duplicates(self):
+        accounts = [
+            {"id": 1, "name": "Chase"},
+            {"id": 2, "name": "chase"},
+            {"id": 3, "name": "HSBC"},
+            {"id": 4, "name": "HSBC "},
+        ]
+        deduped = deduplicate_accounts(accounts)
+        filter_keys = [f"BANK_{a['name'].strip().lower()}" for a in deduped]
+        self.assertEqual(filter_keys, ["BANK_chase", "BANK_hsbc"])
+        self.assertEqual(len(filter_keys), len(set(filter_keys)))
 
 
 # ---------------------------------------------------------------------------------------

@@ -53,12 +53,8 @@ class SpendNotificationListenerService : NotificationListenerService() {
                 pm.getApplicationLabel(appInfo).toString()
             }.getOrNull()?.trim()
 
-            val detectedBankName = resolveBankName(packageName, parsed.source, appLabel)
-            val parsedWithBank = if (parsed.source.isBlank() || parsed.source.equals("Card Payment", ignoreCase = true) || parsed.source.equals("Others", ignoreCase = true)) {
-                parsed.copy(source = detectedBankName)
-            } else {
-                parsed
-            }
+            val detectedBankName = normalizeBankName(resolveBankName(packageName, parsed.source, appLabel))
+            val parsedWithBank = parsed.copy(source = detectedBankName)
 
             Log.i(TAG, "Detected [${parsedWithBank.type}] ${parsedWithBank.source}: ${parsedWithBank.currency}${parsedWithBank.amount} at ${parsedWithBank.merchant} (${parsedWithBank.category})")
 
@@ -85,12 +81,7 @@ class SpendNotificationListenerService : NotificationListenerService() {
                 try {
                     val roomDb = AppDatabase.get(applicationContext)
 
-                    val sourceAccount = roomDb.accountDao().findByName(detectedBankName) ?: run {
-                        val id = roomDb.accountDao().insert(com.spendtracker.app.data.AccountEntity(name = detectedBankName))
-                        Log.i(TAG, "Dynamically auto-registered new bank entity: $detectedBankName (id=$id)")
-                        com.spendtracker.app.data.AccountEntity(id = id, name = detectedBankName)
-                    }
-
+                    val sourceAccount = roomDb.accountDao().getOrCreate(detectedBankName)
                     val allAccounts = roomDb.accountDao().getAll()
                     val fullAlertText = "${title.orEmpty()} ${content.orEmpty()} ${parsedWithBank.merchant}".lowercase(java.util.Locale.ROOT)
 
@@ -259,23 +250,54 @@ class SpendNotificationListenerService : NotificationListenerService() {
     }
 
     private fun resolveBankName(packageName: String, parsedSource: String, appLabel: String?): String {
-        if (!parsedSource.equals("Card Payment", ignoreCase = true) &&
-            !parsedSource.equals("Others", ignoreCase = true) &&
-            parsedSource.isNotBlank()
-        ) {
-            return parsedSource
+        val normParsed = normalizeBankName(parsedSource)
+        if (normParsed != "Others" && normParsed.isNotBlank()) {
+            return normParsed
         }
+
         if (!appLabel.isNullOrBlank()) {
-            val clean = appLabel
-                .replace(Regex("(?i)\\b(?:mobile banking|banking|mobile|uk|app)\\b"), "")
-                .trim()
-            if (clean.isNotBlank()) return clean
+            val labelLower = appLabel.lowercase(java.util.Locale.ROOT)
+            when {
+                labelLower.contains("chase") -> return "Chase"
+                labelLower.contains("hsbc") -> return "HSBC"
+                labelLower.contains("monzo") -> return "Monzo"
+                labelLower.contains("starling") -> return "Starling"
+                labelLower.contains("revolut") -> return "Revolut"
+                labelLower.contains("barclay") -> return "Barclays"
+                labelLower.contains("santander") -> return "Santander"
+                labelLower.contains("natwest") || labelLower.contains("nat west") -> return "NatWest"
+                labelLower.contains("lloyds") -> return "Lloyds"
+                labelLower.contains("halifax") -> return "Halifax"
+                labelLower.contains("nationwide") -> return "Nationwide"
+                labelLower.contains("paypal") -> return "PayPal"
+                labelLower.contains("google") || labelLower.contains("gpay") -> return "Google Pay"
+                labelLower.contains("apple") -> return "Apple Pay"
+                labelLower.contains("samsung") -> return "Samsung Pay"
+                labelLower.contains("amex") || labelLower.contains("american express") -> return "Amex"
+                labelLower.contains("tsb") -> return "TSB"
+                labelLower.contains("rbs") || labelLower.contains("royal bank") -> return "RBS"
+                labelLower.contains("first direct") || labelLower.contains("firstdirect") -> return "First Direct"
+                labelLower.contains("virgin money") -> return "Virgin Money"
+                labelLower.contains("metro") -> return "Metro Bank"
+                labelLower.contains("kroo") -> return "Kroo"
+                else -> {
+                    val clean = appLabel
+                        .replace(Regex("(?i)\\s*[:\\-•|].*"), "")
+                        .replace(Regex("(?i)\\b(?:mobile banking|banking|mobile|uk|app)\\b"), "")
+                        .trim()
+                    if (clean.isNotBlank() && !clean.equals("Bank", ignoreCase = true) && !clean.equals("Banking", ignoreCase = true)) {
+                        val norm = normalizeBankName(clean)
+                        if (norm != "Others" && norm.isNotBlank()) return norm
+                    }
+                }
+            }
         }
+
         val pkgLower = packageName.lowercase(java.util.Locale.ROOT)
         return when {
-            pkgLower.contains("chase") -> "Chase"
+            pkgLower.contains("chase") || pkgLower.contains("jpmorgan") -> "Chase"
             pkgLower.contains("hsbc") -> "HSBC"
-            pkgLower.contains("monzo") -> "Monzo"
+            pkgLower.contains("monzo") || pkgLower.contains("getmondo") -> "Monzo"
             pkgLower.contains("starling") -> "Starling"
             pkgLower.contains("revolut") -> "Revolut"
             pkgLower.contains("barclay") -> "Barclays"
@@ -284,13 +306,24 @@ class SpendNotificationListenerService : NotificationListenerService() {
             pkgLower.contains("lloyds") -> "Lloyds"
             pkgLower.contains("halifax") -> "Halifax"
             pkgLower.contains("nationwide") -> "Nationwide"
+            pkgLower.contains("paypal") -> "PayPal"
+            pkgLower.contains("amex") || pkgLower.contains("americanexpress") -> "Amex"
+            pkgLower.contains("tsb") -> "TSB"
+            pkgLower.contains("rbs") -> "RBS"
+            pkgLower.contains("firstdirect") -> "First Direct"
+            pkgLower.contains("virginmoney") -> "Virgin Money"
+            pkgLower.contains("metrobank") -> "Metro Bank"
+            pkgLower.contains("kroo") -> "Kroo"
+            pkgLower.contains("walletnfcrel") || pkgLower.contains("wallet") || pkgLower.contains("paisa") -> "Google Pay"
+            pkgLower.contains("samsung") && pkgLower.contains("pay") -> "Samsung Pay"
             else -> {
                 val parts = packageName.split(".").filter {
-                    it.length > 2 && it !in listOf("com", "org", "net", "android", "uk", "co", "app")
+                    it.length > 2 && it !in listOf("com", "org", "net", "android", "uk", "co", "app", "mobile", "banking")
                 }
-                parts.lastOrNull()?.replaceFirstChar {
-                    if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString()
-                } ?: "Card Payment"
+                parts.lastOrNull()?.let {
+                    val norm = normalizeBankName(it)
+                    if (norm.equals("Bank", ignoreCase = true) || norm.equals("Banking", ignoreCase = true)) "Others" else norm
+                } ?: "Others"
             }
         }
     }

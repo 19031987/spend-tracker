@@ -73,6 +73,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.spendtracker.app.AppContainer
 import com.spendtracker.app.data.TransactionType
+import com.spendtracker.app.data.normalizeBankName
 import com.spendtracker.app.domain.TransactionItem
 import java.math.BigDecimal
 import java.text.NumberFormat
@@ -123,11 +124,18 @@ fun SpendTrackerScreen(container: AppContainer) {
 
     var quickCategoryTx by remember { mutableStateOf<TransactionItem?>(null) }
 
+    val deduplicatedAccounts = remember(accounts) {
+        accounts
+            .map { it.copy(name = normalizeBankName(it.name)) }
+            .distinctBy { it.name.lowercase(Locale.ROOT) }
+            .sortedBy { it.name }
+    }
+
     Scaffold(
         topBar = {
             HeaderBar(
                 title = "Spend Tracker",
-                subtitle = if (accounts.isEmpty()) "Multi-bank · Nullified transfers" else "${accounts.take(2).joinToString(" & ") { it.name }} · Nullified transfers",
+                subtitle = if (deduplicatedAccounts.isEmpty()) "Multi-bank · Nullified transfers" else "${deduplicatedAccounts.take(2).joinToString(" & ") { it.name.trim() }} · Nullified transfers",
                 onAddClick = { showSheet = true },
                 actions = {
                     IconButton(onClick = { showSettings = true }) {
@@ -374,15 +382,22 @@ private fun TransactionsFeed(
     val transferCount = transactions.count { it.type == TransactionType.TRANSFER || it.categoryKey == "INTERNAL_TRANSFER" || it.excludeFromSpending }
     val transferVolume = transactions.filter { it.type == TransactionType.TRANSFER || it.categoryKey == "INTERNAL_TRANSFER" }.sumOf { it.amountMinor }
 
+    val deduplicatedAccounts = remember(accounts) {
+        accounts
+            .map { it.copy(name = normalizeBankName(it.name)) }
+            .distinctBy { it.name.lowercase(Locale.ROOT) }
+            .sortedBy { it.name }
+    }
+
     val filtered = when {
         filterType == "EXPENSE" -> transactions.filter { it.type == TransactionType.EXPENSE && !it.excludeFromSpending }
         filterType == "INCOME" -> transactions.filter { it.type == TransactionType.INCOME && !it.excludeFromSpending }
         filterType == "TRANSFER" -> transactions.filter { it.type == TransactionType.TRANSFER || it.categoryKey == "INTERNAL_TRANSFER" || it.excludeFromSpending }
         filterType.startsWith("BANK_") -> {
-            val bankName = filterType.removePrefix("BANK_")
+            val bankKey = filterType.removePrefix("BANK_").trim().lowercase(Locale.ROOT)
             transactions.filter {
-                it.accountName.equals(bankName, ignoreCase = true) ||
-                it.source.equals(bankName, ignoreCase = true)
+                normalizeBankName(it.accountName).lowercase(Locale.ROOT) == bankKey ||
+                normalizeBankName(it.source).lowercase(Locale.ROOT) == bankKey
             }
         }
         else -> transactions
@@ -459,7 +474,7 @@ private fun TransactionsFeed(
         }
 
         // Bank Source Breakdown (Dynamically discovered and stored accounts)
-        if (accounts.isNotEmpty()) {
+        if (deduplicatedAccounts.isNotEmpty()) {
             item {
                 Column(
                     modifier = Modifier
@@ -477,15 +492,16 @@ private fun TransactionsFeed(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        items(accounts, key = { it.id }) { acc ->
+                        items(deduplicatedAccounts, key = { it.id }) { acc ->
+                            val cleanName = normalizeBankName(acc.name)
                             val accTxs = nonTransferTxs.filter {
-                                it.source.equals(acc.name, ignoreCase = true) ||
-                                it.accountName.equals(acc.name, ignoreCase = true)
+                                normalizeBankName(it.source).equals(cleanName, ignoreCase = true) ||
+                                normalizeBankName(it.accountName).equals(cleanName, ignoreCase = true)
                             }
                             val accSpent = accTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
                             val accIncome = accTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
 
-                            val (cardBgColor, badgeColor) = when (acc.name.lowercase(Locale.ROOT)) {
+                            val (cardBgColor, badgeColor) = when (cleanName.lowercase(Locale.ROOT)) {
                                 "chase" -> Color(0xFF1E3A8A).copy(alpha = 0.08f) to Color(0xFF1D4ED8)
                                 "hsbc" -> Color(0xFFDC2626).copy(alpha = 0.08f) to Color(0xFFDC2626)
                                 "monzo" -> Color(0xFFF97316).copy(alpha = 0.08f) to Color(0xFFF97316)
@@ -520,7 +536,7 @@ private fun TransactionsFeed(
                                         ) {
                                             Icon(Icons.Default.AccountBalance, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
                                         }
-                                        Text(acc.name, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(cleanName, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                     Text(
                                         "Spent: ${formatMoney(accSpent)}",
@@ -555,12 +571,13 @@ private fun TransactionsFeed(
                     "INCOME" to "Inflow",
                     "TRANSFER" to "🔄 Transfers (${transferCount})"
                 )
-                val bankFilters = accounts.map { acc ->
+                val bankFilters = deduplicatedAccounts.map { acc ->
+                    val cleanName = normalizeBankName(acc.name)
                     val count = transactions.count {
-                        it.accountName.equals(acc.name, ignoreCase = true) ||
-                        it.source.equals(acc.name, ignoreCase = true)
+                        normalizeBankName(it.accountName).equals(cleanName, ignoreCase = true) ||
+                        normalizeBankName(it.source).equals(cleanName, ignoreCase = true)
                     }
-                    "BANK_${acc.name}" to "${acc.name} ($count)"
+                    "BANK_${cleanName.lowercase(Locale.ROOT)}" to "$cleanName ($count)"
                 }
                 val allFilters = baseFilters + bankFilters
 

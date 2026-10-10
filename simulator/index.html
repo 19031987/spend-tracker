@@ -1914,6 +1914,35 @@
         // ========================================================
         const KNOWN_SOURCES = ["Chase", "Monzo", "Revolut", "Amex", "Barclays", "Apple Pay", "Google Wallet", "Starling", "HSBC", "PayPal", "Santander", "NatWest", "Lloyds"];
 
+        function normalizeBankName(raw) {
+            if (!raw || !raw.trim()) return "Chase";
+            const trimmed = raw.trim().replace(/\s+/g, ' ');
+            const lower = trimmed.toLowerCase();
+            if (lower === "chase" || lower.startsWith("chase ") || lower.endsWith(" chase")) return "Chase";
+            if (lower === "hsbc" || lower.startsWith("hsbc ") || lower.endsWith(" hsbc")) return "HSBC";
+            if (lower === "monzo" || lower.startsWith("monzo ") || lower.endsWith(" monzo")) return "Monzo";
+            if (lower === "starling" || lower.startsWith("starling ") || lower.endsWith(" starling")) return "Starling";
+            if (lower === "revolut" || lower.startsWith("revolut ") || lower.endsWith(" revolut")) return "Revolut";
+            if (lower === "barclays" || lower === "barclay" || lower === "barclaycard") return "Barclays";
+            if (lower === "santander") return "Santander";
+            if (lower === "natwest" || lower === "nat west") return "NatWest";
+            if (lower === "lloyds" || lower === "lloyds bank") return "Lloyds";
+            if (lower === "halifax") return "Halifax";
+            if (lower === "nationwide") return "Nationwide";
+            if (lower === "paypal") return "PayPal";
+            if (lower === "google pay" || lower === "google wallet" || lower === "gpay") return "Google Wallet";
+            if (lower === "apple pay") return "Apple Pay";
+            if (lower === "samsung pay" || lower === "samsung wallet") return "Samsung Pay";
+            if (lower === "first direct" || lower === "firstdirect" || lower.startsWith("first direct")) return "First Direct";
+            if (lower === "virgin money" || lower.startsWith("virgin money")) return "Virgin Money";
+            if (lower === "metro bank" || lower === "metro" || lower.startsWith("metro bank") || lower.startsWith("metro ")) return "Metro Bank";
+            if (lower === "kroo" || lower.startsWith("kroo")) return "Kroo";
+            if (lower === "savings" || lower === "saving" || lower.startsWith("savings") || lower.startsWith("saving")) return "Savings";
+            if (lower === "credit card" || lower === "creditcard" || lower.startsWith("credit card")) return "Credit Card";
+            if (lower === "others" || lower === "other" || lower === "card payment" || lower === "bank alert" || lower === "unknown" || lower === "bank" || lower === "banking") return "Others";
+            return trimmed.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+        }
+
         function detectSource(pkg, fullText) {
             const lower = `${pkg} ${fullText}`.toLowerCase();
             if (lower.includes("hsbc")) return "HSBC";
@@ -1923,7 +1952,7 @@
             if (lower.includes("revolut")) return "Revolut";
             if (lower.includes("barclays")) return "Barclays";
             if (lower.includes("wallet") || lower.includes("gpay")) return "Google Wallet";
-            return "Bank Alert";
+            return "Chase";
         }
 
         function cleanParsedMerchant(raw) {
@@ -2010,6 +2039,7 @@
                 merchant: parsed.merchant,
                 amount: parsed.amount,
                 type: parsed.type,
+                source: normalizeBankName(parsed.source),
                 categoryId: parsed.type === 'INCOME' ? 'cat_salary' : finalCatId,
                 date: 'Just now'
             };

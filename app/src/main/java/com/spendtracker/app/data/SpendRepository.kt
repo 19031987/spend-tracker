@@ -34,7 +34,11 @@ class SpendRepository(
     private val locale: Locale = Locale.getDefault()
 ) {
 
-    fun observeAccounts(): Flow<List<AccountEntity>> = accountDao.observeAll()
+    fun observeAccounts(): Flow<List<AccountEntity>> = accountDao.observeAll().map { list ->
+        list.map { it.copy(name = normalizeBankName(it.name)) }
+            .distinctBy { it.name.lowercase(Locale.ROOT) }
+            .sortedBy { it.name }
+    }
     fun observeGroups(): Flow<List<CategoryGroupEntity>> = catalogDao.observeGroups()
     fun observeCategories(): Flow<List<CategoryEntity>> = catalogDao.observeCategories()
     fun observeRules(): Flow<List<MerchantRuleEntity>> = catalogDao.observeRules()
@@ -48,14 +52,25 @@ class SpendRepository(
         transactionDao.observeAll(),
         accountDao.observeAll(),
         catalogDao.observeCategories()
-    ) { txs, accounts, cats ->
-        val accMap = accounts.associateBy { it.id }
+        val rawAccMap = accounts.associateBy { it.id }
+        val dedupAccounts = accounts
+            .map { it.copy(name = normalizeBankName(it.name)) }
+            .distinctBy { it.name.lowercase(Locale.ROOT) }
+        val canonicalIdMap = dedupAccounts.associateBy { it.id }
+        val canonicalNameMap = dedupAccounts.associateBy { it.name.trim().lowercase(Locale.ROOT) }
         val catMap = cats.associateBy { it.key }
 
         txs.map { tx ->
             val isTransfer = tx.type == TransactionType.TRANSFER || tx.category == "INTERNAL_TRANSFER"
-            val acc = accMap[tx.accountId]
-            val destAcc = tx.destinationAccountId?.let { accMap[it] }
+            val normSource = normalizeBankName(tx.source)
+            val rawAcc = rawAccMap[tx.accountId]
+            val acc = canonicalIdMap[tx.accountId]
+                ?: rawAcc?.let { canonicalNameMap[normalizeBankName(it.name).lowercase(Locale.ROOT)] }
+                ?: canonicalNameMap[normSource.lowercase(Locale.ROOT)]
+
+            val rawDest = tx.destinationAccountId?.let { rawAccMap[it] }
+            val destAcc = tx.destinationAccountId?.let { canonicalIdMap[it] }
+                ?: rawDest?.let { canonicalNameMap[normalizeBankName(it.name).lowercase(Locale.ROOT)] }
 
             val cat = if (isTransfer) {
                 com.spendtracker.app.data.CategoryEntity(
@@ -76,9 +91,9 @@ class SpendRepository(
                 id = tx.id,
                 type = tx.type,
                 amountMinor = kotlin.math.abs(tx.amount),
-                accountId = tx.accountId,
-                accountName = acc?.name ?: tx.source ?: "Chase",
-                destinationAccountId = tx.destinationAccountId,
+                accountId = acc?.id ?: tx.accountId,
+                accountName = acc?.name ?: normSource,
+                destinationAccountId = destAcc?.id ?: tx.destinationAccountId,
                 destinationAccountName = destAcc?.name,
                 categoryKey = cat?.key ?: tx.category,
                 categoryName = cat?.name ?: "Other",
@@ -86,7 +101,7 @@ class SpendRepository(
                 categoryColorHex = cat?.colorHex ?: "#E2E8F0",
                 merchant = tx.merchant,
                 note = tx.note,
-                source = tx.source ?: acc?.name ?: "Chase",
+                source = normSource,
                 timestamp = tx.timestamp,
                 excludeFromSpending = tx.excludeFromSpending || isTransfer
             )
@@ -98,8 +113,8 @@ class SpendRepository(
         when (transaction) {
             is NewTransaction.Entry -> {
                 require(transaction.amountMinor > 0) { "Amount must be greater than zero" }
-                val accounts = accountDao.getAll().associateBy { it.id }
-                val accName = accounts[transaction.accountId]?.name ?: "Chase"
+                val accounts = accountDao.getAll().distinctBy { it.name.trim().lowercase(Locale.ROOT) }.associateBy { it.id }
+                val accName = normalizeBankName(accounts[transaction.accountId]?.name ?: "Chase")
                 val isTransferCat = transaction.categoryKey == "INTERNAL_TRANSFER" || transaction.category == TransactionCategory.INTERNAL_TRANSFER
                 val isInternalTransfer = transaction.type == TransactionType.TRANSFER || isTransferCat
                 val chosenCategory = if (isInternalTransfer) "INTERNAL_TRANSFER"
@@ -121,9 +136,9 @@ class SpendRepository(
                 )
             }
             is NewTransaction.Transfer -> {
-                val accounts = accountDao.getAll().associateBy { it.id }
-                val srcName = transaction.sourceName ?: accounts[transaction.sourceAccountId]?.name ?: "Chase"
-                val dstName = transaction.destinationName ?: accounts[transaction.destinationAccountId]?.name ?: "HSBC"
+                val accounts = accountDao.getAll().distinctBy { it.name.trim().lowercase(Locale.ROOT) }.associateBy { it.id }
+                val srcName = normalizeBankName(transaction.sourceName ?: accounts[transaction.sourceAccountId]?.name ?: "Chase")
+                val dstName = normalizeBankName(transaction.destinationName ?: accounts[transaction.destinationAccountId]?.name ?: "HSBC")
                 transactionDao.insertTransferPair(
                     sourceAccountId = transaction.sourceAccountId,
                     destinationAccountId = transaction.destinationAccountId,
@@ -148,9 +163,9 @@ class SpendRepository(
         note: String?,
         excludeFromSpending: Boolean
     ) {
-        val accounts = accountDao.getAll().associateBy { it.id }
-        val srcName = accounts[accountId]?.name ?: "Chase"
-        val dstName = destinationAccountId?.let { accounts[it]?.name } ?: "HSBC"
+        val accounts = accountDao.getAll().distinctBy { it.name.trim().lowercase(Locale.ROOT) }.associateBy { it.id }
+        val srcName = normalizeBankName(accounts[accountId]?.name ?: "Chase")
+        val dstName = normalizeBankName(destinationAccountId?.let { accounts[it]?.name } ?: "HSBC")
         val isTransfer = type == TransactionType.TRANSFER || categoryKey == "INTERNAL_TRANSFER"
 
         if (isTransfer) {
@@ -263,7 +278,7 @@ class SpendRepository(
         val now = System.currentTimeMillis()
         val day = 86_400_000L
 
-        val accMap = accountDao.getAll().associateBy { it.name.lowercase() }
+        val accMap = accountDao.getAll().distinctBy { it.name.trim().lowercase(Locale.ROOT) }.associateBy { it.name.trim().lowercase(Locale.ROOT) }
         val chaseId = accMap["chase"]?.id ?: 1L
         val hsbcId = accMap["hsbc"]?.id ?: 2L
 
@@ -354,7 +369,7 @@ class SpendRepository(
 
     suspend fun exportJson(): String {
         val txs = transactionDao.getAllTransactions()
-        val accMap = accountDao.getAll().associateBy { it.id }
+        val accMap = accountDao.getAll().distinctBy { it.name.trim().lowercase(Locale.ROOT) }.associateBy { it.id }
         val categories = catalogDao.getCategories().associateBy { it.key }
         val groups = catalogDao.getGroups().associateBy { it.id }
         val rules = catalogDao.getRules()
@@ -364,7 +379,7 @@ class SpendRepository(
         val rows = txs.map { t ->
             val cat = categories[t.category]
             val grp = cat?.let { groups[it.groupId] }
-            val accName = accMap[t.accountId]?.name ?: (t.source ?: "Account #${t.accountId}")
+            val accName = accMap[t.accountId]?.name ?: (normalizeBankName(t.source))
             ExportRow(
                 id = t.id,
                 date = dtf.format(Instant.ofEpochMilli(t.timestamp)),
@@ -386,7 +401,7 @@ class SpendRepository(
 
     suspend fun exportCsv(): String {
         val txs = transactionDao.getAllTransactions()
-        val accMap = accountDao.getAll().associateBy { it.id }
+        val accMap = accountDao.getAll().distinctBy { it.name.trim().lowercase(Locale.ROOT) }.associateBy { it.id }
         val categories = catalogDao.getCategories().associateBy { it.key }
         val groups = catalogDao.getGroups().associateBy { it.id }
 
@@ -395,7 +410,7 @@ class SpendRepository(
         val rows = txs.map { t ->
             val cat = categories[t.category]
             val grp = cat?.let { groups[it.groupId] }
-            val accName = accMap[t.accountId]?.name ?: (t.source ?: "Account #${t.accountId}")
+            val accName = accMap[t.accountId]?.name ?: (normalizeBankName(t.source))
             ExportRow(
                 id = t.id,
                 date = dtf.format(Instant.ofEpochMilli(t.timestamp)),
