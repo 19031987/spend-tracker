@@ -37,8 +37,7 @@ jobs:
       env:
         ANDROID_HOME: /usr/local/lib/android/sdk
       run: |
-        set -o pipefail
-        gradle :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace
+        gradle :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace || (echo "=== GRADLE BUILD FAILED ===" && exit 1)
         mkdir -p dist
         find app/build/outputs/ -name "*.apk" -exec cp -v {} dist/ \;
         find app/build/outputs/ -name "*.aab" -exec cp -v {} dist/ \;
