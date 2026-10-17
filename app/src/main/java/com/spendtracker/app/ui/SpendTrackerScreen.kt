@@ -385,6 +385,7 @@ private fun TransactionsFeed(
     val nonTransferTxs = transactions.filter { !it.excludeFromSpending && it.type != TransactionType.TRANSFER && it.categoryKey != "INTERNAL_TRANSFER" }
     val totalSpent = nonTransferTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
     val totalIncome = nonTransferTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
+    val netRemaining = totalIncome - totalSpent
     val transferCount = transactions.count { it.type == TransactionType.TRANSFER || it.categoryKey == "INTERNAL_TRANSFER" || it.excludeFromSpending }
     val transferVolume = transactions.filter { it.type == TransactionType.TRANSFER || it.categoryKey == "INTERNAL_TRANSFER" }.sumOf { it.amountMinor }
 
@@ -455,12 +456,46 @@ private fun TransactionsFeed(
                         }
                     }
 
-                    Text(
-                        text = formatMoney(totalSpent),
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = formatMoney(totalSpent),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+
+                        // Remaining / Saved Pill
+                        val isPositive = netRemaining >= 0
+                        val pillBgColor = if (isPositive) Color(0xFFDCFCE7) else Color(0xFFFEE2E2)
+                        val pillTextColor = if (isPositive) Color(0xFF15803D) else Color(0xFFB91C1C)
+                        val pillLabel = if (isPositive) "Saved / Left: +" else "Deficit: -"
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = pillBgColor
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = if (isPositive) "💰" else "⚠️",
+                                    fontSize = 12.sp
+                                )
+                                Text(
+                                    text = "$pillLabel${formatMoney(kotlin.math.abs(netRemaining))}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = pillTextColor
+                                )
+                            }
+                        }
+                    }
 
                     @OptIn(ExperimentalLayoutApi::class)
                     FlowRow(
@@ -470,11 +505,11 @@ private fun TransactionsFeed(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(15.dp))
-                            Text("Spent: ${formatMoney(totalSpent)}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                            Text("Out: ${formatMoney(totalSpent)}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(15.dp))
-                            Text("Income: +${formatMoney(totalIncome)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF059669), fontWeight = FontWeight.SemiBold)
+                            Text("In: +${formatMoney(totalIncome)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF059669), fontWeight = FontWeight.SemiBold)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(Icons.Default.SwapHoriz, contentDescription = null, tint = Color(0xFF7C3AED), modifier = Modifier.size(15.dp))
@@ -550,17 +585,25 @@ private fun TransactionsFeed(
                                         }
                                         Text(cleanName, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
+                                    val accRemaining = accIncome - accSpent
+                                    val isAccPositive = accRemaining >= 0
                                     Text(
-                                        "Spent: ${formatMoney(accSpent)}",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface
+                                        "Out: ${formatMoney(accSpent)}",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Normal,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Text(
                                         "In: +${formatMoney(accIncome)}",
                                         fontSize = 11.sp,
                                         color = Color(0xFF059669),
                                         fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = "${if (isAccPositive) "Rem: +" else "Rem: -"}${formatMoney(kotlin.math.abs(accRemaining))}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isAccPositive) Color(0xFF059669) else MaterialTheme.colorScheme.error
                                     )
                                 }
                             }
