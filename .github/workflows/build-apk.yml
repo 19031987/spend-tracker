@@ -37,7 +37,7 @@ jobs:
       env:
         ANDROID_HOME: /usr/local/lib/android/sdk
       run: |
-        gradle :app:assembleRelease :app:bundleRelease -x test --no-daemon --stacktrace 2>&1 | tee gradle-build.log || (echo "=== GRADLE BUILD FAILED ===" && tail -n 120 gradle-build.log && exit 1)
+        gradle :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace || (echo "=== GRADLE BUILD FAILED ===" && exit 1)
         mkdir -p dist
         find app/build/outputs/ -name "*.apk" -exec cp -v {} dist/ \;
         find app/build/outputs/ -name "*.aab" -exec cp -v {} dist/ \;
@@ -57,10 +57,10 @@ jobs:
         tag_name: v1.8.2
         name: "SpendTracker Release v1.8.2 (Bank Source Cleanup & Auto-Discovery)"
         body: |
-          ### SpendTracker v1.8.2 - Bank Source Cleanup & Auto-Discovery Fixes
+          ### SpendTracker v1.8.2 - Bank Source Cleanup & Auto-Discovery
           - 🏦 **Bank Source Cleanup & Auto-Discovery**:
             - Eliminated unnecessary "Messages" and "Savings" source accounts.
-            - Real-time auto-discovery: genuine bank sources (Barclays, Monzo, Starling, Revolut, Lloyds, etc.) are automatically registered when transactions arrive.
+            - Real-time auto-discovery: genuine bank sources (Barclays, Monzo, Starling, Revolut, Lloyds, etc.) are automatically added when new transactions arrive.
             - SMS notification parser attributes card spend to genuine bank accounts rather than messaging app packages.
             - Database migration automatically re-links orphan/junk accounts to canonical bank accounts.
           - 📅 **Custom Date Picker in Record Transaction**:
