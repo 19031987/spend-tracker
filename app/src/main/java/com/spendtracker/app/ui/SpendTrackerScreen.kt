@@ -454,21 +454,23 @@ private fun TransactionsFeed(
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
-                    Row(
+                    @OptIn(ExperimentalLayoutApi::class)
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
-                            Text("Spent: ${formatMoney(totalSpent)}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                            Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(15.dp))
+                            Text("Spent: ${formatMoney(totalSpent)}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(16.dp))
-                            Text("Income: +${formatMoney(totalIncome)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF059669), fontWeight = FontWeight.Medium)
+                            Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(15.dp))
+                            Text("Income: +${formatMoney(totalIncome)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF059669), fontWeight = FontWeight.SemiBold)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Icon(Icons.Default.SwapHoriz, contentDescription = null, tint = Color(0xFF7C3AED), modifier = Modifier.size(16.dp))
-                            Text("Transfers: ${formatMoney(transferVolume)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF7C3AED), fontWeight = FontWeight.Medium)
+                            Icon(Icons.Default.SwapHoriz, contentDescription = null, tint = Color(0xFF7C3AED), modifier = Modifier.size(15.dp))
+                            Text("Transfers: ${formatMoney(transferVolume)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF7C3AED), fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }

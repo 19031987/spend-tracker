@@ -39,6 +39,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import java.math.BigDecimal
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -158,21 +160,28 @@ fun AddTransactionSheet(
                 }
             }
 
-            // Day / Date Selector (Today, Yesterday, 2 Days Ago)
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Day", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            // Day / Date Selector (Today, Yesterday, 2 Days Ago, Custom Date)
+            val context = androidx.compose.ui.platform.LocalContext.current
+            var customTimestamp by rememberSaveable { mutableStateOf<Long?>(null) }
+            val dateFormatter = remember { SimpleDateFormat("d MMM yyyy", Locale.getDefault()) }
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Date", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     val days = listOf(0 to "Today", 1 to "Yesterday", 2 to "2 Days Ago")
                     days.forEach { (offset, label) ->
-                        val isSelected = selectedDayOffset == offset
+                        val isSelected = selectedDayOffset == offset && customTimestamp == null
                         Surface(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(10.dp))
-                                .clickable { selectedDayOffset = offset },
+                                .clickable {
+                                    selectedDayOffset = offset
+                                    customTimestamp = null
+                                },
                             color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                             shape = RoundedCornerShape(10.dp)
                         ) {
@@ -187,6 +196,50 @@ fun AddTransactionSheet(
                                     color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                        }
+                    }
+
+                    // 4th option: Pick Date from Calendar
+                    val isCustomSelected = customTimestamp != null
+                    Surface(
+                        modifier = Modifier
+                            .weight(1.2f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                val cal = java.util.Calendar.getInstance()
+                                if (customTimestamp != null) {
+                                    cal.timeInMillis = customTimestamp!!
+                                }
+                                android.app.DatePickerDialog(
+                                    context,
+                                    { _, year, month, dayOfMonth ->
+                                        val selectedCal = java.util.Calendar.getInstance().apply {
+                                            set(java.util.Calendar.YEAR, year)
+                                            set(java.util.Calendar.MONTH, month)
+                                            set(java.util.Calendar.DAY_OF_MONTH, dayOfMonth)
+                                        }
+                                        customTimestamp = selectedCal.timeInMillis
+                                        selectedDayOffset = -1
+                                    },
+                                    cal.get(java.util.Calendar.YEAR),
+                                    cal.get(java.util.Calendar.MONTH),
+                                    cal.get(java.util.Calendar.DAY_OF_MONTH)
+                                ).show()
+                            },
+                        color = if (isCustomSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (customTimestamp != null) "📅 ${dateFormatter.format(Date(customTimestamp!!))}" else "📅 Pick Date",
+                                fontSize = 11.sp,
+                                fontWeight = if (isCustomSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isCustomSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
                         }
                     }
                 }
@@ -423,11 +476,15 @@ fun AddTransactionSheet(
                 onClick = {
                     val amount = parseMinorUnits(amountText)
                     val source = effectiveSource
-                    val cal = java.util.Calendar.getInstance()
-                    if (selectedDayOffset > 0) {
-                        cal.add(java.util.Calendar.DAY_OF_YEAR, -selectedDayOffset)
+                    val txTimestamp = if (customTimestamp != null) {
+                        customTimestamp!!
+                    } else {
+                        val cal = java.util.Calendar.getInstance()
+                        if (selectedDayOffset > 0) {
+                            cal.add(java.util.Calendar.DAY_OF_YEAR, -selectedDayOffset)
+                        }
+                        cal.timeInMillis
                     }
-                    val txTimestamp = cal.timeInMillis
                     when {
                         amount == null -> localError = "Enter a valid amount (max 2 decimals)"
                         source == null -> localError = "Select an account"

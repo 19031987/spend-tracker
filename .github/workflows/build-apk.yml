@@ -54,10 +54,17 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.8.0
-        name: "SpendTracker Release v1.8.0 (Category Comparison & Cash Flow Breakdown)"
+        tag_name: v1.8.1
+        name: "SpendTracker Release v1.8.1 (Custom Date Selection & UI Alignment)"
         body: |
-          ### SpendTracker v1.8.0 - Category-Level Comparison & Cash Flow Breakdown
+          ### SpendTracker v1.8.1 - Custom Date Picker & Landing Page Alignment Fix
+          - 📅 **Custom Date Picker in Record Transaction**:
+            - Added calendar date picker dialog (`Pick Date`) alongside Today, Yesterday, and 2 Days Ago.
+            - Easily add Money In / Out or Transfers on any given past or future date.
+          - 📐 **Landing Page Net Spending Hero Card Alignment**:
+            - Refactored Spent, Income, and Transfers indicators to prevent awkward multi-line word wrapping and vertical squishing on narrow devices.
+          - 📊 **Category-Level Period Comparison in Compare Tab**:
+            - Compares actual spending across individual categories between current and previous periods.
           - 📊 **Category-Level Period Comparison in Compare Tab**:
             - Compares actual spending across individual categories (Groceries, Dining Out, Utilities, Transport, etc.) between the current period and previous period (Week, Month, Year).
             - Real-time reactive data pipeline powered by Room database transactions and category catalogue.
