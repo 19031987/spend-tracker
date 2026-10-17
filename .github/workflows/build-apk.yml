@@ -54,15 +54,24 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.6.0
-        name: "SpendTracker Release v1.6.0 (Fingerprint & Biometric App Access)"
+        tag_name: v1.7.0
+        name: "SpendTracker Release v1.7.0 (Cash Flow Sankey & Breakdown Treemap)"
         body: |
-          ### SpendTracker v1.6.0 - Key Features & Enhancements
-          - 🔒 **Fingerprint & Biometric Authentication Access**:
-            - Added biometric fingerprint lock to protect app access and financial records.
-            - Integrated Android Jetpack `BiometricPrompt` supporting fingerprint sensors, face recognition, and fallback device credentials (PIN/Pattern).
-            - Added a dedicated "Fingerprint / Biometric Lock" toggle in **Settings > Preferences**.
-            - Built responsive `BiometricLockScreen` ensuring data stays secure until verified.
+          ### SpendTracker v1.7.0 - Monarch Cash Flow & Spending Breakdown
+          - 🌊 **Monarch-Style Cash Flow Sankey Diagram**:
+            - 4-column node alignment (`Account` ➔ `Group` ➔ `Category` ➔ `Merchant`).
+            - Disambiguated node IDs preventing circular loop links across shared labels.
+            - Interactive depth toggle: 3-Level (`Account ➔ Group ➔ Category`) vs 4-Level (`+ Merchant`).
+            - Top-5 merchant bucketing with small payees grouped into `Other [Category]`.
+          - 🗺️ **Hierarchical Spending Breakdown Treemap**:
+            - Proportional spending nested by `Group` ➔ `Category` ➔ `Merchant` with zoomable drill-down.
+          - ⚖️ **Dynamic Fixed Living Costs Exclusion Toggle**:
+            - Prominent toggle to exclude Rent & Utilities, dynamically rescaling nodes, link flows, and proportions between all-in spend (£1,540.77) and day-to-day spend (£242.98).
+          - 📊 **Reactive KPI Ribbon**:
+            - Real-time updates for Total Spend, Transaction Count, Top Spending Group, and Top Merchant with visit counts.
+          - 📱 **All-in-One Dashboard & Simulator Integration**:
+            - Direct simulator access and standalone cash flow breakdown page.
+          - 🔒 **Fingerprint & Biometric Authentication Access** (v1.6.0 features included).
           - 🍕 **Promotional & Advertisement Notification Filtering**:
             - Protection against promotional deals, retail offers, and marketing notifications (e.g. Domino's "Save £10 when you spend £30", pizza deals, voucher codes, discounts).
             - Enforced strict financial transaction verification for SMS alerts (`debited`, `spent`, `paid at`, `card ending`, etc.).

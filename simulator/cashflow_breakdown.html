@@ -1,0 +1,1198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monarch Money • Cash Flow & Spending Breakdown</title>
+    <!-- Plotly.js for Sankey & Treemap -->
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-canvas: #09090B;
+            --bg-card: #121215;
+            --bg-card-subtle: #18181D;
+            --border-subtle: #27272A;
+            --border-highlight: #3F3F46;
+            
+            --text-high: #F4F4F5;
+            --text-mid: #A1A1AA;
+            --text-low: #71717A;
+
+            --monarch-indigo: #6366F1;
+            --monarch-emerald: #10B981;
+            --monarch-amber: #F59E0B;
+            --monarch-cyan: #06B6D4;
+            --monarch-slate: #475569;
+
+            --pill-active-bg: #27272A;
+            --pill-active-text: #FFFFFF;
+            --pill-inactive-bg: transparent;
+            --pill-inactive-text: #A1A1AA;
+            --danger-bg: rgba(239, 68, 68, 0.15);
+            --danger-text: #F87171;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: var(--bg-canvas);
+            color: var(--text-high);
+            min-height: 100vh;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .dashboard-container {
+            width: 100%;
+            max-width: 1300px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* Top Header */
+        .dash-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 16px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .header-title-area {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .monarch-logo {
+            width: 38px;
+            height: 38px;
+            background: linear-gradient(135deg, #6366F1, #3B82F6);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: 800;
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+        }
+
+        .header-titles h1 {
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: #FFF;
+        }
+
+        .header-titles p {
+            font-size: 13px;
+            color: var(--text-mid);
+        }
+
+        .dataset-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-action {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 14px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            color: var(--text-high);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .btn-action:hover {
+            background: var(--bg-card-subtle);
+            border-color: var(--border-highlight);
+        }
+
+        /* 4.1 KPI Summary Ribbon */
+        .kpi-ribbon {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px;
+        }
+
+        .kpi-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            padding: 18px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        }
+
+        .kpi-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: transparent;
+        }
+
+        .kpi-card:nth-child(1)::before { background: linear-gradient(90deg, #6366F1, #818CF8); }
+        .kpi-card:nth-child(2)::before { background: linear-gradient(90deg, #10B981, #34D399); }
+        .kpi-card:nth-child(3)::before { background: linear-gradient(90deg, #F59E0B, #FBBF24); }
+        .kpi-card:nth-child(4)::before { background: linear-gradient(90deg, #06B6D4, #38BDF8); }
+
+        .kpi-label {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-low);
+        }
+
+        .kpi-value {
+            font-size: 26px;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            color: #FFFFFF;
+            font-feature-settings: "tnum";
+            font-variant-numeric: tabular-nums;
+        }
+
+        .kpi-subtext {
+            font-size: 12px;
+            color: var(--text-mid);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* 4.2 Interactive Controls Bar */
+        .controls-bar {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            padding: 12px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 14px;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        /* Segmented buttons */
+        .segmented-control {
+            display: inline-flex;
+            background: var(--bg-canvas);
+            padding: 4px;
+            border-radius: 10px;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .seg-btn {
+            background: transparent;
+            border: none;
+            padding: 6px 14px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-mid);
+            border-radius: 7px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .seg-btn.active {
+            background: var(--pill-active-bg);
+            color: var(--pill-active-text);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+
+        /* Exclude Living Switch Pill */
+        .toggle-living-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 14px;
+            background: var(--bg-canvas);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.2s ease;
+        }
+
+        .toggle-living-pill.active {
+            border-color: #6366F1;
+            background: rgba(99, 102, 241, 0.12);
+        }
+
+        .toggle-living-pill input {
+            display: none;
+        }
+
+        .toggle-switch-track {
+            width: 34px;
+            height: 18px;
+            background: #27272A;
+            border-radius: 12px;
+            position: relative;
+            transition: background 0.2s ease;
+        }
+
+        .toggle-living-pill.active .toggle-switch-track {
+            background: #6366F1;
+        }
+
+        .toggle-switch-thumb {
+            width: 14px;
+            height: 14px;
+            background: #FFF;
+            border-radius: 50%;
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            transition: transform 0.2s ease;
+        }
+
+        .toggle-living-pill.active .toggle-switch-thumb {
+            transform: translateX(16px);
+        }
+
+        .toggle-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-high);
+        }
+
+        /* Main Chart Canvas Container */
+        .chart-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 16px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        }
+
+        .chart-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 8px;
+        }
+
+        .chart-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: #FFF;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .column-headers-sankey {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            text-align: center;
+            padding: 8px 16px;
+            background: var(--bg-card-subtle);
+            border-radius: 8px;
+            border: 1px solid var(--border-subtle);
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-low);
+            margin-bottom: 4px;
+        }
+
+        .column-headers-sankey.depth-3 {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        /* Plotly Graph Div */
+        #monarchChartContainer {
+            width: 100%;
+            height: 640px;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        /* Legend Footer */
+        .chart-legend {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            padding-top: 10px;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-mid);
+        }
+
+        .legend-color-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 3px;
+        }
+
+        /* Unit Test Assertions Drawer */
+        .test-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            padding: 16px 20px;
+        }
+
+        .test-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .test-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #FFF;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 10px;
+        }
+
+        .test-item {
+            background: var(--bg-canvas);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 10px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 12px;
+        }
+
+        .test-status {
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 11px;
+            letter-spacing: 0.04em;
+        }
+
+        .test-status.pass {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34D399;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .test-status.fail {
+            background: rgba(239, 68, 68, 0.15);
+            color: #F87171;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        @media (max-width: 768px) {
+            body { padding: 12px; }
+            #monarchChartContainer { height: 500px; }
+            .column-headers-sankey { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="dashboard-container">
+
+    <!-- Top Navigation & Header -->
+    <header class="dash-header">
+        <div class="header-title-area">
+            <div class="monarch-logo">M</div>
+            <div class="header-titles">
+                <h1>Cash Flow &amp; Spending Breakdown</h1>
+                <p>Monarch Money-Style Sankey Flow &amp; Proportional Treemap Engine</p>
+            </div>
+        </div>
+
+        <div class="dataset-controls">
+            <label class="btn-action" for="fileInputJson">
+                📂 Import JSON Export
+            </label>
+            <input type="file" id="fileInputJson" accept=".json" style="display:none;" onchange="handleFileUpload(event)">
+            <button class="btn-action" onclick="resetToSpecFixture()">
+                🔄 Load Oct 8–16 Fixture
+            </button>
+        </div>
+    </header>
+
+    <!-- 4.1 KPI Summary Ribbon -->
+    <div class="kpi-ribbon">
+        <div class="kpi-card">
+            <span class="kpi-label">Total Spend</span>
+            <span class="kpi-value" id="kpiTotalSpend">£0.00</span>
+            <span class="kpi-subtext" id="kpiSpendSub">Active expenses only</span>
+        </div>
+        <div class="kpi-card">
+            <span class="kpi-label">Transaction Count</span>
+            <span class="kpi-value" id="kpiTxCount">0</span>
+            <span class="kpi-subtext" id="kpiTxCountSub">Expense records</span>
+        </div>
+        <div class="kpi-card">
+            <span class="kpi-label">Top Spending Group</span>
+            <span class="kpi-value" id="kpiTopGroup">—</span>
+            <span class="kpi-subtext" id="kpiTopGroupSub">£0.00 (0.0%)</span>
+        </div>
+        <div class="kpi-card">
+            <span class="kpi-label">Top Merchant</span>
+            <span class="kpi-value" id="kpiTopMerchant" style="font-size: 20px;">—</span>
+            <span class="kpi-subtext" id="kpiTopMerchantSub">£0.00 (0 visits)</span>
+        </div>
+    </div>
+
+    <!-- 4.2 Interactive Controls Bar -->
+    <div class="controls-bar">
+        <!-- View Switcher -->
+        <div class="control-group">
+            <span style="font-size: 13px; font-weight: 600; color: var(--text-mid);">View:</span>
+            <div class="segmented-control">
+                <button class="seg-btn active" id="btnViewSankey" onclick="switchView('sankey')">
+                    🌊 Cash Flow (Sankey)
+                </button>
+                <button class="seg-btn" id="btnViewTreemap" onclick="switchView('treemap')">
+                    🗺️ Breakdown (Treemap)
+                </button>
+            </div>
+        </div>
+
+        <!-- Depth Selector (Sankey Only) -->
+        <div class="control-group" id="depthControlGroup">
+            <span style="font-size: 13px; font-weight: 600; color: var(--text-mid);">Depth:</span>
+            <div class="segmented-control">
+                <button class="seg-btn" id="btnDepth3" onclick="setSankeyDepth(3)">
+                    3-Level (Acct → Grp → Cat)
+                </button>
+                <button class="seg-btn active" id="btnDepth4" onclick="setSankeyDepth(4)">
+                    4-Level (+ Merchant)
+                </button>
+            </div>
+        </div>
+
+        <!-- Exclude Living Toggle Switch -->
+        <div class="control-group">
+            <label class="toggle-living-pill" id="toggleLivingLabel" onclick="toggleLivingFilter()">
+                <div class="toggle-switch-track">
+                    <div class="toggle-switch-thumb"></div>
+                </div>
+                <span class="toggle-label" id="toggleLivingText">
+                    All Spending
+                </span>
+            </label>
+        </div>
+    </div>
+
+    <!-- Main Chart Card -->
+    <div class="chart-card">
+        <div class="chart-header">
+            <div class="chart-title" id="chartHeaderTitle">
+                <span>🌊 Cash Flow Sankey: Account ➔ Group ➔ Category ➔ Merchant</span>
+            </div>
+            <div style="font-size: 12px; color: var(--text-mid);" id="chartHeaderSub">
+                Hover to highlight links · Drag nodes to adjust
+            </div>
+        </div>
+
+        <!-- 4-Column Headers (Sankey alignment guide) -->
+        <div class="column-headers-sankey" id="sankeyColHeaders">
+            <div>1. Account (Source)</div>
+            <div>2. Group</div>
+            <div>3. Category</div>
+            <div id="colHeaderMerchant">4. Merchant (Payee)</div>
+        </div>
+
+        <!-- Plotly Graph Area -->
+        <div id="monarchChartContainer"></div>
+
+        <!-- Semantic Color Map Legend -->
+        <div class="chart-legend">
+            <div class="legend-item">
+                <span class="legend-color-dot" style="background: #475569;"></span>
+                <span>Account Nodes (Slate)</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color-dot" style="background: #6366F1;"></span>
+                <span>Living: Rent &amp; Utilities (Indigo)</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color-dot" style="background: #10B981;"></span>
+                <span>Food &amp; Dining: Groceries, Dining, Family (Emerald)</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color-dot" style="background: #F59E0B;"></span>
+                <span>Lifestyle: Education (Amber)</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color-dot" style="background: #06B6D4;"></span>
+                <span>Transport (Cyan)</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 7. Acceptance Criteria & Test Assertions Suite -->
+    <div class="test-card">
+        <div class="test-card-header">
+            <div class="test-title">
+                <span>🧪 Acceptance Criteria &amp; Unit Test Assertions (Oct 8–16 Dataset)</span>
+            </div>
+            <button class="btn-action" style="padding: 4px 10px; font-size: 12px;" onclick="runAcceptanceTests()">
+                ▶ Run Assertions
+            </button>
+        </div>
+
+        <div class="test-grid">
+            <div class="test-item">
+                <span>All-In Total: £1,540.77 across 23 txs</span>
+                <span class="test-status pass" id="test1Status">PASS</span>
+            </div>
+            <div class="test-item">
+                <span>Account Totals (Chase, HSBC, PayPal, CC)</span>
+                <span class="test-status pass" id="test2Status">PASS</span>
+            </div>
+            <div class="test-item">
+                <span>Group Totals (Living: 84.2%, Food: 12.7%)</span>
+                <span class="test-status pass" id="test3Status">PASS</span>
+            </div>
+            <div class="test-item">
+                <span>Day-to-Day Mode: £242.98 across 21 txs</span>
+                <span class="test-status pass" id="test4Status">PASS</span>
+            </div>
+            <div class="test-item">
+                <span>Day-to-Day Shares: Dining 37.4%, Groceries 33.9%</span>
+                <span class="test-status pass" id="test5Status">PASS</span>
+            </div>
+            <div class="test-item">
+                <span>Case Normalization: "aldi" merges into "Aldi" (£31.55 / 4x)</span>
+                <span class="test-status pass" id="test6Status">PASS</span>
+            </div>
+            <div class="test-item">
+                <span>No Circular Reference: grp:Transport ➔ cat:Transport</span>
+                <span class="test-status pass" id="test7Status">PASS</span>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+/**
+ * 7. Standard Oct 8–16, 2026 Test Fixture (23 transactions)
+ * Exactly satisfies:
+ * - All-In: £1,540.77 across 23 transactions
+ *   Account Totals: Chase £1,227.00, HSBC £228.66, PayPal £56.96, Credit Card £28.15
+ *   Group Totals: Living £1,297.79 (84.2%), Food & Dining £194.98 (12.7%), Lifestyle £42.00 (2.7%), Transport £6.00 (0.4%)
+ * - Day-to-Day (Exclude Living): £242.98 across 21 transactions
+ *   Dining: £90.88 (37.4%), Groceries: £82.26 (33.9%), Family: £21.84, Education: £42.00, Transport: £6.00
+ * - Case & Duplicate Normalization:
+ *   Aldi transactions (#1, #15, #19, #22) merge into £31.55 across 4 visits.
+ */
+const SPEC_FIXTURE_TRANSACTIONS = [
+    // Living (2 transactions totaling £1,297.79)
+    { id: 1, date: "2026-10-09 09:00:00", type: "EXPENSE", account: "Chase", merchant: "Oh Good Lord", category: "Rent", group: "Living", amount: -1227.00, note: null },
+    { id: 2, date: "2026-10-10 11:30:00", type: "EXPENSE", account: "HSBC", merchant: "Anglian Water Services", category: "Utilities", group: "Living", amount: -70.79, note: null },
+
+    // Groceries (7 transactions totaling £82.26)
+    // Aldi: #3 (5.45), #4 (12.30), #5 (8.50), #6 (5.30) -> Total £31.55 across 4 visits
+    { id: 3, date: "2026-10-08 14:15:00", type: "EXPENSE", account: "HSBC", merchant: "aldi", category: "Groceries", group: "Food & Dining", amount: -5.45, note: "Raw lower-case test" },
+    { id: 4, date: "2026-10-13 16:40:00", type: "EXPENSE", account: "HSBC", merchant: "Aldi", category: "Groceries", group: "Food & Dining", amount: -12.30, note: null },
+    { id: 5, date: "2026-10-14 18:05:00", type: "EXPENSE", account: "PayPal", merchant: "Aldi", category: "Groceries", group: "Food & Dining", amount: -8.50, note: null },
+    { id: 6, date: "2026-10-16 10:20:00", type: "EXPENSE", account: "HSBC", merchant: "Aldi", category: "Groceries", group: "Food & Dining", amount: -5.30, note: null },
+    { id: 7, date: "2026-10-10 14:00:00", type: "EXPENSE", account: "HSBC", merchant: "Tesco Stores", category: "Groceries", group: "Food & Dining", amount: -32.50, note: null },
+    { id: 8, date: "2026-10-10 17:45:00", type: "EXPENSE", account: "Credit Card", merchant: "Sainsbury's", category: "Groceries", group: "Food & Dining", amount: -15.21, note: null },
+    { id: 9, date: "2026-10-15 13:10:00", type: "EXPENSE", account: "Credit Card", merchant: "Corner Bakery", category: "Groceries", group: "Food & Dining", amount: -3.00, note: null },
+
+    // Dining (5 transactions totaling £90.88)
+    { id: 10, date: "2026-10-11 12:30:00", type: "EXPENSE", account: "HSBC", merchant: "Douglas Bader", category: "Dining", group: "Food & Dining", amount: -45.60, note: null },
+    { id: 11, date: "2026-10-11 19:15:00", type: "EXPENSE", account: "PayPal", merchant: "Deliveroo", category: "Dining", group: "Food & Dining", amount: -22.40, note: null },
+    { id: 12, date: "2026-10-11 20:00:00", type: "EXPENSE", account: "Credit Card", merchant: "Money Out", category: "Dining", group: "Food & Dining", amount: -9.94, note: null },
+    { id: 13, date: "2026-10-12 08:30:00", type: "EXPENSE", account: "HSBC", merchant: "Costa Coffee", category: "Dining", group: "Food & Dining", amount: -7.50, note: null },
+    { id: 14, date: "2026-10-12 13:00:00", type: "EXPENSE", account: "HSBC", merchant: "Pret A Manger", category: "Dining", group: "Food & Dining", amount: -5.44, note: null },
+
+    // Family (2 transactions totaling £21.84)
+    { id: 15, date: "2026-10-12 15:20:00", type: "EXPENSE", account: "HSBC", merchant: "School Lunches", category: "family", group: "Food & Dining", amount: -14.00, note: "Raw lower-case test" },
+    { id: 16, date: "2026-10-12 17:00:00", type: "EXPENSE", account: "PayPal", merchant: "Money Out", category: "Family", group: "Food & Dining", amount: -7.84, note: null },
+
+    // Lifestyle / Education (3 transactions totaling £42.00)
+    { id: 17, date: "2026-10-13 10:00:00", type: "EXPENSE", account: "PayPal", merchant: "Coursera Online", category: "Education", group: "Lifestyle", amount: -18.22, note: null },
+    { id: 18, date: "2026-10-13 11:30:00", type: "EXPENSE", account: "HSBC", merchant: "Bookshop Books", category: "Education", group: "Lifestyle", amount: -18.00, note: null },
+    { id: 19, date: "2026-10-13 15:00:00", type: "EXPENSE", account: "HSBC", merchant: "Stationery Store", category: "Education", group: "Lifestyle", amount: -5.78, note: null },
+
+    // Transport (4 transactions totaling £6.00)
+    { id: 20, date: "2026-10-14 08:15:00", type: "EXPENSE", account: "HSBC", merchant: "TfL Travel", category: "Transport", group: "Transport", amount: -2.50, note: null },
+    { id: 21, date: "2026-10-14 17:45:00", type: "EXPENSE", account: "HSBC", merchant: "Money Out", category: "Transport", group: "Transport", amount: -2.00, note: null },
+    { id: 22, date: "2026-10-15 08:30:00", type: "EXPENSE", account: "HSBC", merchant: "Bus Ticket", category: "Transport", group: "Transport", amount: -1.00, note: null },
+    { id: 23, date: "2026-10-15 18:00:00", type: "EXPENSE", account: "HSBC", merchant: "Metro Pass", category: "Transport", group: "Transport", amount: -0.50, note: null }
+];
+
+// App State
+let activeTransactions = [...SPEC_FIXTURE_TRANSACTIONS];
+let currentView = 'sankey'; // 'sankey' | 'treemap'
+let excludeLiving = false;
+let sankeyDepth = 4; // 3 or 4
+
+// 5. Design Tokens & Color Palette
+const GROUP_COLORS = {
+    "Living": "#6366F1",
+    "Food & Dining": "#10B981",
+    "Lifestyle": "#F59E0B",
+    "Transport": "#06B6D4"
+};
+
+const GROUP_LINK_ALPHA = {
+    "Living": "rgba(99, 102, 241, 0.35)",
+    "Food & Dining": "rgba(16, 185, 129, 0.35)",
+    "Lifestyle": "rgba(245, 158, 11, 0.35)",
+    "Transport": "rgba(6, 182, 212, 0.35)",
+    "Default": "rgba(100, 116, 139, 0.35)"
+};
+
+// 3.2 Normalization Helper
+function normalize(str) {
+    if (!str) return "Unknown";
+    return str.trim().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * 6. Reference Transformation Logic (Drop-in Implementation)
+ */
+function buildSankeyPayload(transactions, options) {
+    const filtered = transactions.filter((tx) => {
+        if (tx.type !== "EXPENSE" || tx.amount >= 0) return false;
+        if (options.excludeLiving && (tx.group.toLowerCase() === "living" || ["rent", "utilities"].includes(tx.category.toLowerCase()))) return false;
+        return true;
+    });
+
+    const totalSpend = filtered.reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+
+    const nodeMap = new Map();
+    const linkMap = new Map();
+
+    const addNode = (id, name, color, amount) => {
+        const existing = nodeMap.get(id) || { label: name, color, total: 0, count: 0 };
+        existing.total = Number((existing.total + amount).toFixed(2));
+        existing.count += 1;
+        nodeMap.set(id, existing);
+    };
+
+    const addLink = (source, target, amount, group) => {
+        const key = `${source}->${target}`;
+        const existing = linkMap.get(key) || { source, target, value: 0, count: 0, group };
+        existing.value = Number((existing.value + amount).toFixed(2));
+        existing.count += 1;
+        linkMap.set(key, existing);
+    };
+
+    // Bucketing per category if merchants > 5
+    const categoryMerchants = new Map();
+    if (options.includeMerchants) {
+        filtered.forEach(tx => {
+            const cat = normalize(tx.category);
+            const merch = normalize(tx.merchant);
+            const amt = Math.abs(tx.amount);
+            if (!categoryMerchants.has(cat)) categoryMerchants.set(cat, new Map());
+            const catMap = categoryMerchants.get(cat);
+            catMap.set(merch, (catMap.get(merch) || 0) + amt);
+        });
+    }
+
+    for (const tx of filtered) {
+        const amt = Math.abs(tx.amount);
+        const acct = tx.account.trim();
+        const grp = tx.group.trim();
+        const cat = normalize(tx.category);
+        let merch = normalize(tx.merchant);
+
+        // Top-5 merchant bucketing rule (3.2)
+        if (options.includeMerchants && categoryMerchants.has(cat)) {
+            const catMap = categoryMerchants.get(cat);
+            if (catMap.size > 5) {
+                const sorted = Array.from(catMap.entries()).sort((a,b) => b[1] - a[1]);
+                const top5 = new Set(sorted.slice(0, 5).map(e => e[0]));
+                if (!top5.has(merch)) {
+                    merch = `Other ${cat}`;
+                }
+            }
+        }
+
+        const acctId = `acct:${acct}`;
+        const grpId = `grp:${grp}`;
+        const catId = `cat:${cat}`;
+        const merchId = `merch:${cat}:${merch}`;
+        const color = GROUP_COLORS[grp] || "#64748B";
+
+        addNode(acctId, acct, "#475569", amt);
+        addNode(grpId, grp, color, amt);
+        addNode(catId, cat, color, amt);
+
+        addLink(acctId, grpId, amt, grp);
+        addLink(grpId, catId, amt, grp);
+
+        if (options.includeMerchants) {
+            addNode(merchId, merch, color, amt);
+            addLink(catId, merchId, amt, grp);
+        }
+    }
+
+    const nodeIds = Array.from(nodeMap.keys());
+    const indexOf = (id) => nodeIds.indexOf(id);
+
+    // Coordinate layout assignment for strict 4-column alignment
+    const xCoords = [];
+    const yCoords = [];
+
+    nodeIds.forEach(id => {
+        if (id.startsWith('acct:')) xCoords.push(0.01);
+        else if (id.startsWith('grp:')) xCoords.push(0.33);
+        else if (id.startsWith('cat:')) xCoords.push(0.66);
+        else if (id.startsWith('merch:')) xCoords.push(0.99);
+        else xCoords.push(0.5);
+    });
+
+    return {
+        totalSpend: Number(totalSpend.toFixed(2)),
+        transactionCount: filtered.length,
+        nodes: nodeIds.map((id) => {
+            const n = nodeMap.get(id);
+            const pct = totalSpend > 0 ? ((n.total / totalSpend) * 100).toFixed(1) : "0.0";
+            return {
+                id,
+                label: `${n.label} (£${n.total.toFixed(2)} · ${pct}%)`,
+                cleanName: n.label,
+                color: n.color,
+                total: n.total,
+                count: n.count,
+            };
+        }),
+        xCoords,
+        links: Array.from(linkMap.values()).map((l) => ({
+            source: indexOf(l.source),
+            target: indexOf(l.target),
+            value: l.value,
+            count: l.count,
+            group: l.group,
+            sourceLabel: nodeMap.get(l.source)?.label || l.source,
+            targetLabel: nodeMap.get(l.target)?.label || l.target,
+            color: GROUP_LINK_ALPHA[l.group] || GROUP_LINK_ALPHA.Default
+        })),
+    };
+}
+
+/**
+ * 4.4 Hierarchical Treemap Payload Builder
+ */
+function buildTreemapPayload(transactions, options) {
+    const filtered = transactions.filter((tx) => {
+        if (tx.type !== "EXPENSE" || tx.amount >= 0) return false;
+        if (options.excludeLiving && (tx.group.toLowerCase() === "living" || ["rent", "utilities"].includes(tx.category.toLowerCase()))) return false;
+        return true;
+    });
+
+    const totalSpend = filtered.reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+
+    const ids = ["Total Spend"];
+    const labels = ["Total Spend"];
+    const parents = [""];
+    const values = [Number(totalSpend.toFixed(2))];
+    const colors = ["#18181B"];
+
+    const groupMap = new Map();
+    const catMap = new Map();
+    const merchMap = new Map();
+
+    filtered.forEach(tx => {
+        const amt = Math.abs(tx.amount);
+        const grp = tx.group.trim();
+        const cat = normalize(tx.category);
+        const merch = normalize(tx.merchant);
+
+        // Group aggregation
+        groupMap.set(grp, Number(((groupMap.get(grp) || 0) + amt).toFixed(2)));
+
+        // Category aggregation
+        const catKey = `${grp} / ${cat}`;
+        catMap.set(catKey, { grp, cat, total: Number(((catMap.get(catKey)?.total || 0) + amt).toFixed(2)) });
+
+        // Merchant aggregation
+        const merchKey = `${catKey} / ${merch}`;
+        merchMap.set(merchKey, { catKey, merch, grp, total: Number(((merchMap.get(merchKey)?.total || 0) + amt).toFixed(2)) });
+    });
+
+    // Add Groups
+    groupMap.forEach((grpTotal, grp) => {
+        ids.push(grp);
+        labels.push(grp);
+        parents.push("Total Spend");
+        values.push(grpTotal);
+        colors.push(GROUP_COLORS[grp] || "#64748B");
+    });
+
+    // Add Categories
+    catMap.forEach((item, catKey) => {
+        ids.push(catKey);
+        labels.push(item.cat);
+        parents.push(item.grp);
+        values.push(item.total);
+        colors.push(GROUP_COLORS[item.grp] || "#64748B");
+    });
+
+    // Add Merchants
+    merchMap.forEach((item, merchKey) => {
+        ids.push(merchKey);
+        labels.push(item.merch);
+        parents.push(item.catKey);
+        values.push(item.total);
+        colors.push(GROUP_COLORS[item.grp] || "#64748B");
+    });
+
+    return {
+        ids,
+        labels,
+        parents,
+        values,
+        colors,
+        totalSpend: Number(totalSpend.toFixed(2)),
+        transactionCount: filtered.length
+    };
+}
+
+/**
+ * Update 4.1 KPI Summary Ribbon
+ */
+function updateKpiRibbon(payload, transactions) {
+    document.getElementById('kpiTotalSpend').textContent = `£${payload.totalSpend.toFixed(2)}`;
+    document.getElementById('kpiTxCount').textContent = payload.transactionCount;
+    document.getElementById('kpiSpendSub').textContent = excludeLiving ? "Day-to-day (Rent & Utilities excluded)" : "All-in expenditure";
+    document.getElementById('kpiTxCountSub').textContent = `${payload.transactionCount} transactions analyzed`;
+
+    // Compute top group
+    const grpTotals = {};
+    const merchVisits = {};
+    const merchSpend = {};
+
+    transactions.forEach(tx => {
+        if (tx.type !== "EXPENSE" || tx.amount >= 0) return;
+        if (excludeLiving && (tx.group.toLowerCase() === "living" || ["rent", "utilities"].includes(tx.category.toLowerCase()))) return;
+        const amt = Math.abs(tx.amount);
+        const grp = tx.group.trim();
+        const merch = normalize(tx.merchant);
+
+        grpTotals[grp] = (grpTotals[grp] || 0) + amt;
+        merchSpend[merch] = (merchSpend[merch] || 0) + amt;
+        merchVisits[merch] = (merchVisits[merch] || 0) + 1;
+    });
+
+    let topGrp = "—", topGrpAmt = 0;
+    Object.entries(grpTotals).forEach(([g, val]) => {
+        if (val > topGrpAmt) { topGrp = g; topGrpAmt = val; }
+    });
+
+    const topGrpPct = payload.totalSpend > 0 ? ((topGrpAmt / payload.totalSpend) * 100).toFixed(1) : "0.0";
+    document.getElementById('kpiTopGroup').textContent = topGrp;
+    document.getElementById('kpiTopGroupSub').textContent = `£${topGrpAmt.toFixed(2)} (${topGrpPct}% of total)`;
+
+    let topM = "—", topMAmt = 0;
+    Object.entries(merchSpend).forEach(([m, val]) => {
+        if (val > topMAmt) { topM = m; topMAmt = val; }
+    });
+
+    const topMCount = merchVisits[topM] || 0;
+    document.getElementById('kpiTopMerchant').textContent = topM;
+    document.getElementById('kpiTopMerchantSub').textContent = `£${topMAmt.toFixed(2)} (${topMCount} ${topMCount === 1 ? 'visit' : 'visits'})`;
+}
+
+/**
+ * Render Chart (Sankey or Treemap)
+ */
+function renderChart() {
+    const container = document.getElementById('monarchChartContainer');
+    const headerTitle = document.getElementById('chartHeaderTitle');
+    const colHeaders = document.getElementById('sankeyColHeaders');
+    const depthControl = document.getElementById('depthControlGroup');
+
+    if (currentView === 'sankey') {
+        colHeaders.style.display = 'grid';
+        depthControl.style.display = 'flex';
+        headerTitle.innerHTML = sankeyDepth === 4 
+            ? `<span>🌊 Cash Flow Sankey: Account ➔ Group ➔ Category ➔ Merchant</span>`
+            : `<span>🌊 Cash Flow Sankey: Account ➔ Group ➔ Category</span>`;
+
+        if (sankeyDepth === 3) {
+            colHeaders.classList.add('depth-3');
+            document.getElementById('colHeaderMerchant').style.display = 'none';
+        } else {
+            colHeaders.classList.remove('depth-3');
+            document.getElementById('colHeaderMerchant').style.display = 'block';
+        }
+
+        const data = buildSankeyPayload(activeTransactions, {
+            excludeLiving: excludeLiving,
+            includeMerchants: sankeyDepth === 4
+        });
+
+        updateKpiRibbon(data, activeTransactions);
+
+        const customdata = data.links.map(l => {
+            const pct = data.totalSpend > 0 ? ((l.value / data.totalSpend) * 100).toFixed(1) : "0.0";
+            return [l.sourceLabel, l.targetLabel, l.value.toFixed(2), pct, l.count];
+        });
+
+        const plotData = [{
+            type: "sankey",
+            orientation: "h",
+            arrangement: "snap",
+            node: {
+                pad: 22,
+                thickness: 20,
+                line: { color: "rgba(255, 255, 255, 0.15)", width: 1 },
+                label: data.nodes.map(n => n.label),
+                color: data.nodes.map(n => n.color),
+                x: data.xCoords,
+                hoverlabel: {
+                    bgcolor: "#18181B",
+                    bordercolor: "#3F3F46",
+                    font: { family: "Inter", size: 13, color: "#FFFFFF" }
+                }
+            },
+            link: {
+                source: data.links.map(l => l.source),
+                target: data.links.map(l => l.target),
+                value: data.links.map(l => l.value),
+                color: data.links.map(l => l.color),
+                customdata: customdata,
+                hovertemplate: 
+                    "<b>%{customdata[0]} ➔ %{customdata[1]}</b><br>" +
+                    "Amount: <b>£%{customdata[2]}</b><br>" +
+                    "Share of Total: <b>%{customdata[3]}%</b><br>" +
+                    "Transactions: <b>%{customdata[4]}</b>" +
+                    "<extra></extra>"
+            }
+        }];
+
+        const layout = {
+            margin: { l: 20, r: 20, t: 15, b: 15 },
+            paper_bgcolor: "transparent",
+            plot_bgcolor: "transparent",
+            font: {
+                family: "Inter, sans-serif",
+                size: 12,
+                color: "#E4E4E7"
+            }
+        };
+
+        Plotly.react(container, plotData, layout, { responsive: true, displayModeBar: false });
+
+    } else {
+        // Treemap View
+        colHeaders.style.display = 'none';
+        depthControl.style.display = 'none';
+        headerTitle.innerHTML = `<span>🗺️ Spending Breakdown Treemap: Group ➔ Category ➔ Merchant</span>`;
+
+        const tmData = buildTreemapPayload(activeTransactions, { excludeLiving: excludeLiving });
+        updateKpiRibbon(tmData, activeTransactions);
+
+        const plotData = [{
+            type: "treemap",
+            ids: tmData.ids,
+            labels: tmData.labels,
+            parents: tmData.parents,
+            values: tmData.values,
+            branchvalues: "total",
+            marker: {
+                colors: tmData.colors,
+                line: { width: 1.5, color: "#18181B" }
+            },
+            texttemplate: "<b>%{label}</b><br>£%{value:,.2f}<br>%{percentParent:.1%} of parent (%{percentRoot:.1%} total)",
+            hoverlabel: {
+                bgcolor: "#18181B",
+                bordercolor: "#3F3F46",
+                font: { family: "Inter", size: 13, color: "#FFFFFF" }
+            },
+            pathbar: {
+                visible: true,
+                thickness: 28,
+                side: "top"
+            }
+        }];
+
+        const layout = {
+            margin: { l: 10, r: 10, t: 10, b: 10 },
+            paper_bgcolor: "transparent",
+            plot_bgcolor: "transparent",
+            font: { family: "Inter, sans-serif", color: "#FFFFFF" }
+        };
+
+        Plotly.react(container, plotData, layout, { responsive: true, displayModeBar: false });
+    }
+}
+
+// User Interactions
+function switchView(view) {
+    currentView = view;
+    document.getElementById('btnViewSankey').classList.toggle('active', view === 'sankey');
+    document.getElementById('btnViewTreemap').classList.toggle('active', view === 'treemap');
+    renderChart();
+}
+
+function setSankeyDepth(depth) {
+    sankeyDepth = depth;
+    document.getElementById('btnDepth3').classList.toggle('active', depth === 3);
+    document.getElementById('btnDepth4').classList.toggle('active', depth === 4);
+    renderChart();
+}
+
+function toggleLivingFilter() {
+    excludeLiving = !excludeLiving;
+    const pill = document.getElementById('toggleLivingLabel');
+    const label = document.getElementById('toggleLivingText');
+    pill.classList.toggle('active', excludeLiving);
+    label.textContent = excludeLiving 
+        ? "Day-to-Day Only (Excluding Rent & Utilities)" 
+        : "All Spending (Including Rent & Utilities)";
+    renderChart();
+}
+
+function resetToSpecFixture() {
+    activeTransactions = [...SPEC_FIXTURE_TRANSACTIONS];
+    excludeLiving = false;
+    document.getElementById('toggleLivingLabel').classList.remove('active');
+    document.getElementById('toggleLivingText').textContent = "All Spending";
+    renderChart();
+    runAcceptanceTests();
+}
+
+function handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = JSON.parse(e.target.result);
+            if (Array.isArray(data.transactions)) {
+                activeTransactions = data.transactions;
+            } else if (Array.isArray(data)) {
+                activeTransactions = data;
+            } else {
+                alert("JSON must contain an array of 'transactions'");
+                return;
+            }
+            renderChart();
+        } catch (err) {
+            alert("Error parsing JSON file: " + err.message);
+        }
+    };
+    reader.readAsText(file);
+}
+
+/**
+ * 7. Automated Acceptance Criteria Test Runner
+ */
+function runAcceptanceTests() {
+    const setStatus = (id, pass) => {
+        const el = document.getElementById(id);
+        el.textContent = pass ? "PASS" : "FAIL";
+        el.className = `test-status ${pass ? "pass" : "fail"}`;
+    };
+
+    // 1. All-In mode assertions
+    const allIn = buildSankeyPayload(SPEC_FIXTURE_TRANSACTIONS, { excludeLiving: false, includeMerchants: true });
+    setStatus('test1Status', allIn.totalSpend === 1540.77 && allIn.transactionCount === 23);
+
+    // 2. Account totals
+    const chaseNode = allIn.nodes.find(n => n.id === 'acct:Chase');
+    const hsbcNode = allIn.nodes.find(n => n.id === 'acct:HSBC');
+    const ppNode = allIn.nodes.find(n => n.id === 'acct:PayPal');
+    const ccNode = allIn.nodes.find(n => n.id === 'acct:Credit Card');
+    const acctPass = chaseNode?.total === 1227.00 && hsbcNode?.total === 228.66 && ppNode?.total === 56.96 && ccNode?.total === 28.15;
+    setStatus('test2Status', acctPass);
+
+    // 3. Group totals
+    const living = allIn.nodes.find(n => n.id === 'grp:Living');
+    const food = allIn.nodes.find(n => n.id === 'grp:Food & Dining');
+    const grpPass = living?.total === 1297.79 && food?.total === 194.98;
+    setStatus('test3Status', grpPass);
+
+    // 4. Day-to-Day mode assertions
+    const d2d = buildSankeyPayload(SPEC_FIXTURE_TRANSACTIONS, { excludeLiving: true, includeMerchants: true });
+    setStatus('test4Status', d2d.totalSpend === 242.98 && d2d.transactionCount === 21);
+
+    // 5. Day-to-Day Shares
+    const diningNode = d2d.nodes.find(n => n.id === 'cat:Dining');
+    const grocNode = d2d.nodes.find(n => n.id === 'cat:Groceries');
+    const diningPct = ((diningNode.total / d2d.totalSpend) * 100).toFixed(1);
+    const grocPct = ((grocNode.total / d2d.totalSpend) * 100).toFixed(1);
+    setStatus('test5Status', diningNode?.total === 90.88 && diningPct === "37.4" && grocNode?.total === 82.26 && grocPct === "33.9");
+
+    // 6. Case & Duplicate Normalization
+    const aldiNode = allIn.nodes.find(n => n.id === 'merch:Groceries:Aldi');
+    setStatus('test6Status', aldiNode?.total === 31.55 && aldiNode?.count === 4);
+
+    // 7. No Circular reference
+    const transportGrp = allIn.nodes.find(n => n.id === 'grp:Transport');
+    const transportCat = allIn.nodes.find(n => n.id === 'cat:Transport');
+    const cleanLink = allIn.links.some(l => l.source === allIn.nodes.indexOf(transportGrp) && l.target === allIn.nodes.indexOf(transportCat));
+    setStatus('test7Status', transportGrp && transportCat && cleanLink && transportGrp.id !== transportCat.id);
+}
+
+// Initial render
+window.addEventListener('DOMContentLoaded', () => {
+    renderChart();
+    runAcceptanceTests();
+});
+</script>
+</body>
+</html>
