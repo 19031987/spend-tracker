@@ -37,7 +37,13 @@ jobs:
       env:
         ANDROID_HOME: /usr/local/lib/android/sdk
       run: |
-        gradle :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace || (echo "=== GRADLE BUILD FAILED ===" && exit 1)
+        if ! gradle :app:assembleRelease :app:bundleRelease -x test --no-daemon --stacktrace > build.log 2>&1; then
+          echo "::error::Gradle build failed! Log excerpt:"
+          cat build.log | grep -E -A 10 -B 2 "(e: |error:|FAILURE:|Exception)" | head -n 80
+          echo "=== LAST 40 LINES ==="
+          tail -n 40 build.log
+          exit 1
+        fi
         mkdir -p dist
         find app/build/outputs/ -name "*.apk" -exec cp -v {} dist/ \;
         find app/build/outputs/ -name "*.aab" -exec cp -v {} dist/ \;
