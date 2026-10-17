@@ -256,7 +256,14 @@ class SpendNotificationListenerService : NotificationListenerService() {
             return normParsed
         }
 
-        if (!appLabel.isNullOrBlank()) {
+        val pkgLower = packageName.lowercase(java.util.Locale.ROOT)
+        val isSmsApp = pkgLower.contains("messaging") || pkgLower.contains("mms") ||
+            packageName in listOf(
+                "com.google.android.apps.messaging", "com.samsung.android.messaging",
+                "com.android.mms", "com.android.messaging", "com.oneplus.mms"
+            )
+
+        if (!appLabel.isNullOrBlank() && !isSmsApp) {
             val labelLower = appLabel.lowercase(java.util.Locale.ROOT)
             when {
                 labelLower.contains("chase") -> return "Chase"
@@ -284,9 +291,10 @@ class SpendNotificationListenerService : NotificationListenerService() {
                 else -> {
                     val clean = appLabel
                         .replace(Regex("(?i)\\s*[:\\-•|].*"), "")
-                        .replace(Regex("(?i)\\b(?:mobile banking|banking|mobile|uk|app)\\b"), "")
+                        .replace(Regex("(?i)\\b(?:mobile banking|banking|mobile|uk|app|messages?|messaging|sms)\\b"), "")
                         .trim()
-                    if (clean.isNotBlank() && !clean.equals("Bank", ignoreCase = true) && !clean.equals("Banking", ignoreCase = true)) {
+                    val cleanLower = clean.lowercase(java.util.Locale.ROOT)
+                    if (clean.isNotBlank() && cleanLower !in listOf("bank", "banking", "messages", "messaging", "message", "sms", "mms")) {
                         val norm = normalizeBankName(clean)
                         if (norm != "Others" && norm.isNotBlank()) return norm
                     }
@@ -317,13 +325,14 @@ class SpendNotificationListenerService : NotificationListenerService() {
             pkgLower.contains("kroo") -> "Kroo"
             pkgLower.contains("walletnfcrel") || pkgLower.contains("wallet") || pkgLower.contains("paisa") -> "Google Pay"
             pkgLower.contains("samsung") && pkgLower.contains("pay") -> "Samsung Pay"
+            isSmsApp -> "Credit Card"
             else -> {
                 val parts = packageName.split(".").filter {
-                    it.length > 2 && it !in listOf("com", "org", "net", "android", "uk", "co", "app", "mobile", "banking")
+                    it.length > 2 && it !in listOf("com", "org", "net", "android", "uk", "co", "app", "mobile", "banking", "messaging", "mms")
                 }
                 parts.lastOrNull()?.let {
                     val norm = normalizeBankName(it)
-                    if (norm.equals("Bank", ignoreCase = true) || norm.equals("Banking", ignoreCase = true)) "Others" else norm
+                    if (norm.equals("Bank", ignoreCase = true) || norm.equals("Banking", ignoreCase = true) || norm.equals("Others", ignoreCase = true)) "Others" else norm
                 } ?: "Others"
             }
         }

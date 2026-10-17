@@ -177,7 +177,7 @@ fun cleanupAndConsolidateAccounts(db: SupportSQLiteDatabase) {
         """.trimIndent())
 
         // 5. Ensure core default accounts exist if missing
-        val defaultBanks = listOf("Chase", "HSBC", "Savings", "Credit Card")
+        val defaultBanks = listOf("Chase", "HSBC", "Credit Card")
         for (b in defaultBanks) {
             val lower = b.lowercase(java.util.Locale.ROOT)
             val countCursor = db.query("SELECT COUNT(*) FROM accounts WHERE LOWER(TRIM(name)) = ?", arrayOf(lower))
@@ -186,6 +186,29 @@ fun cleanupAndConsolidateAccounts(db: SupportSQLiteDatabase) {
             if (!exists) {
                 db.execSQL("INSERT OR IGNORE INTO accounts(name) VALUES (?)", arrayOf(b))
             }
+        }
+
+        // 5b. Purge unwanted 'Messages', 'Savings', 'Others' accounts and remap any linked transactions
+        try {
+            val chaseCursor = db.query("SELECT id FROM accounts WHERE LOWER(TRIM(name)) = 'chase' LIMIT 1")
+            val chaseId = if (chaseCursor.moveToFirst()) chaseCursor.getLong(0) else 1L
+            chaseCursor.close()
+
+            db.execSQL("""
+                UPDATE transactions 
+                SET accountId = $chaseId, source = 'Chase'
+                WHERE accountId IN (
+                    SELECT id FROM accounts 
+                    WHERE LOWER(TRIM(name)) IN ('messages', 'savings', 'messaging', 'others', 'bank alert', 'message')
+                )
+            """.trimIndent())
+
+            db.execSQL("""
+                DELETE FROM accounts 
+                WHERE LOWER(TRIM(name)) IN ('messages', 'savings', 'messaging', 'others', 'bank alert', 'message')
+            """.trimIndent())
+        } catch (e: Exception) {
+            android.util.Log.w("AppDatabase", "Purge junk accounts notice: ${e.message}")
         }
 
         // 6. Ensure unique index on accounts(name COLLATE NOCASE)
@@ -253,7 +276,7 @@ abstract class AppDatabase : RoomDatabase() {
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL("INSERT OR IGNORE INTO accounts(name) VALUES ('Chase'), ('HSBC'), ('Savings'), ('Credit Card')")
+                        db.execSQL("INSERT OR IGNORE INTO accounts(name) VALUES ('Chase'), ('HSBC'), ('Credit Card')")
                         CatalogSeed.seed(db)
                     }
 

@@ -40,9 +40,12 @@ fun normalizeBankName(raw: String?, fallback: String = "Others"): String {
         lower == "metro bank" || lower == "metro" || lower.startsWith("metro bank") || lower.startsWith("metro ") -> "Metro Bank"
         lower == "kroo" || lower == "kroo bank" || lower.startsWith("kroo ") -> "Kroo"
         lower == "checking" || lower == "checking account" || lower == "current account" || lower.startsWith("checking ") -> "Chase"
-        lower == "savings" || lower == "saving" || lower == "savings account" || lower.startsWith("savings ") || lower.startsWith("saving ") -> "Savings"
+        lower == "savings" || lower == "saving" || lower == "savings account" || lower.startsWith("savings ") || lower.startsWith("saving ") -> "Chase"
         lower == "credit card" || lower == "creditcard" || lower.startsWith("credit card") || lower.startsWith("creditcard") -> "Credit Card"
-        lower == "others" || lower == "other" || lower == "card payment" || lower == "bank alert" || lower == "unknown" || lower.startsWith("other ") || lower == "bank" || lower == "banking" || lower == "mobile banking" || lower == "mobile" || lower == "app" -> "Others"
+        lower == "others" || lower == "other" || lower == "card payment" || lower == "bank alert" || lower == "unknown" || lower.startsWith("other ") ||
+            lower == "bank" || lower == "banking" || lower == "mobile banking" || lower == "mobile" || lower == "app" ||
+            lower == "messages" || lower == "messaging" || lower == "message" || lower == "sms" || lower == "mms" ||
+            lower == "android system" || lower == "system" || lower == "phone" || lower.contains("messaging") || lower.contains("mms") -> "Others"
         else -> {
             trimmed.split(" ").joinToString(" ") { word ->
                 word.lowercase(Locale.ROOT).replaceFirstChar {

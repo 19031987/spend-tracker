@@ -129,6 +129,10 @@ fun SpendTrackerScreen(container: AppContainer) {
     val deduplicatedAccounts = remember(accounts) {
         accounts
             .map { it.copy(name = normalizeBankName(it.name)) }
+            .filter {
+                val lower = it.name.lowercase(Locale.ROOT)
+                lower != "others" && lower != "messages" && lower != "savings" && lower != "messaging"
+            }
             .distinctBy { it.name.lowercase(Locale.ROOT) }
             .sortedBy { it.name }
     }
@@ -387,6 +391,10 @@ private fun TransactionsFeed(
     val deduplicatedAccounts = remember(accounts) {
         accounts
             .map { it.copy(name = normalizeBankName(it.name)) }
+            .filter {
+                val lower = it.name.lowercase(Locale.ROOT)
+                lower != "others" && lower != "messages" && lower != "savings" && lower != "messaging"
+            }
             .distinctBy { it.name.lowercase(Locale.ROOT) }
             .sortedBy { it.name }
     }
