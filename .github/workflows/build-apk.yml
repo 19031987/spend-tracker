@@ -38,10 +38,13 @@ jobs:
         ANDROID_HOME: /usr/local/lib/android/sdk
       run: |
         if ! gradle :app:assembleRelease :app:bundleRelease -x test --no-daemon --stacktrace > build.log 2>&1; then
-          echo "::error::Gradle build failed! Log excerpt:"
-          cat build.log | grep -E -A 10 -B 2 "(e: |error:|FAILURE:|Exception)" | head -n 80
-          echo "=== LAST 40 LINES ==="
-          tail -n 40 build.log
+          echo "=== GRADLE BUILD FAILED ==="
+          grep -E "(e: |error:|FAILURE:|BUILD FAILED|Caused by:)" build.log | head -n 30 | while read -r line; do
+            echo "::error::$line"
+          done
+          tail -n 15 build.log | while read -r line; do
+            echo "::error::TAIL: $line"
+          done
           exit 1
         fi
         mkdir -p dist
