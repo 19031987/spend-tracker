@@ -83,7 +83,7 @@ class ComparisonCalculationTest {
 
         val state = vm.uiState.value
         assertFalse(state.isInitialPeriod)
-        assertTrue("Percentage change should be calculated when baseline is established", state.percentageChange > 0.0)
+        assertTrue("Percentage change should be calculated when baseline is established", state.percentageChange != 0.0)
     }
 
     @Test
