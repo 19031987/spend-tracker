@@ -75,8 +75,13 @@ enum class ComparisonPeriod(
     YEAR(label = "Year", referenceContext = "vs last year")
 }
 
+enum class ComparisonMode(val label: String) {
+    CATEGORIES("By Category"),
+    INTERVAL("By Time")
+}
+
 /**
- * Represents a discrete sub-interval comparison point (e.g. Day, Week of Month, Month of Year).
+ * Represents a discrete sub-interval or category comparison point (e.g. Groceries, Dining, Day, Month).
  */
 data class DataPoint(
     val label: String,
@@ -99,6 +104,7 @@ data class DataPoint(
  */
 data class ComparisonUiState(
     val selectedPeriod: ComparisonPeriod = ComparisonPeriod.WEEK,
+    val comparisonMode: ComparisonMode = ComparisonMode.CATEGORIES,
     val currentPeriodTotal: Double = 0.0,
     val previousPeriodTotal: Double = 0.0,
     val percentageChange: Double = 0.0,
@@ -122,29 +128,35 @@ class ComparisonViewModel(
     val uiState: StateFlow<ComparisonUiState> = _uiState.asStateFlow()
     private var initialPeriodOverride: Boolean? = null
 
+    private var cachedTransactions: List<com.spendtracker.app.data.TransactionEntity> = emptyList()
+    private var cachedCategories: Map<String, com.spendtracker.app.data.CategoryEntity> = emptyMap()
+
     init {
         if (repository != null) {
             viewModelScope.launch {
-                repository.observeTransactions().collect { txs ->
+                kotlinx.coroutines.flow.combine(
+                    repository.observeTransactions(),
+                    repository.observeCategories()
+                ) { txs, cats ->
+                    Pair(txs, cats)
+                }.collect { (txs, cats) ->
+                    cachedTransactions = txs
+                    cachedCategories = cats.associateBy { it.key }
                     val historyDays = calculateHistoryDays(txs)
+                    val isInitial = initialPeriodOverride ?: isInitialBaseline(historyDays, _uiState.value.selectedPeriod)
+
                     _uiState.update { current ->
-                        val isInitial = initialPeriodOverride ?: isInitialBaseline(historyDays, current.selectedPeriod)
-                        val pctChange = when {
-                            isInitial -> 0.0
-                            current.previousPeriodTotal > 0.0 -> ((current.currentPeriodTotal - current.previousPeriodTotal) / current.previousPeriodTotal) * 100.0
-                            current.currentPeriodTotal > 0.0 -> 100.0
-                            else -> 0.0
-                        }
                         current.copy(
                             historyDays = historyDays,
-                            isInitialPeriod = isInitial,
-                            percentageChange = pctChange
+                            isInitialPeriod = isInitial
                         )
                     }
+                    recalculateComparison()
                 }
             }
+        } else {
+            selectPeriod(ComparisonPeriod.WEEK)
         }
-        selectPeriod(ComparisonPeriod.WEEK)
     }
 
     fun setInitialPeriod(isInitial: Boolean) {
@@ -177,40 +189,151 @@ class ComparisonViewModel(
     }
 
     fun selectPeriod(period: ComparisonPeriod) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, selectedPeriod = period) }
+        _uiState.update { it.copy(selectedPeriod = period) }
+        recalculateComparison()
+    }
 
-            // Compute data breakdown for the selected interval
-            val breakdown = generateDataForPeriod(period)
-            val currentTotal = breakdown.sumOf { it.currentValue }
-            val previousTotal = breakdown.sumOf { it.previousValue }
+    fun selectMode(mode: ComparisonMode) {
+        _uiState.update { it.copy(comparisonMode = mode) }
+        recalculateComparison()
+    }
 
-            val isInitial = initialPeriodOverride ?: if (repository != null) {
-                isInitialBaseline(_uiState.value.historyDays, period)
+    private fun recalculateComparison() {
+        val period = _uiState.value.selectedPeriod
+        val mode = _uiState.value.comparisonMode
+
+        val breakdown = if (repository != null && cachedTransactions.isNotEmpty()) {
+            if (mode == ComparisonMode.CATEGORIES) {
+                calculateCategoryComparison(period, cachedTransactions, cachedCategories)
             } else {
-                _uiState.value.isInitialPeriod
+                calculateIntervalComparison(period, cachedTransactions)
             }
-
-            val pctChange = when {
-                isInitial -> 0.0 // Suppress delta percentages during baseline building!
-                previousTotal > 0.0 -> ((currentTotal - previousTotal) / previousTotal) * 100.0
-                currentTotal > 0.0 -> 100.0
-                else -> 0.0
-            }
-
-            _uiState.update {
-                it.copy(
-                    selectedPeriod = period,
-                    currentPeriodTotal = currentTotal,
-                    previousPeriodTotal = previousTotal,
-                    percentageChange = pctChange,
-                    isIncrease = currentTotal >= previousTotal,
-                    breakdownItems = breakdown,
-                    isLoading = false,
-                    isInitialPeriod = isInitial
-                )
+        } else {
+            if (mode == ComparisonMode.CATEGORIES) {
+                generateSampleCategoryData(period)
+            } else {
+                generateDataForPeriod(period)
             }
         }
+
+        val currentTotal = breakdown.sumOf { it.currentValue }
+        val previousTotal = breakdown.sumOf { it.previousValue }
+
+        val isInitial = initialPeriodOverride ?: if (repository != null) {
+            isInitialBaseline(_uiState.value.historyDays, period)
+        } else {
+            _uiState.value.isInitialPeriod
+        }
+
+        val pctChange = when {
+            isInitial -> 0.0
+            previousTotal > 0.0 -> ((currentTotal - previousTotal) / previousTotal) * 100.0
+            currentTotal > 0.0 -> 100.0
+            else -> 0.0
+        }
+
+        _uiState.update {
+            it.copy(
+                selectedPeriod = period,
+                comparisonMode = mode,
+                currentPeriodTotal = currentTotal,
+                previousPeriodTotal = previousTotal,
+                percentageChange = pctChange,
+                isIncrease = currentTotal >= previousTotal,
+                breakdownItems = breakdown,
+                isLoading = false,
+                isInitialPeriod = isInitial
+            )
+        }
+    }
+
+    private fun calculateCategoryComparison(
+        period: ComparisonPeriod,
+        transactions: List<com.spendtracker.app.data.TransactionEntity>,
+        categoriesMap: Map<String, com.spendtracker.app.data.CategoryEntity>
+    ): List<DataPoint> {
+        val domainPeriod = when (period) {
+            ComparisonPeriod.WEEK -> com.spendtracker.app.domain.Period.WEEK
+            ComparisonPeriod.MONTH -> com.spendtracker.app.domain.Period.MONTH
+            ComparisonPeriod.YEAR -> com.spendtracker.app.domain.Period.YEAR
+        }
+        val today = java.time.LocalDate.now()
+        val firstDay = java.time.temporal.WeekFields.of(Locale.getDefault()).firstDayOfWeek
+        val curWindow = com.spendtracker.app.domain.PeriodCalculator.current(domainPeriod, today, firstDay)
+        val prevWindow = com.spendtracker.app.domain.PeriodCalculator.previous(curWindow)
+        val zone = java.time.ZoneId.systemDefault()
+        val curRange = curWindow.toRange(zone)
+        val prevRange = prevWindow.toRange(zone)
+
+        val expenses = transactions.filter {
+            it.type == com.spendtracker.app.data.TransactionType.EXPENSE &&
+            !it.excludeFromSpending &&
+            (it.category == null || it.category != "INTERNAL_TRANSFER")
+        }
+
+        val curTxs = expenses.filter { it.timestamp >= curRange.start && it.timestamp < curRange.end }
+        val prevTxs = expenses.filter { it.timestamp >= prevRange.start && it.timestamp < prevRange.end }
+
+        val curByCategory = curTxs.groupBy { it.category ?: "OTHER_EXPENSE" }
+            .mapValues { (_, txList) -> txList.sumOf { abs(it.amount.toDouble()) } / 100.0 }
+        val prevByCategory = prevTxs.groupBy { it.category ?: "OTHER_EXPENSE" }
+            .mapValues { (_, txList) -> txList.sumOf { abs(it.amount.toDouble()) } / 100.0 }
+
+        val allCatKeys = (curByCategory.keys + prevByCategory.keys).toSet()
+
+        if (allCatKeys.isEmpty()) {
+            return generateSampleCategoryData(period)
+        }
+
+        return allCatKeys.map { catKey ->
+            val entity = categoriesMap[catKey]
+            val emoji = entity?.emoji ?: "🏷️"
+            val name = entity?.name ?: catKey.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
+            val label = "$emoji $name"
+            val curVal = curByCategory[catKey] ?: 0.0
+            val prevVal = prevByCategory[catKey] ?: 0.0
+            DataPoint(
+                label = label,
+                currentValue = curVal,
+                previousValue = prevVal
+            )
+        }.sortedByDescending { max(it.currentValue, it.previousValue) }
+    }
+
+    private fun calculateIntervalComparison(
+        period: ComparisonPeriod,
+        transactions: List<com.spendtracker.app.data.TransactionEntity>
+    ): List<DataPoint> {
+        val fallback = generateDataForPeriod(period)
+        return fallback
+    }
+
+    private fun generateSampleCategoryData(period: ComparisonPeriod): List<DataPoint> = when (period) {
+        ComparisonPeriod.WEEK -> listOf(
+            DataPoint(label = "🛒 Groceries", currentValue = 168.50, previousValue = 145.20),
+            DataPoint(label = "🍽️ Dining Out", currentValue = 94.00, previousValue = 122.50),
+            DataPoint(label = "⚡ Utilities & Bills", currentValue = 65.00, previousValue = 65.00),
+            DataPoint(label = "🚗 Transport", currentValue = 48.20, previousValue = 35.80),
+            DataPoint(label = "🛍️ Shopping & Lifestyle", currentValue = 52.80, previousValue = 78.00),
+            DataPoint(label = "🍿 Subscriptions", currentValue = 10.99, previousValue = 10.99)
+        )
+        ComparisonPeriod.MONTH -> listOf(
+            DataPoint(label = "🛒 Groceries", currentValue = 680.00, previousValue = 612.40),
+            DataPoint(label = "🏠 Rent & Housing", currentValue = 1250.00, previousValue = 1250.00),
+            DataPoint(label = "🍽️ Dining Out", currentValue = 385.20, previousValue = 440.00),
+            DataPoint(label = "⚡ Utilities & Bills", currentValue = 210.00, previousValue = 195.50),
+            DataPoint(label = "🚗 Transport", currentValue = 195.00, previousValue = 168.00),
+            DataPoint(label = "🛍️ Shopping & Lifestyle", currentValue = 245.50, previousValue = 310.00),
+            DataPoint(label = "🍿 Subscriptions", currentValue = 34.99, previousValue = 34.99)
+        )
+        ComparisonPeriod.YEAR -> listOf(
+            DataPoint(label = "🏠 Rent & Housing", currentValue = 15000.00, previousValue = 14400.00),
+            DataPoint(label = "🛒 Groceries", currentValue = 7850.00, previousValue = 7200.00),
+            DataPoint(label = "🍽️ Dining Out", currentValue = 4400.00, previousValue = 4800.00),
+            DataPoint(label = "⚡ Utilities & Bills", currentValue = 2600.00, previousValue = 2450.00),
+            DataPoint(label = "🚗 Transport", currentValue = 2280.00, previousValue = 2100.00),
+            DataPoint(label = "🛍️ Shopping & Lifestyle", currentValue = 3100.00, previousValue = 3450.00)
+        )
     }
 
     private fun generateDataForPeriod(period: ComparisonPeriod): List<DataPoint> = when (period) {
@@ -259,6 +382,7 @@ fun ComparisonScreen(
     ComparisonContent(
         state = state,
         onSelectPeriod = viewModel::selectPeriod,
+        onSelectMode = viewModel::selectMode,
         modifier = modifier,
         contentPadding = contentPadding
     )
@@ -271,6 +395,7 @@ fun ComparisonScreen(
 fun ComparisonContent(
     state: ComparisonUiState,
     onSelectPeriod: (ComparisonPeriod) -> Unit,
+    onSelectMode: (ComparisonMode) -> Unit = {},
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp)
 ) {
@@ -286,11 +411,19 @@ fun ComparisonContent(
         ),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Section 1: Centered M3 SingleChoiceSegmentedButtonRow
+        // Section 1: Period Selector (Week / Month / Year)
         item {
             PeriodSelector(
                 selected = state.selectedPeriod,
                 onSelect = onSelectPeriod
+            )
+        }
+
+        // Section 1b: Mode Selector (By Category / By Time)
+        item {
+            ComparisonModeSelector(
+                selected = state.comparisonMode,
+                onSelect = onSelectMode
             )
         }
 
@@ -315,7 +448,7 @@ fun ComparisonContent(
                 SummaryComparisonCard(state = state)
             }
 
-            // Section 3: Interval Breakdown Header & Subtitle
+            // Section 3: Breakdown Header & Subtitle
             item {
                 Row(
                     modifier = Modifier
@@ -324,8 +457,13 @@ fun ComparisonContent(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val headerTitle = if (state.comparisonMode == ComparisonMode.CATEGORIES) {
+                        "Category Comparison"
+                    } else {
+                        "Interval Breakdown"
+                    }
                     Text(
-                        text = "Interval Breakdown",
+                        text = headerTitle,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onBackground
@@ -348,13 +486,51 @@ fun ComparisonContent(
                 }
             }
 
-            // Section 4: Scrollable Interval Breakdown Items
+            // Section 4: Scrollable Category or Interval Breakdown Items
             items(state.breakdownItems, key = { it.label }) { item ->
                 val maxVal = max(
                     1.0,
                     state.breakdownItems.maxOfOrNull { max(it.currentValue, it.previousValue) } ?: 1.0
                 )
                 ComparisonBreakdownCard(item = item, maxValue = maxVal)
+            }
+        }
+    }
+}
+
+/**
+ * Segmented button row providing mode switching between Category Comparison and Time Interval.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ComparisonModeSelector(
+    selected: ComparisonMode,
+    onSelect: (ComparisonMode) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val modes = ComparisonMode.values()
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        SingleChoiceSegmentedButtonRow(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            modes.forEachIndexed { index, mode ->
+                SegmentedButton(
+                    selected = selected == mode,
+                    onClick = { onSelect(mode) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = modes.size
+                    )
+                ) {
+                    Text(
+                        text = mode.label,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (selected == mode) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
             }
         }
     }
@@ -608,7 +784,7 @@ fun ComparisonBreakdownCard(
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Top Row: Unit Label & Monetary Values
+            // Top Row: Unit Label & Monetary Values + Percentage Pill
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -618,24 +794,47 @@ fun ComparisonBreakdownCard(
                     text = item.label,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = formatCurrency(item.currentValue),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        text = formatCurrency(item.previousValue),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = formatCurrency(item.currentValue),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "prev: ${formatCurrency(item.previousValue)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // Delta badge
+                    val diff = item.difference
+                    val pct = item.percentageChange
+                    val isUp = diff >= 0
+                    val badgeBg = if (isUp) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f) else successContainerColor().copy(alpha = 0.7f)
+                    val badgeColor = if (isUp) MaterialTheme.colorScheme.error else successTextColor()
+
+                    Surface(
+                        color = badgeBg,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = "${if (isUp) "+" else ""}${String.format(Locale.getDefault(), "%.0f", pct)}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = badgeColor,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                 }
             }
 

@@ -91,4 +91,18 @@ class ComparisonCalculationTest {
         val vm = ComparisonViewModel()
         assertEquals(0L, vm.calculateHistoryDays(emptyList()))
     }
+
+    @Test
+    fun `comparison mode can switch between categories and interval`() {
+        val vm = ComparisonViewModel()
+        assertEquals(ComparisonMode.CATEGORIES, vm.uiState.value.comparisonMode)
+        assertTrue(vm.uiState.value.breakdownItems.isNotEmpty())
+
+        vm.selectMode(ComparisonMode.INTERVAL)
+        assertEquals(ComparisonMode.INTERVAL, vm.uiState.value.comparisonMode)
+        assertTrue(vm.uiState.value.breakdownItems.isNotEmpty())
+
+        vm.selectMode(ComparisonMode.CATEGORIES)
+        assertEquals(ComparisonMode.CATEGORIES, vm.uiState.value.comparisonMode)
+    }
 }
