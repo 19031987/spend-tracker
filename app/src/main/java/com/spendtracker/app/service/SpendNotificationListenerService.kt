@@ -302,7 +302,6 @@ class SpendNotificationListenerService : NotificationListenerService() {
             }
         }
 
-        val pkgLower = packageName.lowercase(java.util.Locale.ROOT)
         return when {
             pkgLower.contains("chase") || pkgLower.contains("jpmorgan") -> "Chase"
             pkgLower.contains("hsbc") -> "HSBC"
