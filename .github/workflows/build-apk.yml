@@ -63,10 +63,15 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.8.5
-        name: "SpendTracker Release v1.8.5 (Money In & Money Out Pipe Alert Parsing)"
+        tag_name: v1.8.6
+        name: "SpendTracker Release v1.8.6 (Retroactive Transaction Repair & Vendor Fix)"
         body: |
-          ### SpendTracker v1.8.5 - Money In & Money Out Pipe Alert Parsing
+          ### SpendTracker v1.8.6 - Retroactive Transaction Repair & Vendor Fix
+          - 🔄 **Retroactive Past Transaction Auto-Repair**:
+            - On app startup, automatically scans previously saved transactions in Room and legacy SQLite databases.
+            - Re-parses any past notifications containing structured pipe alerts (e.g. `£50.00 transaction | TRIPURA JHANSI RANCHASE | HSBC ADVANCE`).
+            - Automatically resolves and replaces generic "Money In" or "Unknown Vendor" labels with the true sender/merchant name ("Tripura Jhansi Ranchase").
+            - Corrects inverted expense signs to positive Income (+£50.00).
           - 📨 **Full Support for HSBC & Bank Pipe Notifications (`Money In` & `Money Out`)**:
             - Accurately captures both `Money In` (income/deposits) and `Money Out` (spending/expenses) from notification titles and content.
             - Handles formats such as `£50.00 transaction | TRIPURA JHANSI RANCHASE | HSBC ADVANCE` and `£15.50 transaction | Costa Coffee | HSBC ADVANCE`.

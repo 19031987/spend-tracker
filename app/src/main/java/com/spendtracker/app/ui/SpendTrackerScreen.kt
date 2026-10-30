@@ -769,7 +769,15 @@ private fun TransactionRowItem(
     onCategoryClick: () -> Unit
 ) {
     val isTransfer = tx.type == TransactionType.TRANSFER || tx.categoryKey == "INTERNAL_TRANSFER" || tx.excludeFromSpending
-    val isUnknownVendor = !isTransfer && (tx.merchant.isNullOrBlank() || tx.merchant.equals("Chase Payment", ignoreCase = true) || tx.merchant.equals("HSBC Payment", ignoreCase = true))
+    val isUnknownVendor = !isTransfer && (
+        tx.merchant.isNullOrBlank() ||
+        tx.merchant.equals("Chase Payment", ignoreCase = true) ||
+        tx.merchant.equals("HSBC Payment", ignoreCase = true) ||
+        tx.merchant.equals("Money In", ignoreCase = true) ||
+        tx.merchant.equals("Money Out", ignoreCase = true) ||
+        tx.merchant.equals("Card Payment", ignoreCase = true) ||
+        tx.merchant.equals("Payment", ignoreCase = true)
+    )
 
     val timeStr = if (tx.timestamp > 0) {
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(tx.timestamp))

@@ -229,6 +229,114 @@ fun cleanupAndConsolidateAccounts(db: SupportSQLiteDatabase) {
     }
 }
 
+fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
+    try {
+        // 1. Repair from Room's transactions table where note contains pipe symbols
+        val cursor = db.query(
+            "SELECT id, amount, note, source, merchant, type FROM transactions WHERE note LIKE '%|%' OR note LIKE '%¦%'"
+        )
+        while (cursor.moveToNext()) {
+            val txId = cursor.getLong(0)
+            val currentAmount = cursor.getLong(1)
+            val note = cursor.getString(2) ?: ""
+            val source = cursor.getString(3) ?: ""
+
+            val cleanNote = note
+                .replace(Regex("(?i)^Captured from [^:]+:\\s*"), "")
+                .replace(Regex("(?i)^Captured from [^:]+ alert:?\\s*"), "")
+                .trim()
+
+            val parsed = com.spendtracker.app.parser.SpendParser.parse(source, "", cleanNote)
+            if (parsed != null && parsed.merchant.isNotBlank()) {
+                val newType = if (parsed.type == com.spendtracker.app.parser.SpendParser.TYPE_IN) "INCOME" else "EXPENSE"
+                val absMinor = kotlin.math.abs(currentAmount)
+                val newAmount = if (newType == "INCOME") absMinor else -absMinor
+                db.execSQL(
+                    "UPDATE transactions SET merchant = ?, type = ?, amount = ? WHERE id = ?",
+                    arrayOf(parsed.merchant, newType, newAmount, txId)
+                )
+            }
+        }
+        cursor.close()
+    } catch (e: Exception) {
+        android.util.Log.w("AppDatabase", "Repair from note notice: ${e.message}")
+    }
+
+    try {
+        // 2. Repair from legacy spend_tracker.db if present
+        val legacyDbFile = context.getDatabasePath("spend_tracker.db")
+        if (legacyDbFile != null && legacyDbFile.exists()) {
+            val legacyDb = android.database.sqlite.SQLiteDatabase.openDatabase(
+                legacyDbFile.absolutePath,
+                null,
+                android.database.sqlite.SQLiteDatabase.OPEN_READWRITE
+            )
+            val expCursor = legacyDb.rawQuery(
+                "SELECT id, amount, raw_text, timestamp, source FROM expenses WHERE raw_text LIKE '%|%' OR raw_text LIKE '%¦%'",
+                null
+            )
+            while (expCursor.moveToNext()) {
+                val expId = expCursor.getLong(0)
+                val rawText = expCursor.getString(2) ?: ""
+                val timestamp = expCursor.getLong(3)
+                val source = expCursor.getString(4) ?: ""
+
+                val parsed = com.spendtracker.app.parser.SpendParser.parse(source, "", rawText)
+                if (parsed != null && parsed.merchant.isNotBlank()) {
+                    val newType = if (parsed.type == com.spendtracker.app.parser.SpendParser.TYPE_IN) "INCOME" else "EXPENSE"
+                    val absMinor = kotlin.math.abs((parsed.amount * 100.0).toLong())
+                    val newAmount = if (newType == "INCOME") absMinor else -absMinor
+
+                    val cv = android.content.ContentValues().apply {
+                        put("merchant", parsed.merchant)
+                        put("type", parsed.type)
+                        put("category", parsed.category)
+                    }
+                    legacyDb.update("expenses", cv, "id = ?", arrayOf(expId.toString()))
+
+                    db.execSQL(
+                        """
+                        UPDATE transactions 
+                        SET merchant = ?, type = ?, amount = ?
+                        WHERE ABS(ABS(amount) - ?) <= 1 
+                          AND ABS(timestamp - ?) <= 60000
+                          AND (merchant IS NULL OR merchant = '' OR merchant IN ('Money In', 'Money Out', 'Unknown Vendor', 'HSBC Payment', 'Chase Payment', 'Card Payment', 'Payment', 'HSBC', 'Chase'))
+                        """.trimIndent(),
+                        arrayOf(parsed.merchant, newType, newAmount, absMinor, timestamp)
+                    )
+                }
+            }
+            expCursor.close()
+            legacyDb.close()
+        }
+    } catch (e: Exception) {
+        android.util.Log.w("AppDatabase", "Repair from legacy db notice: ${e.message}")
+    }
+
+    try {
+        // 3. Clear literal 'Money In' / 'Money Out' as merchant name and fix inverted sign
+        db.execSQL(
+            """
+            UPDATE transactions
+            SET merchant = NULL
+            WHERE merchant IN ('Money In', 'Money Out')
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            UPDATE transactions
+            SET type = 'INCOME', amount = ABS(amount)
+            WHERE type = 'EXPENSE' AND (
+                LOWER(note) LIKE '%money in%' OR
+                LOWER(category) LIKE '%money in%'
+            )
+            """.trimIndent()
+        )
+    } catch (e: Exception) {
+        android.util.Log.w("AppDatabase", "Clean Money In labels notice: ${e.message}")
+    }
+}
+
 val MIGRATION_4_5 = object : Migration(4, 5) {
     override fun migrate(db: SupportSQLiteDatabase) {
         cleanupAndConsolidateAccounts(db)
@@ -283,6 +391,7 @@ abstract class AppDatabase : RoomDatabase() {
                     override fun onOpen(db: SupportSQLiteDatabase) {
                         super.onOpen(db)
                         cleanupAndConsolidateAccounts(db)
+                        cleanupAndRepairTransactions(db, context.applicationContext)
                         db.execSQL(
                             """
                             INSERT OR IGNORE INTO categories(`key`, groupId, name, emoji, colorHex, type, isBuiltIn, isHidden)

@@ -92,6 +92,11 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
         }
     }
 
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        cleanupAndRepairData(db)
+    }
+
     /**
      * Time-Window Fingerprinting:
      * Returns all transactions within the time window matching amount and bank source.
@@ -279,6 +284,7 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
                         ELSE $COL_CATEGORY
                     END
                 WHERE $COL_TYPE = 'OUT' AND (
+                    LOWER($COL_RAW_TEXT) LIKE '%money in%' OR
                     LOWER($COL_RAW_TEXT) LIKE '%added%' OR
                     LOWER($COL_RAW_TEXT) LIKE '%received%' OR
                     LOWER($COL_RAW_TEXT) LIKE '%sent you%' OR
@@ -329,6 +335,27 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
                     db.update(TABLE_NAME, cv, "$COL_SOURCE = ?", arrayOf(raw))
                 }
             }
+
+            // 6. Automatically re-parse any structured pipe alerts (e.g. £50.00 transaction | TRIPURA JHANSI RANCHASE | HSBC)
+            val pipeCursor = db.rawQuery(
+                "SELECT $COL_ID, $COL_RAW_TEXT, $COL_SOURCE FROM $TABLE_NAME WHERE $COL_RAW_TEXT LIKE '%|%' OR $COL_RAW_TEXT LIKE '%¦%'",
+                null
+            )
+            while (pipeCursor.moveToNext()) {
+                val rowId = pipeCursor.getLong(0)
+                val rawText = pipeCursor.getString(1) ?: ""
+                val source = pipeCursor.getString(2) ?: ""
+                val parsed = com.spendtracker.app.parser.SpendParser.parse(source, "", rawText)
+                if (parsed != null && parsed.merchant.isNotBlank()) {
+                    val cv = ContentValues().apply {
+                        put(COL_MERCHANT, parsed.merchant)
+                        put(COL_TYPE, parsed.type)
+                        put(COL_CATEGORY, parsed.category)
+                    }
+                    db.update(TABLE_NAME, cv, "$COL_ID = ?", arrayOf(rowId.toString()))
+                }
+            }
+            pipeCursor.close()
 
         } catch (e: Exception) {
             e.printStackTrace()
