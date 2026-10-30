@@ -63,10 +63,15 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.8.4
-        name: "SpendTracker Release v1.8.4 (Structured Sender & Bank Notification Parsing)"
+        tag_name: v1.8.5
+        name: "SpendTracker Release v1.8.5 (Money In & Money Out Pipe Alert Parsing)"
         body: |
-          ### SpendTracker v1.8.4 - Structured Sender & Bank Notification Parsing
+          ### SpendTracker v1.8.5 - Money In & Money Out Pipe Alert Parsing
+          - 📨 **Full Support for HSBC & Bank Pipe Notifications (`Money In` & `Money Out`)**:
+            - Accurately captures both `Money In` (income/deposits) and `Money Out` (spending/expenses) from notification titles and content.
+            - Handles formats such as `£50.00 transaction | TRIPURA JHANSI RANCHASE | HSBC ADVANCE` and `£15.50 transaction | Costa Coffee | HSBC ADVANCE`.
+            - Appropriately attributes Money Out to spending categories (e.g. Dining, Groceries, Shopping) and Money In to Income / Transfers In.
+            - Cleans all-caps vendor/sender names into polished Title Case.
           - 📨 **Structured Pipe-Format Parsing (`amount | sender name | Bank`)**:
             - Automatically parses structured alerts (e.g. `£50.00 | John Smith | HSBC` or `£1,250.50 | TechCorp Payroll | Chase`).
             - Captures sender name as merchant and routes to the designated bank account with zero manual tagging.

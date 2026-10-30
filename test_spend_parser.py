@@ -84,7 +84,7 @@ STRONG_IN = re.compile(
 STRONG_OUT = re.compile(
     r"\b(?:you(?:'ve|’ve| have)? (?:spent|paid|sent|bought|made a payment)|spent|paid to|payment to|paid|"
     r"direct debit|standing order|purchase[ds]?|charged|debited|withdrawal|withdrawn|withdrew|"
-    r"card payment|sent to|sent|transfer to)\b", I)
+    r"card payment|sent to|sent|transfer to|money[ -]out|outgoing payment|outgoing transfer)\b", I)
 WEAK_IN = re.compile(r"\b(?:received|incoming|has arrived|arrived|cashback|interest|credit)\b(?!\s*card)", I)
 WEAK_OUT = re.compile(
     r"\b(?:payment|paid|pay|transaction|approved|contactless|card ending|debit|subscription|bill|charge)\b", I)
@@ -345,10 +345,18 @@ def parse_spend(pkg: str, title, text):
             tx_type = TYPE_IN
         elif sign in ("-", "\u2212"):
             tx_type = TYPE_OUT
-        elif STRONG_IN.search(content):
+        elif re.search(r"\bmoney[ -]out\b", title or "", re.I):
+            tx_type = TYPE_OUT
+        elif re.search(r"\bmoney[ -]in\b", title or "", re.I):
+            tx_type = TYPE_IN
+        elif re.search(r"\bmoney[ -]out\b", content, re.I):
+            tx_type = TYPE_OUT
+        elif re.search(r"\bmoney[ -]in\b", content, re.I):
             tx_type = TYPE_IN
         elif STRONG_OUT.search(content):
             tx_type = TYPE_OUT
+        elif STRONG_IN.search(content):
+            tx_type = TYPE_IN
         else:
             tx_type = TYPE_IN
 
@@ -424,6 +432,20 @@ class TestSpendParser(unittest.TestCase):
             self.assertEqual(res["source"], source, res)
 
     # --- Money Out ---
+    def test_pipe_format_hsbc_money_in_notification_sample(self):
+        # Exact notification from user: "Money In" header, "£50.00 transaction | TRIPURA JHANSI RANCHASE | HSBC ADVANCE"
+        self.check(parse_spend(HSBC, "Money In", "£50.00 transaction | TRIPURA JHANSI RANCHASE | HSBC ADVANCE"),
+                   TYPE_IN, 50.0, "Tripura Jhansi Ranchase", "Money In", "HSBC")
+
+    def test_pipe_format_hsbc_money_out_counterpart(self):
+        # Counterpart "Money Out" notification
+        self.check(parse_spend(HSBC, "Money Out", "£15.50 transaction | Costa Coffee | HSBC ADVANCE"),
+                   TYPE_OUT, 15.5, "Costa Coffee", "Dining & Drinks", "HSBC")
+
+    def test_pipe_format_hsbc_money_out_groceries(self):
+        self.check(parse_spend(HSBC, "Money Out", "£35.20 transaction | Tesco | HSBC ADVANCE"),
+                   TYPE_OUT, 35.2, "Tesco Stores", "Groceries", "HSBC")
+
     def test_pipe_format_hsbc_in(self):
         self.check(parse_spend(HSBC, "HSBC", "£50.00 | John Smith | HSBC"),
                    TYPE_IN, 50.0, "John Smith", "Transfers In", "HSBC")

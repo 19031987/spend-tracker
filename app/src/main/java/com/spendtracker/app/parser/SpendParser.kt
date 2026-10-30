@@ -149,7 +149,7 @@ object SpendParser {
     private val STRONG_OUT = Regex(
         "\\b(?:you(?:'ve|’ve| have)? (?:spent|paid|sent|bought|made a payment)|spent|paid to|payment to|paid|" +
             "direct debit|standing order|purchase[ds]?|charged|debited|withdrawal|withdrawn|withdrew|" +
-            "card payment|sent to|sent|transfer to)\\b",
+            "card payment|sent to|sent|transfer to|money[ -]out|outgoing payment|outgoing transfer)\\b",
         IC
     )
     private val WEAK_IN = Regex("\\b(?:received|incoming|has arrived|arrived|cashback|interest|credit)\\b(?!\\s*card)", IC)
@@ -258,8 +258,12 @@ object SpendParser {
             val type = when {
                 money.sign == "+" -> TYPE_IN
                 money.sign == "-" || money.sign == "\u2212" -> TYPE_OUT
-                STRONG_IN.containsMatchIn(content) -> TYPE_IN
+                Regex("\\bmoney[ -]out\\b", IC).containsMatchIn(title.orEmpty()) -> TYPE_OUT
+                Regex("\\bmoney[ -]in\\b", IC).containsMatchIn(title.orEmpty()) -> TYPE_IN
+                Regex("\\bmoney[ -]out\\b", IC).containsMatchIn(content) -> TYPE_OUT
+                Regex("\\bmoney[ -]in\\b", IC).containsMatchIn(content) -> TYPE_IN
                 STRONG_OUT.containsMatchIn(content) -> TYPE_OUT
+                STRONG_IN.containsMatchIn(content) -> TYPE_IN
                 else -> TYPE_IN
             }
 

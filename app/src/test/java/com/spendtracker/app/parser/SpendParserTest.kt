@@ -16,6 +16,41 @@ class SpendParserTest {
     private val smsPkg = "com.google.android.apps.messaging"
 
     @Test
+    fun `exact photo sample Money In extracts sender and Money In type`() {
+        val parsed = SpendParser.parse(hsbcPkg, "Money In", "£50.00 transaction | TRIPURA JHANSI RANCHASE | HSBC ADVANCE")
+        assertNotNull(parsed)
+        assertEquals(SpendParser.TYPE_IN, parsed!!.type)
+        assertEquals(50.0, parsed.amount, 0.001)
+        assertEquals("Tripura Jhansi Ranchase", parsed.merchant)
+        assertEquals("HSBC", parsed.source)
+        assertEquals("Money In", parsed.category)
+        assertFalse(parsed.merchantIsFallback)
+    }
+
+    @Test
+    fun `exact counterpart Money Out extracts merchant and Money Out type with expense category`() {
+        val parsed = SpendParser.parse(hsbcPkg, "Money Out", "£15.50 transaction | Costa Coffee | HSBC ADVANCE")
+        assertNotNull(parsed)
+        assertEquals(SpendParser.TYPE_OUT, parsed!!.type)
+        assertEquals(15.50, parsed.amount, 0.001)
+        assertEquals("Costa Coffee", parsed.merchant)
+        assertEquals("HSBC", parsed.source)
+        assertEquals("Dining & Drinks", parsed.category)
+        assertFalse(parsed.merchantIsFallback)
+    }
+
+    @Test
+    fun `exact counterpart Money Out for groceries extracts Groceries`() {
+        val parsed = SpendParser.parse(hsbcPkg, "Money Out", "£35.20 transaction | Tesco | HSBC ADVANCE")
+        assertNotNull(parsed)
+        assertEquals(SpendParser.TYPE_OUT, parsed!!.type)
+        assertEquals(35.20, parsed.amount, 0.001)
+        assertEquals("Tesco Stores", parsed.merchant)
+        assertEquals("HSBC", parsed.source)
+        assertEquals("Groceries", parsed.category)
+    }
+
+    @Test
     fun `pipe format with amount sender bank extracts sender as merchant and money in`() {
         val parsed = SpendParser.parse(hsbcPkg, "HSBC", "£50.00 | John Smith | HSBC")
         assertNotNull(parsed)
