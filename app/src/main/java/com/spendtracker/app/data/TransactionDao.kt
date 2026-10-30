@@ -13,6 +13,24 @@ data class TransferIds(val sourceId: Long, val destinationId: Long)
 private const val SPEND_WHERE =
     "type = 'EXPENSE' AND excludeFromSpending = 0 AND (category IS NULL OR category != 'INTERNAL_TRANSFER') AND timestamp >= :start AND timestamp < :end"
 
+fun isMerchantDuplicate(existingMerchant: String?, newMerchant: String?, sourceName: String? = null): Boolean {
+    fun isGenericOrBlank(m: String?): Boolean {
+        if (m.isNullOrBlank()) return true
+        val trimmed = m.trim()
+        if (trimmed.equals("Card Payment", ignoreCase = true) ||
+            trimmed.equals("Payment", ignoreCase = true) ||
+            (!sourceName.isNullOrBlank() && trimmed.equals(sourceName.trim(), ignoreCase = true))
+        ) return true
+        return false
+    }
+
+    val existingGeneric = isGenericOrBlank(existingMerchant)
+    val newGeneric = isGenericOrBlank(newMerchant)
+
+    if (existingGeneric || newGeneric) return true
+    return existingMerchant!!.trim().equals(newMerchant!!.trim(), ignoreCase = true)
+}
+
 @Dao
 abstract class TransactionDao {
 
@@ -46,6 +64,41 @@ abstract class TransactionDao {
         timestamp: Long,
         windowMillis: Long = 60_000L
     ): TransactionEntity?
+
+    /**
+     * Finds all candidates within the time window matching amount and bank.
+     */
+    @Query(
+        """
+        SELECT * FROM transactions
+        WHERE ABS(amount) = :absAmountMinor
+          AND (LOWER(source) = LOWER(:sourceName) OR accountId = :accountId)
+          AND ABS(timestamp - :timestamp) <= :windowMillis
+        ORDER BY ABS(timestamp - :timestamp) ASC
+        """
+    )
+    abstract suspend fun findDuplicates(
+        absAmountMinor: Long,
+        sourceName: String,
+        accountId: Long,
+        timestamp: Long,
+        windowMillis: Long = 60_000L
+    ): List<TransactionEntity>
+
+    /**
+     * Deduplicates taking into account the sender/merchant name.
+     */
+    suspend fun findMatchingDuplicate(
+        absAmountMinor: Long,
+        sourceName: String,
+        accountId: Long,
+        timestamp: Long,
+        merchant: String?,
+        windowMillis: Long = 60_000L
+    ): TransactionEntity? {
+        val candidates = findDuplicates(absAmountMinor, sourceName, accountId, timestamp, windowMillis)
+        return candidates.firstOrNull { isMerchantDuplicate(it.merchant, merchant, sourceName) }
+    }
 
     @Query("UPDATE transactions SET pairedTransactionId = :pairedId WHERE id = :id")
     abstract suspend fun setPairedId(id: Long, pairedId: Long)

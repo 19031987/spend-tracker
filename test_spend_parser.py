@@ -277,6 +277,42 @@ def extract_merchant(tx_type, text, amount_end, title, source):
     return "", True
 
 
+def extract_pipe_segments(title, text, content):
+    def check_candidate(raw_str):
+        if not raw_str or ("|" not in raw_str and "¦" not in raw_str):
+            return None
+        segs = [s.strip() for s in re.split(r"[|¦]", raw_str) if s.strip()]
+        if len(segs) < 3:
+            return None
+        seg0_scrubbed = segs[0]
+        for r in BALANCE_PHRASES:
+            seg0_scrubbed = r.sub(" ", seg0_scrubbed)
+        money = find_first_money(seg0_scrubbed)
+        if not money:
+            return None
+        _, _, _, amount, _ = money
+        if amount <= 0 or amount >= 1_000_000:
+            return None
+        if not is_usable_name(segs[1]):
+            return None
+        return segs
+
+    res = check_candidate(text)
+    if res:
+        return res
+    res = check_candidate(title)
+    if res:
+        return res
+    if title and text and ("|" in title or "|" in text or "¦" in title or "¦" in text):
+        res = check_candidate(f"{title} | {text}")
+        if res:
+            return res
+    res = check_candidate(content)
+    if res:
+        return res
+    return None
+
+
 def parse_spend(pkg: str, title, text):
     pkg = (pkg or "").strip().lower()
     content = " ".join(p.strip() for p in (title, text) if p and p.strip())
@@ -285,6 +321,47 @@ def parse_spend(pkg: str, title, text):
     trust = classify_package(pkg)
     if trust == "UNTRUSTED":
         return None
+
+    pipe_segs = extract_pipe_segments(title, text, content)
+    if pipe_segs is not None:
+        non_sender_parts = [pipe_segs[0]] + pipe_segs[2:]
+        if title and title not in " | ".join(pipe_segs):
+            non_sender_parts.insert(0, title)
+        non_sender_text = " ".join(non_sender_parts)
+        if IGNORE.search(non_sender_text) or PROMO.search(non_sender_text):
+            return None
+
+        seg0_scrubbed = pipe_segs[0]
+        for r in BALANCE_PHRASES:
+            seg0_scrubbed = r.sub(" ", seg0_scrubbed)
+        money = find_first_money(seg0_scrubbed)
+        if not money:
+            return None
+        _, sign, currency, amount, _ = money
+        if amount <= 0 or amount >= 1_000_000:
+            return None
+
+        if sign == "+":
+            tx_type = TYPE_IN
+        elif sign in ("-", "\u2212"):
+            tx_type = TYPE_OUT
+        elif STRONG_IN.search(content):
+            tx_type = TYPE_IN
+        elif STRONG_OUT.search(content):
+            tx_type = TYPE_OUT
+        else:
+            tx_type = TYPE_IN
+
+        seg2 = pipe_segs[2]
+        detected = detect_source("", seg2)
+        source = seg2.strip() if detected == "Card Payment" and seg2.strip() else (detected if detected != "Card Payment" else detect_source(pkg, content))
+        cleaned = clean_merchant(pipe_segs[1], source)
+        final_merchant = cleaned if cleaned else pipe_segs[1].strip()
+        direction = "INCOMING" if tx_type == TYPE_IN else "OUTGOING"
+        return {"type": tx_type, "direction": direction, "source": source, "amount": amount, "currency": currency,
+                "merchant": final_merchant, "merchantIsFallback": False,
+                "category": categorize("%s %s" % (final_merchant, content), tx_type)}
+
     if IGNORE.search(content) or PROMO.search(content):
         return None
     scrubbed = content
@@ -347,6 +424,53 @@ class TestSpendParser(unittest.TestCase):
             self.assertEqual(res["source"], source, res)
 
     # --- Money Out ---
+    def test_pipe_format_hsbc_in(self):
+        self.check(parse_spend(HSBC, "HSBC", "£50.00 | John Smith | HSBC"),
+                   TYPE_IN, 50.0, "John Smith", "Transfers In", "HSBC")
+
+    def test_pipe_format_monzo_title_only(self):
+        self.check(parse_spend("com.monzo.android", "£120.00 | Sarah Jones | Monzo", ""),
+                   TYPE_IN, 120.0, "Sarah Jones", "Transfers In", "Monzo")
+
+    def test_pipe_format_chase_payroll(self):
+        self.check(parse_spend(CHASE, "Chase", "£1,250.50 | TechCorp Payroll | Chase"),
+                   TYPE_IN, 1250.5, "Techcorp Payroll", "Income & Salary", "Chase")
+
+    def test_pipe_format_sms(self):
+        self.check(parse_spend("com.google.android.apps.messaging", "HSBC", "£23.00 | Dave Brown | HSBC"),
+                   TYPE_IN, 23.0, "Dave Brown", "Transfers In", "HSBC")
+
+    def test_pipe_format_outflow_explicit_minus(self):
+        self.check(parse_spend(HSBC, "", "-£8.99 | Netflix | HSBC"),
+                   TYPE_OUT, 8.99, "Netflix", "Bills & Subscriptions", "HSBC")
+
+    def test_pipe_format_custom_bank(self):
+        self.check(parse_spend(HSBC, "", "£50.00 | John Smith | Some Credit Union"),
+                   TYPE_IN, 50.0, "John Smith", "Transfers In", "Some Credit Union")
+
+    def test_pipe_format_win_tan_not_ignored(self):
+        self.check(parse_spend(HSBC, "", "£50.00 | Win Tan | HSBC"),
+                   TYPE_IN, 50.0, "Win Tan", "Money In", "HSBC")
+
+    def test_pipe_format_untrusted_whatsapp_rejected(self):
+        self.assertIsNone(parse_spend("com.whatsapp", "", "£50.00 | John | HSBC"))
+
+    def test_pipe_format_fallback_when_not_usable_name(self):
+        res = parse_spend(HSBC, "", "£50.00 | Your card ending 1234 | HSBC")
+        self.assertIsNotNone(res)
+        self.assertEqual(res["amount"], 50.0)
+
+    def test_pipe_format_balance_scrubbed_fallback(self):
+        self.assertIsNone(parse_spend(HSBC, "", "Balance £1,650.99 | John | HSBC"))
+
+    def test_pipe_format_split_title_text(self):
+        self.check(parse_spend(HSBC, "£50.00 | John Smith", "HSBC"),
+                   TYPE_IN, 50.0, "John Smith", "Transfers In", "HSBC")
+
+    def test_pipe_format_broken_bar_separator(self):
+        self.check(parse_spend(HSBC, "", "£50.00 ¦ Sarah Jones ¦ HSBC"),
+                   TYPE_IN, 50.0, "Sarah Jones", "Transfers In", "HSBC")
+
     def test_chase_asda(self):
         self.check(parse_spend(CHASE, "Chase UK", "You spent £18.50 with your card at ASDA"),
                    TYPE_OUT, 18.50, "ASDA", "Groceries", "Chase")

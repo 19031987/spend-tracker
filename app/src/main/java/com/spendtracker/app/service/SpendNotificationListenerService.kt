@@ -116,11 +116,12 @@ class SpendNotificationListenerService : NotificationListenerService() {
 
                     if (isInternalTransfer && destinationAccount != null) {
                         // Check if a transfer pair already exists within deduplication window
-                        val existingTransfer = roomDb.transactionDao().findDuplicate(
+                        val existingTransfer = roomDb.transactionDao().findMatchingDuplicate(
                             absAmountMinor = minorAmount,
                             sourceName = sourceAccount.name,
                             accountId = sourceAccount.id,
                             timestamp = eventTimestamp,
+                            merchant = null,
                             windowMillis = 60_000L
                         )
                         if (existingTransfer != null) {
@@ -177,12 +178,13 @@ class SpendNotificationListenerService : NotificationListenerService() {
                         val signedAmount = if (txType == TransactionType.EXPENSE) -minorAmount else minorAmount
                         val merchantName = if (parsedWithBank.merchantIsFallback || parsedWithBank.merchant.isBlank()) null else parsedWithBank.merchant
 
-                        // Time-Window Fingerprinting: |t_new - t_existing| < 60s AND amount matches AND source bank matches
-                        val existingTx = roomDb.transactionDao().findDuplicate(
+                        // Time-Window Fingerprinting: |t_new - t_existing| < 60s AND amount matches AND source bank matches AND merchant matches
+                        val existingTx = roomDb.transactionDao().findMatchingDuplicate(
                             absAmountMinor = minorAmount,
                             sourceName = sourceAccount.name,
                             accountId = sourceAccount.id,
                             timestamp = eventTimestamp,
+                            merchant = merchantName,
                             windowMillis = 60_000L
                         )
 

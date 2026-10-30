@@ -552,5 +552,92 @@ class TestUiAccountDeduplication(unittest.TestCase):
         self.assertEqual(acc["name"], "Chase")
 
 
+class TestTransactionDeduplication(unittest.TestCase):
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        self.cur = self.conn.cursor()
+        self.cur.execute("""
+            CREATE TABLE transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                accountId INTEGER,
+                amount INTEGER,
+                merchant TEXT,
+                source TEXT,
+                timestamp INTEGER,
+                type TEXT
+            )
+        """)
+
+    def tearDown(self):
+        self.conn.close()
+
+    def simulate_find_duplicate(self, abs_amount, source_name, account_id, timestamp, new_merchant, window_millis=60000):
+        min_ts = timestamp - window_millis
+        max_ts = timestamp + window_millis
+        self.cur.execute("""
+            SELECT id, accountId, amount, merchant, source, timestamp
+            FROM transactions
+            WHERE ABS(amount) = ?
+              AND (LOWER(source) = LOWER(?) OR accountId = ?)
+              AND timestamp BETWEEN ? AND ?
+            ORDER BY ABS(timestamp - ?) ASC
+        """, (abs_amount, source_name, account_id, min_ts, max_ts, timestamp))
+        rows = self.cur.fetchall()
+        for r in rows:
+            existing_merchant = r[3]
+            # Deduplication rule: candidate matches if both generic/blank OR names match
+            is_generic_existing = not existing_merchant or existing_merchant.strip().lower() in ("card payment", "payment", source_name.lower())
+            is_generic_new = not new_merchant or new_merchant.strip().lower() in ("card payment", "payment", source_name.lower())
+            if is_generic_existing or is_generic_new:
+                return r
+            if existing_merchant.strip().lower() == new_merchant.strip().lower():
+                return r
+        return None
+
+    def test_dedup_same_amount_same_bank_different_merchants(self):
+        # Two payments of £10 within 60s from different senders should both be inserted
+        ts = 100000
+        # 1. John sends £10
+        dup1 = self.simulate_find_duplicate(1000, "HSBC", 1, ts, "John Smith")
+        self.assertIsNone(dup1)
+        self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (1, 1000, 'John Smith', 'HSBC', ?, 'INCOME')", (ts,))
+
+        # 2. Sarah sends £10 15 seconds later
+        dup2 = self.simulate_find_duplicate(1000, "HSBC", 1, ts + 15000, "Sarah Jones")
+        self.assertIsNone(dup2, "Different merchants must NOT be treated as duplicate")
+        self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (1, 1000, 'Sarah Jones', 'HSBC', ?, 'INCOME')", (ts + 15000,))
+
+        self.cur.execute("SELECT COUNT(*) FROM transactions")
+        self.assertEqual(self.cur.fetchone()[0], 2)
+
+    def test_dedup_same_amount_same_bank_same_merchant(self):
+        ts = 100000
+        dup1 = self.simulate_find_duplicate(1000, "HSBC", 1, ts, "John Smith")
+        self.assertIsNone(dup1)
+        self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (1, 1000, 'John Smith', 'HSBC', ?, 'INCOME')", (ts,))
+
+        # Duplicate notification arrives 5 seconds later with identical merchant
+        dup2 = self.simulate_find_duplicate(1000, "HSBC", 1, ts + 5000, "John Smith")
+        self.assertIsNotNone(dup2, "Identical merchant within 60s must be detected as duplicate")
+
+    def test_dedup_one_with_merchant_one_without_enriches(self):
+        ts = 100000
+        # SMS arrives first without merchant (or generic "Card Payment")
+        dup1 = self.simulate_find_duplicate(1000, "HSBC", 1, ts, "Card Payment")
+        self.assertIsNone(dup1)
+        self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (1, 1000, 'Card Payment', 'HSBC', ?, 'INCOME')", (ts,))
+
+        # App notification arrives 2 seconds later with specific sender name "John Smith"
+        dup2 = self.simulate_find_duplicate(1000, "HSBC", 1, ts + 2000, "John Smith")
+        self.assertIsNotNone(dup2, "Generic merchant must match specific merchant for enrichment")
+        # Enrich the record
+        self.cur.execute("UPDATE transactions SET merchant = ? WHERE id = ?", ("John Smith", dup2[0]))
+
+        self.cur.execute("SELECT COUNT(*), merchant FROM transactions")
+        row = self.cur.fetchone()
+        self.assertEqual(row[0], 1)
+        self.assertEqual(row[1], "John Smith")
+
+
 if __name__ == "__main__":
     unittest.main()

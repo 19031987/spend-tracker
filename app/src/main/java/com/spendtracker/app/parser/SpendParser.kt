@@ -238,6 +238,49 @@ object SpendParser {
 
         val trust = classifyPackage(pkg)
         if (trust == Trust.UNTRUSTED) return null
+
+        val pipeSegments = extractPipeSegments(title, text, content)
+        if (pipeSegments != null) {
+            val nonSenderParts = mutableListOf(pipeSegments[0])
+            nonSenderParts.addAll(pipeSegments.drop(2))
+            val combinedPipes = pipeSegments.joinToString(" | ")
+            if (!title.isNullOrBlank() && !combinedPipes.contains(title)) {
+                nonSenderParts.add(0, title)
+            }
+            val nonSenderText = nonSenderParts.joinToString(" ")
+            if (IGNORE.containsMatchIn(nonSenderText) || PROMO.containsMatchIn(nonSenderText)) return null
+
+            var seg0Scrubbed = pipeSegments[0]
+            for (r in BALANCE_PHRASES) seg0Scrubbed = r.replace(seg0Scrubbed, " ")
+            val money = findFirstMoney(seg0Scrubbed) ?: return null
+            if (money.amount <= 0.0 || money.amount >= 1_000_000.0) return null
+
+            val type = when {
+                money.sign == "+" -> TYPE_IN
+                money.sign == "-" || money.sign == "\u2212" -> TYPE_OUT
+                STRONG_IN.containsMatchIn(content) -> TYPE_IN
+                STRONG_OUT.containsMatchIn(content) -> TYPE_OUT
+                else -> TYPE_IN
+            }
+
+            val seg2 = pipeSegments[2]
+            val detected = detectSource("", seg2)
+            val source = if (detected == "Card Payment" && seg2.isNotBlank()) seg2.trim() else if (detected != "Card Payment") detected else detectSource(pkg, content)
+            val cleaned = cleanMerchantName(pipeSegments[1], source)
+            val finalMerchant = cleaned.ifBlank { pipeSegments[1].trim() }
+
+            return ParsedExpense(
+                type = type,
+                amount = money.amount,
+                currency = money.currency,
+                merchant = finalMerchant,
+                category = categorize("$finalMerchant $content", type),
+                source = source,
+                rawText = content,
+                merchantIsFallback = false
+            )
+        }
+
         if (IGNORE.containsMatchIn(content) || PROMO.containsMatchIn(content)) return null
 
         var scrubbed = content
@@ -343,6 +386,33 @@ object SpendParser {
     // ---------------------------------------------------------------------------------------
     // Internals
     // ---------------------------------------------------------------------------------------
+
+    private fun extractPipeSegments(title: String?, text: String?, content: String): List<String>? {
+        fun checkCandidate(rawStr: String?): List<String>? {
+            if (rawStr.isNullOrBlank() || (!rawStr.contains("|") && !rawStr.contains("¦"))) {
+                return null
+            }
+            val segs = rawStr.split(Regex("[|¦]")).map { it.trim() }.filter { it.isNotEmpty() }
+            if (segs.size < 3) return null
+
+            var seg0Scrubbed = segs[0]
+            for (r in BALANCE_PHRASES) seg0Scrubbed = r.replace(seg0Scrubbed, " ")
+            val money = findFirstMoney(seg0Scrubbed) ?: return null
+            if (money.amount <= 0.0 || money.amount >= 1_000_000.0) return null
+            if (!isUsableName(segs[1])) return null
+            return segs
+        }
+
+        checkCandidate(text)?.let { return it }
+        checkCandidate(title)?.let { return it }
+        if (!title.isNullOrBlank() && !text.isNullOrBlank() &&
+            (title.contains("|") || title.contains("¦") || text.contains("|") || text.contains("¦"))
+        ) {
+            checkCandidate("$title | $text")?.let { return it }
+        }
+        checkCandidate(content)?.let { return it }
+        return null
+    }
 
     private fun classifyPackage(pkg: String): Trust = when {
         pkg.isEmpty() -> Trust.TRUSTED

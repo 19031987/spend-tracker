@@ -16,6 +16,7 @@
 
 ### 2. 🏢 Accurate Vendor & Merchant Capture
 - **Smart Vendor Extraction**: Extracts clean merchant and sender names (e.g. `Tesco Stores`, `Costa Coffee`, `British Gas`, `Steam Games`, `Amazon`, `John Smith`).
+- **Structured Sender & Bank Pipe Parsing**: Intelligently parses structured alerts in the format of `amount | sender name | Bank` (e.g. `£50.00 | John Smith | HSBC`), auto-tagging the sender as merchant and routing to the designated bank account.
 - **Noise Filter**: Removes card suffixes, dates, timestamps, reference codes, and legal tags (`LTD`, `UK`).
 - **Exact Date & Time**: Captures and records full transaction timestamps down to the second.
 

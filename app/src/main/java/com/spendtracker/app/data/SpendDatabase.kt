@@ -94,14 +94,14 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
 
     /**
      * Time-Window Fingerprinting:
-     * isDuplicate = exists where |t_new - t_existing| < delta_t (e.g. 30-60s) AND amount matches AND source bank matches.
+     * Returns all transactions within the time window matching amount and bank source.
      */
-    fun findDuplicate(
+    fun findDuplicates(
         amount: Double,
         source: String,
         timestamp: Long = System.currentTimeMillis(),
         windowMillis: Long = 60_000L
-    ): TransactionRecord? {
+    ): List<TransactionRecord> {
         val db = readableDatabase
         val minTs = timestamp - windowMillis
         val maxTs = timestamp + windowMillis
@@ -114,7 +114,6 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
               AND LOWER($COL_SOURCE) = LOWER(?) 
               AND $COL_TIMESTAMP BETWEEN ? AND ? 
             ORDER BY ABS($COL_TIMESTAMP - ?) ASC
-            LIMIT 1
             """.trimIndent(),
             arrayOf(
                 amount.toString(),
@@ -124,29 +123,43 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
                 timestamp.toString()
             )
         )
-        return if (cursor.moveToFirst()) {
-            val record = TransactionRecord(
-                id = cursor.getLong(0),
-                type = cursor.getString(1),
-                amount = cursor.getDouble(2),
-                currency = cursor.getString(3),
-                merchant = cursor.getString(4),
-                category = cursor.getString(5),
-                source = cursor.getString(6),
-                timestamp = cursor.getLong(7),
-                formattedTime = "",
-                rawText = cursor.getString(8)
+        val list = mutableListOf<TransactionRecord>()
+        while (cursor.moveToNext()) {
+            list.add(
+                TransactionRecord(
+                    id = cursor.getLong(0),
+                    type = cursor.getString(1),
+                    amount = cursor.getDouble(2),
+                    currency = cursor.getString(3),
+                    merchant = cursor.getString(4),
+                    category = cursor.getString(5),
+                    source = cursor.getString(6),
+                    timestamp = cursor.getLong(7),
+                    formattedTime = "",
+                    rawText = cursor.getString(8)
+                )
             )
-            cursor.close()
-            record
-        } else {
-            cursor.close()
-            null
         }
+        cursor.close()
+        return list
+    }
+
+    /**
+     * Finds a duplicate transaction taking into account sender/merchant name matching.
+     */
+    fun findDuplicate(
+        amount: Double,
+        source: String,
+        timestamp: Long = System.currentTimeMillis(),
+        windowMillis: Long = 60_000L,
+        merchant: String? = null
+    ): TransactionRecord? {
+        val candidates = findDuplicates(amount, source, timestamp, windowMillis)
+        return candidates.firstOrNull { isMerchantDuplicate(it.merchant, merchant, source) }
     }
 
     fun isDuplicate(expense: ParsedExpense, timestamp: Long = System.currentTimeMillis(), windowMillis: Long = 60_000L): Boolean {
-        return findDuplicate(expense.amount, expense.source, timestamp, windowMillis) != null
+        return findDuplicate(expense.amount, expense.source, timestamp, windowMillis, expense.merchant) != null
     }
 
     /**
@@ -156,7 +169,7 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
      */
     fun insertExpense(expense: ParsedExpense, timestamp: Long = System.currentTimeMillis(), windowMillis: Long = 60_000L): Long {
         val normalizedSource = normalizeBankName(expense.source)
-        val existing = findDuplicate(expense.amount, normalizedSource, timestamp, windowMillis)
+        val existing = findDuplicate(expense.amount, normalizedSource, timestamp, windowMillis, expense.merchant)
         if (existing != null) {
             // Update the existing record with vendor/reference enrichment rather than creating a duplicate row
             val db = writableDatabase

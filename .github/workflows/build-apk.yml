@@ -63,10 +63,19 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.8.3
-        name: "SpendTracker Release v1.8.3 (Money In / Money Out Remaining & Saved Indicator)"
+        tag_name: v1.8.4
+        name: "SpendTracker Release v1.8.4 (Structured Sender & Bank Notification Parsing)"
         body: |
-          ### SpendTracker v1.8.3 - Amount Remaining & Saved Indicator
+          ### SpendTracker v1.8.4 - Structured Sender & Bank Notification Parsing
+          - 📨 **Structured Pipe-Format Parsing (`amount | sender name | Bank`)**:
+            - Automatically parses structured alerts (e.g. `£50.00 | John Smith | HSBC` or `£1,250.50 | TechCorp Payroll | Chase`).
+            - Captures sender name as merchant and routes to the designated bank account with zero manual tagging.
+            - Defaults to Money In (`TYPE_IN`) for incoming transfers and payroll.
+            - Bypasses SMS financial transaction verb constraints for structured alerts while preserving strict anti-spam filters.
+            - Isolates `IGNORE` filters from legitimate sender names (e.g. "Win Tan" is preserved).
+          - 🛡️ **Sender-Aware Notification Deduplication**:
+            - Two transactions of the same amount arriving within 60s at the same bank from different senders are recorded as separate transactions instead of erroneously deduplicating.
+            - Seamlessly merges companion SMS and app alerts to enrich blank or generic merchant rows.
           - 💰 **Amount Remaining / Saved (Net Difference)**:
             - Dynamically computes the net difference between Money In (income) and Money Out (expenses) with internal transfers nullified.
             - Prominent **"Saved / Left"** (positive surplus) vs **"Deficit"** (negative overspend) badge in the hero cash flow card.
