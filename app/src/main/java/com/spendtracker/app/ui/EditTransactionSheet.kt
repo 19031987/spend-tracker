@@ -93,7 +93,11 @@ fun EditTransactionSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    var type by rememberSaveable { mutableStateOf(transaction.type) }
+    var type by rememberSaveable {
+        mutableStateOf(
+            if (transaction.type == TransactionType.TRANSFER) TransactionType.EXPENSE else transaction.type
+        )
+    }
     var merchantText by rememberSaveable { mutableStateOf(transaction.merchant ?: "") }
     var amountText by rememberSaveable {
         mutableStateOf(
@@ -101,8 +105,11 @@ fun EditTransactionSheet(
         )
     }
     var sourceId by rememberSaveable { mutableStateOf<Long?>(transaction.accountId) }
-    var destinationId by rememberSaveable { mutableStateOf<Long?>(transaction.destinationAccountId) }
-    var selectedCategoryKey by rememberSaveable { mutableStateOf(transaction.categoryKey) }
+    var selectedCategoryKey by rememberSaveable {
+        mutableStateOf(
+            if (transaction.categoryKey == "INTERNAL_TRANSFER") null else transaction.categoryKey
+        )
+    }
     var note by rememberSaveable { mutableStateOf(transaction.note ?: "") }
     var excludeFromSpending by rememberSaveable { mutableStateOf(transaction.excludeFromSpending) }
     var localError by rememberSaveable { mutableStateOf<String?>(null) }
@@ -123,12 +130,7 @@ fun EditTransactionSheet(
         ?: deduplicatedAccounts.firstOrNull { it.name.trim().equals("Chase", ignoreCase = true) }
         ?: deduplicatedAccounts.firstOrNull()
 
-    val effectiveDestination = deduplicatedAccounts.firstOrNull { it.id == destinationId && it.id != effectiveSource?.id }
-        ?: deduplicatedAccounts.firstOrNull { it.id != effectiveSource?.id && it.name.trim().equals(normalizeBankName(transaction.destinationAccountName), ignoreCase = true) }
-        ?: deduplicatedAccounts.firstOrNull { it.id != effectiveSource?.id && it.name.trim().equals("HSBC", ignoreCase = true) }
-        ?: deduplicatedAccounts.firstOrNull { it.id != effectiveSource?.id }
-
-    val activeCategory = categories.firstOrNull { it.key == selectedCategoryKey }
+    val activeCategory = categories.firstOrNull { it.key == selectedCategoryKey && it.type == type }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
@@ -155,49 +157,45 @@ fun EditTransactionSheet(
                 }
             }
 
-            // Transaction Type Selector
-            val types = TransactionType.values()
+            // 2-way Transaction Type Selector: Money Out vs Money In
+            val types = listOf(
+                TransactionType.EXPENSE to "↓ Money Out",
+                TransactionType.INCOME to "↑ Money In"
+            )
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                types.forEachIndexed { index, t ->
+                types.forEachIndexed { index, (t, label) ->
                     SegmentedButton(
                         selected = type == t,
                         onClick = {
                             type = t
-                            if (t == TransactionType.TRANSFER) {
-                                selectedCategoryKey = "INTERNAL_TRANSFER"
-                                excludeFromSpending = true
-                            } else if (selectedCategoryKey == "INTERNAL_TRANSFER") {
-                                selectedCategoryKey = "OTHER_EXPENSE"
-                                excludeFromSpending = false
+                            val curCat = categories.firstOrNull { it.key == selectedCategoryKey }
+                            if (curCat != null && curCat.type != t) {
+                                selectedCategoryKey = if (t == TransactionType.INCOME) "OTHER_INCOME" else "OTHER_EXPENSE"
                             }
                             localError = null
                         },
                         shape = SegmentedButtonDefaults.itemShape(index, types.size)
                     ) {
                         Text(
-                            when (t) {
-                                TransactionType.EXPENSE -> "Expense"
-                                TransactionType.INCOME -> "Income"
-                                TransactionType.TRANSFER -> "🔄 Transfer"
-                            },
+                            text = label,
                             maxLines = 1,
-                            fontSize = 12.sp
+                            softWrap = false,
+                            fontSize = 12.sp,
+                            fontWeight = if (type == t) FontWeight.Bold else FontWeight.Medium
                         )
                     }
                 }
             }
 
             // Payee / Merchant
-            if (type != TransactionType.TRANSFER) {
-                OutlinedTextField(
-                    value = merchantText,
-                    onValueChange = { merchantText = it },
-                    label = { Text("Payee / Merchant Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
-            }
+            OutlinedTextField(
+                value = merchantText,
+                onValueChange = { merchantText = it },
+                label = { Text("Payee / Merchant Name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            )
 
             // Amount
             OutlinedTextField(
@@ -211,163 +209,135 @@ fun EditTransactionSheet(
                 shape = RoundedCornerShape(12.dp)
             )
 
-            // Account Pickers: "From Account" and "To Account"
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Box(modifier = Modifier.weight(1f)) {
-                    AccountPicker(
-                        label = if (type == TransactionType.TRANSFER) "From account" else "Account (Source)",
-                        accounts = deduplicatedAccounts,
-                        selected = effectiveSource,
-                        onSelected = { sourceId = it.id }
-                    )
+            // Account Picker
+            AccountPicker(
+                label = "Account (Source)",
+                accounts = deduplicatedAccounts,
+                selected = effectiveSource,
+                onSelected = { sourceId = it.id }
+            )
+
+            // Category Display / Picker (uniform 32dp icon box)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Category", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { showCategoryPicker = true },
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        if (activeCategory != null) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(parseColorHex(activeCategory.colorHex)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(activeCategory.emoji, fontSize = 16.sp)
+                                }
+                                Text(
+                                    activeCategory.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                        } else {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFFFEF3C7)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("❓", fontSize = 16.sp)
+                                }
+                                Text(
+                                    "Uncategorized",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = Color(0xFFB45309),
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        TextButton(onClick = { showCategoryPicker = true }) {
+                            Text("Change", fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
 
-                if (type == TransactionType.TRANSFER) {
-                    Box(modifier = Modifier.weight(1f)) {
-                        AccountPicker(
-                            label = "To account",
-                            accounts = deduplicatedAccounts.filter { it.id != effectiveSource?.id },
-                            selected = effectiveDestination,
-                            onSelected = { destinationId = it.id }
+                if (merchantText.isNotBlank() && activeCategory != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = autoRuleChecked,
+                            onCheckedChange = { autoRuleChecked = it }
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Always categorize \"${merchantText.trim()}\" as ${activeCategory.name}",
+                            style = MaterialTheme.typography.bodySmall
                         )
                     }
                 }
             }
 
-            // Category Display / Picker
-            if (type == TransactionType.TRANSFER) {
-                // Internal Transfer notification / banner
-                Surface(
-                    color = Color(0xFFEDE9FE),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text("🔄", fontSize = 20.sp)
-                        Column {
-                            Text(
-                                "Category: Internal Transfer",
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF4C1D95),
-                                fontSize = 14.sp
-                            )
-                            Text(
-                                "Internal transactions nullify each other and are excluded from spending totals.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF6D28D9),
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-                }
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Category", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .clickable { showCategoryPicker = true },
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            if (activeCategory != null) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(parseColorHex(activeCategory.colorHex)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(activeCategory.emoji, fontSize = 16.sp)
-                                    }
-                                    Text(
-                                        activeCategory.name,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            } else {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text("❓", fontSize = 16.sp)
-                                    Text("Uncategorized", fontWeight = FontWeight.SemiBold)
-                                }
-                            }
-                            TextButton(onClick = { showCategoryPicker = true }) {
-                                Text("Change", fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-
-                    if (merchantText.isNotBlank() && activeCategory != null) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Checkbox(
-                                checked = autoRuleChecked,
-                                onCheckedChange = { autoRuleChecked = it }
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                "Always categorize \"${merchantText.trim()}\" as ${activeCategory.name}",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    }
-                }
-
-                // Nullify / Exclude toggle for non-transfers
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            "Nullify from spend calculations",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            "Exclude this transaction from total spending and analytics",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 11.sp
-                        )
-                    }
-                    Switch(
-                        checked = excludeFromSpending,
-                        onCheckedChange = { excludeFromSpending = it }
+            // Nullify / Exclude toggle
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Nullify from spend calculations",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "Exclude this transaction from total spending and analytics",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp
                     )
                 }
+                Switch(
+                    checked = excludeFromSpending,
+                    onCheckedChange = { excludeFromSpending = it }
+                )
             }
 
             OutlinedTextField(
@@ -396,38 +366,18 @@ fun EditTransactionSheet(
                         localError = "Select an account"
                         return@Button
                     }
-                    if (type == TransactionType.TRANSFER) {
-                        val dest = effectiveDestination
-                        if (dest == null) {
-                            localError = "Select a destination account"
-                            return@Button
-                        }
-                        onSave(
-                            transaction.id,
-                            TransactionType.TRANSFER,
-                            source.id,
-                            dest.id,
-                            amount,
-                            "INTERNAL_TRANSFER",
-                            "${source.name} ➔ ${dest.name}",
-                            note.trim().takeIf { it.isNotEmpty() },
-                            true, // Transfer is ALWAYS nullified from spend!
-                            null
-                        )
-                    } else {
-                        onSave(
-                            transaction.id,
-                            type,
-                            source.id,
-                            null,
-                            amount,
-                            selectedCategoryKey,
-                            merchantText.trim().takeIf { it.isNotEmpty() },
-                            note.trim().takeIf { it.isNotEmpty() },
-                            excludeFromSpending || selectedCategoryKey == "INTERNAL_TRANSFER",
-                            if (autoRuleChecked && merchantText.isNotBlank()) merchantText.trim() else null
-                        )
-                    }
+                    onSave(
+                        transaction.id,
+                        type,
+                        source.id,
+                        null,
+                        amount,
+                        selectedCategoryKey ?: if (type == TransactionType.INCOME) "OTHER_INCOME" else "OTHER_EXPENSE",
+                        merchantText.trim().takeIf { it.isNotEmpty() },
+                        note.trim().takeIf { it.isNotEmpty() },
+                        excludeFromSpending,
+                        if (autoRuleChecked && merchantText.isNotBlank()) merchantText.trim() else null
+                    )
                 }
             ) {
                 Text("Save Changes", fontWeight = FontWeight.Bold)

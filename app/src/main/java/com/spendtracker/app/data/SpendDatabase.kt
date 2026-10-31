@@ -116,12 +116,19 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
             SELECT $COL_ID, $COL_TYPE, $COL_AMOUNT, $COL_CURRENCY, $COL_MERCHANT, $COL_CATEGORY, $COL_SOURCE, $COL_TIMESTAMP, $COL_RAW_TEXT
             FROM $TABLE_NAME 
             WHERE ABS($COL_AMOUNT - ?) < 0.005 
-              AND LOWER($COL_SOURCE) = LOWER(?) 
+              AND (
+                  LOWER(TRIM($COL_SOURCE)) = LOWER(TRIM(?))
+                  OR (
+                      LOWER(TRIM(?)) IN ('hsbc', 'premier', 'hsbc premier', 'premier account', 'premier bank', 'hsbc advance', 'advance', 'advance account')
+                      AND LOWER(TRIM($COL_SOURCE)) IN ('hsbc', 'premier', 'hsbc premier', 'premier account', 'premier bank', 'hsbc advance', 'advance', 'advance account')
+                  )
+              )
               AND $COL_TIMESTAMP BETWEEN ? AND ? 
             ORDER BY ABS($COL_TIMESTAMP - ?) ASC
             """.trimIndent(),
             arrayOf(
                 amount.toString(),
+                source,
                 source,
                 minTs.toString(),
                 maxTs.toString(),
@@ -160,6 +167,11 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
         merchant: String? = null
     ): TransactionRecord? {
         val candidates = findDuplicates(amount, source, timestamp, windowMillis)
+        if (!isUnknownOrGenericMerchant(merchant, source)) {
+            candidates.firstOrNull {
+                !isUnknownOrGenericMerchant(it.merchant, source) && isMerchantDuplicate(it.merchant, merchant, source)
+            }?.let { return it }
+        }
         return candidates.firstOrNull { isMerchantDuplicate(it.merchant, merchant, source) }
     }
 
@@ -176,16 +188,19 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
         val normalizedSource = normalizeBankName(expense.source)
         val existing = findDuplicate(expense.amount, normalizedSource, timestamp, windowMillis, expense.merchant)
         if (existing != null) {
-            // Update the existing record with vendor/reference enrichment rather than creating a duplicate row
+            // Update the existing record with vendor/reference enrichment and HSBC bank preference rather than creating a duplicate row
             val db = writableDatabase
             val values = ContentValues()
             var hasUpdates = false
 
-            if ((existing.merchant.isBlank() || 
-                 existing.merchant.equals(existing.source, ignoreCase = true) ||
-                 existing.merchant.equals("Card Payment", ignoreCase = true) ||
-                 existing.merchant.equals("Payment", ignoreCase = true)) && 
-                expense.merchant.isNotBlank()) {
+            val preferredSource = resolvePreferredBankSource(existing.source, normalizedSource)
+            if (!existing.source.equals(preferredSource, ignoreCase = false)) {
+                values.put(COL_SOURCE, preferredSource)
+                hasUpdates = true
+            }
+
+            if (isUnknownOrGenericMerchant(existing.merchant, existing.source) &&
+                !isUnknownOrGenericMerchant(expense.merchant, normalizedSource)) {
                 values.put(COL_MERCHANT, expense.merchant)
                 hasUpdates = true
             }
@@ -258,24 +273,14 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
 
     /**
      * Self-healing data repair routine:
-     * 1. Removes rapid duplicate notifications (e.g. repeated £1650.99, £8.99 in same 3-min window)
+     * 1. Removes rapid duplicate notifications (including Premier <-> HSBC duplicates), keeping the HSBC record
      * 2. Corrects inverted transaction signs where money was added/received/topped-up but stored as OUT
-     * 3. Fixes spurious source names (e.g. "purchase" -> Chase)
+     * 3. Fixes spurious source names (e.g. "purchase" -> Chase, "Premier" -> HSBC)
      */
     fun cleanupAndRepairData(dbInstance: SQLiteDatabase? = null) {
         val db = dbInstance ?: writableDatabase
         try {
-            // 1. Delete identical duplicates within 3-minute windows
-            db.execSQL("""
-                DELETE FROM $TABLE_NAME
-                WHERE $COL_ID NOT IN (
-                    SELECT MIN($COL_ID)
-                    FROM $TABLE_NAME
-                    GROUP BY ROUND($COL_AMOUNT, 2), $COL_TYPE, $COL_SOURCE, $COL_MERCHANT, ($COL_TIMESTAMP / 180000)
-                )
-            """.trimIndent())
-
-            // 2. Fix inverted signs for incoming deposits/added funds
+            // 1. Fix inverted signs for incoming deposits/added funds
             db.execSQL("""
                 UPDATE $TABLE_NAME
                 SET $COL_TYPE = 'IN',
@@ -300,7 +305,7 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
                 )
             """.trimIndent())
 
-            // 3. Fix erroneous Chase attribution caused by "purchase" matching "chase"
+            // 2. Fix erroneous Chase attribution caused by "purchase" matching "chase"
             db.execSQL("""
                 UPDATE $TABLE_NAME
                 SET $COL_SOURCE = 'Google Pay',
@@ -309,7 +314,7 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
                   AND (LOWER($COL_RAW_TEXT) LIKE '%google pay%' OR LOWER($COL_RAW_TEXT) LIKE '%gpay%')
             """.trimIndent())
 
-            // 4. Remove obvious OTP / balance rows that were mistakenly saved by old regex
+            // 3. Remove obvious OTP / balance rows that were mistakenly saved by old regex
             db.execSQL("""
                 DELETE FROM $TABLE_NAME
                 WHERE LOWER($COL_RAW_TEXT) LIKE '%available balance%'
@@ -318,7 +323,7 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
                    OR LOWER($COL_RAW_TEXT) LIKE '%declined%'
             """.trimIndent())
 
-            // 5. Trim and normalize bank source names
+            // 4. Trim and normalize bank source names (e.g. Premier -> HSBC)
             db.execSQL("UPDATE $TABLE_NAME SET $COL_SOURCE = TRIM($COL_SOURCE)")
             val srcCursor = db.rawQuery("SELECT DISTINCT $COL_SOURCE FROM $TABLE_NAME WHERE $COL_SOURCE IS NOT NULL", null)
             val distinctSources = mutableListOf<String>()
@@ -336,7 +341,7 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
                 }
             }
 
-            // 6. Automatically re-parse any structured pipe alerts (e.g. £50.00 transaction | TRIPURA JHANSI RANCHASE | HSBC)
+            // 5. Automatically re-parse any structured pipe alerts (e.g. £50.00 transaction | TRIPURA JHANSI RANCHASE | HSBC)
             val pipeCursor = db.rawQuery(
                 "SELECT $COL_ID, $COL_RAW_TEXT, $COL_SOURCE FROM $TABLE_NAME WHERE $COL_RAW_TEXT LIKE '%|%' OR $COL_RAW_TEXT LIKE '%¦%'",
                 null
@@ -351,11 +356,88 @@ class SpendDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME,
                         put(COL_MERCHANT, parsed.merchant)
                         put(COL_TYPE, parsed.type)
                         put(COL_CATEGORY, parsed.category)
+                        put(COL_SOURCE, normalizeBankName(parsed.source))
                     }
                     db.update(TABLE_NAME, cv, "$COL_ID = ?", arrayOf(rowId.toString()))
                 }
             }
             pipeCursor.close()
+
+            // 6. Deduplicate transactions with same amount, same/equivalent bank (Premier/HSBC -> HSBC),
+            //    within time window, and matching or unknown merchant.
+            //    Unknown transactions with different amount or different time are preserved.
+            val allCursor = db.rawQuery(
+                "SELECT $COL_ID, $COL_TYPE, $COL_AMOUNT, $COL_MERCHANT, $COL_CATEGORY, $COL_SOURCE, $COL_TIMESTAMP, $COL_RAW_TEXT FROM $TABLE_NAME ORDER BY $COL_TIMESTAMP ASC, $COL_ID ASC",
+                null
+            )
+            data class LegacyRow(
+                val id: Long,
+                var type: String,
+                val amount: Double,
+                var merchant: String,
+                var category: String,
+                var source: String,
+                val timestamp: Long,
+                var rawText: String?
+            )
+            val rows = mutableListOf<LegacyRow>()
+            while (allCursor.moveToNext()) {
+                rows.add(
+                    LegacyRow(
+                        id = allCursor.getLong(0),
+                        type = allCursor.getString(1) ?: "OUT",
+                        amount = allCursor.getDouble(2),
+                        merchant = allCursor.getString(3) ?: "",
+                        category = allCursor.getString(4) ?: "General Spend",
+                        source = allCursor.getString(5) ?: "Others",
+                        timestamp = allCursor.getLong(6),
+                        rawText = allCursor.getString(7)
+                    )
+                )
+            }
+            allCursor.close()
+
+            val keptRows = mutableListOf<LegacyRow>()
+            val idsToDelete = mutableListOf<Long>()
+            for (row in rows) {
+                val match = keptRows.lastOrNull { kept ->
+                    kotlin.math.abs(kept.amount - row.amount) < 0.005 &&
+                        kotlin.math.abs(kept.timestamp - row.timestamp) <= 180_000L &&
+                        isSameOrEquivalentBank(kept.source, row.source) &&
+                        isMerchantDuplicate(kept.merchant, row.merchant, resolvePreferredBankSource(kept.source, row.source))
+                }
+                if (match != null) {
+                    val preferredBank = resolvePreferredBankSource(match.source, row.source)
+                    val updates = ContentValues()
+                    var changed = false
+                    if (match.source != preferredBank) {
+                        match.source = preferredBank
+                        updates.put(COL_SOURCE, preferredBank)
+                        changed = true
+                    }
+                    if (isUnknownOrGenericMerchant(match.merchant, match.source) &&
+                        !isUnknownOrGenericMerchant(row.merchant, row.source)) {
+                        match.merchant = row.merchant
+                        updates.put(COL_MERCHANT, row.merchant)
+                        changed = true
+                    }
+                    if ((match.category == "General Spend" || match.category == "Other" || match.category == "OTHER_EXPENSE") &&
+                        row.category != "General Spend") {
+                        match.category = row.category
+                        updates.put(COL_CATEGORY, row.category)
+                        changed = true
+                    }
+                    if (changed) {
+                        db.update(TABLE_NAME, updates, "$COL_ID = ?", arrayOf(match.id.toString()))
+                    }
+                    idsToDelete.add(row.id)
+                } else {
+                    keptRows.add(row)
+                }
+            }
+            if (idsToDelete.isNotEmpty()) {
+                db.execSQL("DELETE FROM $TABLE_NAME WHERE $COL_ID IN (${idsToDelete.joinToString(",")})")
+            }
 
         } catch (e: Exception) {
             e.printStackTrace()

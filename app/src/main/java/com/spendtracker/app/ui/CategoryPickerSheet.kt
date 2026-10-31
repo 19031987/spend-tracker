@@ -234,7 +234,9 @@ fun CategoryPickerContent(
                 // Hierarchical Category List
                 val filteredCategories = categories.filter { cat ->
                     !cat.isHidden &&
-                        (transactionType == TransactionType.TRANSFER || cat.type == transactionType) &&
+                        cat.type != TransactionType.TRANSFER &&
+                        cat.key != "INTERNAL_TRANSFER" &&
+                        cat.type == transactionType &&
                         (searchQuery.isBlank() || cat.name.contains(searchQuery, ignoreCase = true))
                 }
 

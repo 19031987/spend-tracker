@@ -147,8 +147,13 @@ object CategorizationEngine {
         history: List<HistoryEntry>,
         validKeys: Set<String>
     ): Classification.Matched? {
+        val padded = " $text "
         val best = history
-            .filter { it.categoryKey in validKeys && MerchantNormalizer.normalize(it.merchant) == text }
+            .filter {
+                if (it.categoryKey !in validKeys) return@filter false
+                val normHist = MerchantNormalizer.normalize(it.merchant)
+                normHist.isNotEmpty() && (normHist == text || padded.contains(" $normHist "))
+            }
             .groupBy { it.categoryKey }
             .mapValues { (_, rows) -> rows.sumOf { it.uses } }
             .entries

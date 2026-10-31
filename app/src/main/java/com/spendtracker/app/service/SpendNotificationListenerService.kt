@@ -9,7 +9,9 @@ import com.spendtracker.app.data.AppDatabase
 import com.spendtracker.app.data.SpendDatabase
 import com.spendtracker.app.data.TransactionEntity
 import com.spendtracker.app.data.TransactionType
+import com.spendtracker.app.data.isUnknownOrGenericMerchant
 import com.spendtracker.app.data.normalizeBankName
+import com.spendtracker.app.data.resolvePreferredBankSource
 import com.spendtracker.app.domain.CategorizationEngine
 import com.spendtracker.app.domain.Classification
 import com.spendtracker.app.domain.MatchType
@@ -18,6 +20,8 @@ import com.spendtracker.app.parser.SpendParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.math.roundToLong
 
 class SpendNotificationListenerService : NotificationListenerService() {
@@ -25,6 +29,7 @@ class SpendNotificationListenerService : NotificationListenerService() {
     companion object {
         const val ACTION_NEW_EXPENSE = "com.spendtracker.app.ACTION_NEW_EXPENSE"
         private const val TAG = "SpendListenerService"
+        private val roomDedupMutex = Mutex()
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO)
@@ -79,72 +84,14 @@ class SpendNotificationListenerService : NotificationListenerService() {
 
             // 2. Save directly into Room AppDatabase so Compose UI & Analytics update in real time!
             serviceScope.launch {
-                try {
-                    val roomDb = AppDatabase.get(applicationContext)
+                roomDedupMutex.withLock {
+                    try {
+                        val roomDb = AppDatabase.get(applicationContext)
 
-                    val sourceAccount = roomDb.accountDao().getOrCreate(detectedBankName)
-                    val allAccounts = roomDb.accountDao().getAll()
-                    val fullAlertText = "${title.orEmpty()} ${content.orEmpty()} ${parsedWithBank.merchant}".lowercase(java.util.Locale.ROOT)
+                        val sourceAccount = roomDb.accountDao().getOrCreate(detectedBankName)
+                        val minorAmount = (parsedWithBank.amount * 100.0).roundToLong().coerceAtLeast(1L)
+                        val txType = if (parsedWithBank.type.equals("IN", ignoreCase = true)) TransactionType.INCOME else TransactionType.EXPENSE
 
-                    // Transfer intent check: MUST have transfer intent phrasing to be considered a transfer
-                    val hasExplicitTransferPhrase = fullAlertText.contains("internal transfer") ||
-                        fullAlertText.contains("transfer between accounts") ||
-                        fullAlertText.contains("transferred between") ||
-                        fullAlertText.contains("moved money between")
-
-                    // Find mentioned other registered account using flexible transfer action pattern
-                    val mentionedOtherAccount = allAccounts.firstOrNull { other ->
-                        if (other.id == sourceAccount.id) return@firstOrNull false
-                        val otherName = other.name.trim().lowercase(java.util.Locale.ROOT)
-                        if (otherName.isBlank()) return@firstOrNull false
-                        val toPattern = Regex("\\b(?:transfer(?:red)?|sent|moved|paid)\\b.*?\\bto\\s+${Regex.escape(otherName)}\\b", RegexOption.IGNORE_CASE)
-                        val fromPattern = Regex("\\b(?:transfer(?:red)?|received|moved)\\b.*?\\bfrom\\s+${Regex.escape(otherName)}\\b", RegexOption.IGNORE_CASE)
-                        if (toPattern.containsMatchIn(fullAlertText) || fromPattern.containsMatchIn(fullAlertText)) {
-                            return@firstOrNull true
-                        }
-                        if (hasExplicitTransferPhrase && Regex("\\b${Regex.escape(otherName)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(fullAlertText)) {
-                            return@firstOrNull true
-                        }
-                        false
-                    }
-
-                    val isInternalTransfer = hasExplicitTransferPhrase || (mentionedOtherAccount != null)
-                    val destinationAccount = mentionedOtherAccount
-                        ?: if (hasExplicitTransferPhrase) allAccounts.firstOrNull { it.id != sourceAccount.id } else null
-
-                    val minorAmount = (parsedWithBank.amount * 100.0).roundToLong().coerceAtLeast(1L)
-
-                    if (isInternalTransfer && destinationAccount != null) {
-                        // Check if a transfer pair already exists within deduplication window
-                        val existingTransfer = roomDb.transactionDao().findMatchingDuplicate(
-                            absAmountMinor = minorAmount,
-                            sourceName = sourceAccount.name,
-                            accountId = sourceAccount.id,
-                            timestamp = eventTimestamp,
-                            merchant = null,
-                            windowMillis = 60_000L
-                        )
-                        if (existingTransfer != null) {
-                            Log.i(TAG, "Deduplication: skipped duplicate internal transfer alert within 60s window (amount=$minorAmount)")
-                        } else {
-                            val isOutflow = !parsedWithBank.type.equals("IN", ignoreCase = true)
-                            val srcId = if (isOutflow) sourceAccount.id else destinationAccount.id
-                            val dstId = if (isOutflow) destinationAccount.id else sourceAccount.id
-                            val srcName = if (isOutflow) sourceAccount.name else destinationAccount.name
-                            val dstName = if (isOutflow) destinationAccount.name else sourceAccount.name
-
-                            val transferPair = roomDb.transactionDao().insertTransferPair(
-                                sourceAccountId = srcId,
-                                destinationAccountId = dstId,
-                                amountMinor = minorAmount,
-                                timestamp = eventTimestamp,
-                                note = "Captured from ${sourceAccount.name} alert",
-                                sourceName = srcName,
-                                destinationName = dstName
-                            )
-                            Log.i(TAG, "Successfully inserted INTERNAL TRANSFER pair (source=$srcName, dest=$dstName, amount=$minorAmount, nullified from spending)")
-                        }
-                    } else {
                         // Auto-categorize using rules from Room database
                         val rules = roomDb.catalogDao().getRules().mapNotNull { r ->
                             runCatching {
@@ -157,7 +104,7 @@ class SpendNotificationListenerService : NotificationListenerService() {
                             }.getOrNull()
                         }
                         val categories = roomDb.catalogDao().getCategories()
-                        val validKeys = categories.filter { !it.isHidden }.map { it.key }.toSet()
+                        val validKeys = categories.filter { !it.isHidden && it.type == txType }.map { it.key }.toSet()
 
                         val classification = CategorizationEngine.classify(
                             merchant = parsedWithBank.merchant,
@@ -168,17 +115,13 @@ class SpendNotificationListenerService : NotificationListenerService() {
 
                         val resolvedCategoryKey = when (classification) {
                             is Classification.Matched -> classification.categoryKey
-                            else -> {
-                                val normalizedParsed = parsedWithBank.category.uppercase().replace(" ", "_")
-                                if (normalizedParsed in validKeys) normalizedParsed else "OTHER_EXPENSE"
-                            }
+                            else -> mapParsedCategoryToCatalogKey(parsedWithBank.category, txType, validKeys)
                         }
 
-                        val txType = if (parsedWithBank.type.equals("IN", ignoreCase = true)) TransactionType.INCOME else TransactionType.EXPENSE
                         val signedAmount = if (txType == TransactionType.EXPENSE) -minorAmount else minorAmount
-                        val merchantName = if (parsedWithBank.merchantIsFallback || parsedWithBank.merchant.isBlank()) null else parsedWithBank.merchant
+                        val merchantName = if (parsedWithBank.merchantIsFallback || isUnknownOrGenericMerchant(parsedWithBank.merchant, sourceAccount.name)) null else parsedWithBank.merchant
 
-                        // Time-Window Fingerprinting: |t_new - t_existing| < 60s AND amount matches AND source bank matches AND merchant matches
+                        // Time-Window Fingerprinting: |t_new - t_existing| <= 60s AND amount matches AND source bank matches (including Premier <-> HSBC) AND merchant matches
                         val existingTx = roomDb.transactionDao().findMatchingDuplicate(
                             absAmountMinor = minorAmount,
                             sourceName = sourceAccount.name,
@@ -189,25 +132,44 @@ class SpendNotificationListenerService : NotificationListenerService() {
                         )
 
                         if (existingTx != null) {
-                            // Update existing record (enrichment with vendor/reference) rather than creating a duplicate row
-                            val enrichedMerchant = if (!merchantName.isNullOrBlank() &&
-                                (existingTx.merchant.isNullOrBlank() ||
-                                 existingTx.merchant.equals(existingTx.source, ignoreCase = true) ||
-                                 existingTx.merchant.equals("Card Payment", ignoreCase = true) ||
-                                 existingTx.merchant.equals("Payment", ignoreCase = true))) {
-                                merchantName
+                            val preferredSource = resolvePreferredBankSource(existingTx.source, sourceAccount.name)
+                            val preferredAccount = if (preferredSource.equals(sourceAccount.name, ignoreCase = true)) {
+                                sourceAccount
                             } else {
-                                existingTx.merchant
+                                roomDb.accountDao().getOrCreate(preferredSource)
                             }
-                            val enrichedNote = if (!content.isNullOrBlank() && (existingTx.note.isNullOrBlank() || existingTx.note.startsWith("Captured from"))) {
-                                "Captured from ${sourceAccount.name}: $content"
-                            } else {
-                                existingTx.note
+
+                            // Update existing record (enrichment with vendor/reference and HSBC bank preference) rather than creating a duplicate row
+                            val enrichedMerchant = when {
+                                !merchantName.isNullOrBlank() && isUnknownOrGenericMerchant(existingTx.merchant, existingTx.source) -> merchantName
+                                isUnknownOrGenericMerchant(existingTx.merchant, existingTx.source) -> null
+                                else -> existingTx.merchant
                             }
+                            val rawAlertText = parsedWithBank.rawText.ifBlank { content.orEmpty() }
+                            val enrichedNote = when {
+                                existingTx.note.isNullOrBlank() && rawAlertText.isNotBlank() ->
+                                    "Captured from ${preferredAccount.name} alert: $rawAlertText"
+                                existingTx.note != null && (!merchantName.isNullOrBlank() && isUnknownOrGenericMerchant(existingTx.merchant, existingTx.source)) && rawAlertText.isNotBlank() ->
+                                    "Captured from ${preferredAccount.name} alert: $rawAlertText"
+                                existingTx.note != null && existingTx.note.contains("Premier", ignoreCase = true) ->
+                                    if (rawAlertText.isNotBlank() && !isUnknownOrGenericMerchant(merchantName, preferredAccount.name)) {
+                                        "Captured from ${preferredAccount.name} alert: $rawAlertText"
+                                    } else {
+                                        existingTx.note.replace(
+                                            Regex("(?i)^Captured from\\s+(?:HSBC\\s+)?Premier(?:\\s+Account|\\s+Bank)?"),
+                                            "Captured from ${preferredAccount.name}"
+                                        )
+                                    }
+                                else -> existingTx.note
+                            }
+                            val defaultCat = if (txType == TransactionType.INCOME) "OTHER_INCOME" else "OTHER_EXPENSE"
                             val enrichedCategory = if ((existingTx.category.isNullOrBlank() ||
                                                          existingTx.category == "OTHER_EXPENSE" ||
+                                                         existingTx.category == "OTHER_INCOME" ||
                                                          existingTx.category == "General Spend") &&
-                                                        resolvedCategoryKey != "OTHER_EXPENSE") {
+                                                        resolvedCategoryKey != defaultCat) {
+                                resolvedCategoryKey
+                            } else if (existingTx.type == TransactionType.EXPENSE && txType == TransactionType.INCOME && existingTx.category == "OTHER_EXPENSE") {
                                 resolvedCategoryKey
                             } else {
                                 existingTx.category
@@ -220,6 +182,8 @@ class SpendNotificationListenerService : NotificationListenerService() {
                             val enrichedAmount = if (enrichedType == TransactionType.INCOME) minorAmount else -minorAmount
 
                             val enriched = existingTx.copy(
+                                accountId = preferredAccount.id,
+                                source = preferredAccount.name,
                                 merchant = enrichedMerchant,
                                 note = enrichedNote,
                                 category = enrichedCategory,
@@ -227,13 +191,14 @@ class SpendNotificationListenerService : NotificationListenerService() {
                                 amount = enrichedAmount
                             )
                             roomDb.transactionDao().update(enriched)
-                            Log.i(TAG, "Deduplication: enriched existing transaction id=${existingTx.id} with vendor/reference instead of creating duplicate row")
+                            Log.i(TAG, "Deduplication: enriched existing transaction id=${existingTx.id} (bank=${preferredAccount.name}) instead of creating duplicate row")
                         } else {
+                            val rawAlertText = parsedWithBank.rawText.ifBlank { content.orEmpty() }
                             val transaction = TransactionEntity(
                                 accountId = sourceAccount.id,
                                 amount = signedAmount,
                                 category = resolvedCategoryKey,
-                                note = "Captured from ${sourceAccount.name} alert",
+                                note = "Captured from ${sourceAccount.name} alert: $rawAlertText",
                                 timestamp = eventTimestamp,
                                 type = txType,
                                 excludeFromSpending = false,
@@ -244,12 +209,38 @@ class SpendNotificationListenerService : NotificationListenerService() {
                             val insertedId = roomDb.transactionDao().insert(transaction)
                             Log.i(TAG, "Successfully inserted transaction into Room db (id=$insertedId, source=${sourceAccount.name}, merchant=${parsedWithBank.merchant}, cat=$resolvedCategoryKey)")
                         }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to insert parsed notification into Room: ${e.message}", e)
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to insert parsed notification into Room: ${e.message}", e)
                 }
             }
         }
+    }
+
+    private fun mapParsedCategoryToCatalogKey(
+        parsedCategory: String,
+        txType: TransactionType,
+        validKeys: Set<String>
+    ): String {
+        val normalized = parsedCategory.trim().uppercase(java.util.Locale.ROOT).replace(" ", "_")
+        if (normalized in validKeys) return normalized
+
+        val mapped = when (parsedCategory.trim().lowercase(java.util.Locale.ROOT)) {
+            "groceries" -> "GROCERIES"
+            "dining & drinks", "dining" -> "DINING"
+            "transport & fuel", "transport" -> "TRANSPORT"
+            "bills & subscriptions", "subscriptions" -> "SUBSCRIPTIONS"
+            "utilities" -> "UTILITIES"
+            "shopping" -> "SHOPPING"
+            "entertainment" -> "ENTERTAINMENT"
+            "income & salary", "salary" -> "SALARY"
+            "freelance" -> "FREELANCE"
+            "investment" -> "INVESTMENT"
+            "gift" -> "GIFT"
+            "refunds", "transfers in", "cashback & rewards", "top-ups & deposits", "money in", "other income" -> "OTHER_INCOME"
+            else -> if (txType == TransactionType.INCOME) "OTHER_INCOME" else "OTHER_EXPENSE"
+        }
+        return if (mapped in validKeys) mapped else if (txType == TransactionType.INCOME) "OTHER_INCOME" else "OTHER_EXPENSE"
     }
 
     private fun resolveBankName(packageName: String, parsedSource: String, appLabel: String?): String {
@@ -269,7 +260,7 @@ class SpendNotificationListenerService : NotificationListenerService() {
             val labelLower = appLabel.lowercase(java.util.Locale.ROOT)
             when {
                 labelLower.contains("chase") -> return "Chase"
-                labelLower.contains("hsbc") -> return "HSBC"
+                labelLower.contains("hsbc") || labelLower.contains("premier") -> return "HSBC"
                 labelLower.contains("monzo") -> return "Monzo"
                 labelLower.contains("starling") -> return "Starling"
                 labelLower.contains("revolut") -> return "Revolut"
@@ -306,7 +297,7 @@ class SpendNotificationListenerService : NotificationListenerService() {
 
         return when {
             pkgLower.contains("chase") || pkgLower.contains("jpmorgan") -> "Chase"
-            pkgLower.contains("hsbc") -> "HSBC"
+            pkgLower.contains("hsbc") || pkgLower.contains("premier") -> "HSBC"
             pkgLower.contains("monzo") || pkgLower.contains("getmondo") -> "Monzo"
             pkgLower.contains("starling") -> "Starling"
             pkgLower.contains("revolut") -> "Revolut"

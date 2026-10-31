@@ -21,7 +21,7 @@ def normalize_bank_name(raw, fallback="Others"):
 
     if lower in ("chase", "chase bank", "chase uk") or lower.startswith("chase ") or lower.endswith(" chase"):
         return "Chase"
-    if lower in ("hsbc", "hsbc uk", "hsbc bank") or lower.startswith("hsbc ") or lower.endswith(" hsbc"):
+    if lower in ("hsbc", "hsbc uk", "hsbc bank", "premier", "premier account", "premier bank", "advance", "advance account", "advance bank") or lower.startswith("hsbc ") or lower.endswith(" hsbc") or lower.startswith("premier ") or lower.endswith(" premier"):
         return "HSBC"
     if lower in ("monzo", "monzo bank") or lower.startswith("monzo ") or lower.endswith(" monzo"):
         return "Monzo"
@@ -578,16 +578,30 @@ class TestTransactionDeduplication(unittest.TestCase):
             SELECT id, accountId, amount, merchant, source, timestamp
             FROM transactions
             WHERE ABS(amount) = ?
-              AND (LOWER(source) = LOWER(?) OR accountId = ?)
+              AND (
+                  LOWER(TRIM(source)) = LOWER(TRIM(?))
+                  OR accountId = ?
+                  OR (
+                      LOWER(TRIM(?)) IN ('hsbc', 'premier', 'hsbc premier', 'premier account', 'premier bank', 'hsbc advance', 'advance', 'advance account')
+                      AND LOWER(TRIM(source)) IN ('hsbc', 'premier', 'hsbc premier', 'premier account', 'premier bank', 'hsbc advance', 'advance', 'advance account')
+                  )
+              )
               AND timestamp BETWEEN ? AND ?
             ORDER BY ABS(timestamp - ?) ASC
-        """, (abs_amount, source_name, account_id, min_ts, max_ts, timestamp))
+        """, (abs_amount, source_name, account_id, source_name, min_ts, max_ts, timestamp))
         rows = self.cur.fetchall()
+        generic_labels = ("card payment", "payment", "unknown", "unknown vendor", "transaction", "money in", "money out", "hsbc payment", "chase payment", "premier payment", "hsbc", "premier", "chase", source_name.lower())
+        is_generic_new = not new_merchant or new_merchant.strip().lower() in generic_labels
+        if not is_generic_new:
+            for r in rows:
+                existing_merchant = r[3]
+                is_generic_existing = not existing_merchant or existing_merchant.strip().lower() in generic_labels
+                if not is_generic_existing and existing_merchant.strip().lower() == new_merchant.strip().lower():
+                    return r
         for r in rows:
             existing_merchant = r[3]
             # Deduplication rule: candidate matches if both generic/blank OR names match
-            is_generic_existing = not existing_merchant or existing_merchant.strip().lower() in ("card payment", "payment", source_name.lower())
-            is_generic_new = not new_merchant or new_merchant.strip().lower() in ("card payment", "payment", source_name.lower())
+            is_generic_existing = not existing_merchant or existing_merchant.strip().lower() in generic_labels
             if is_generic_existing or is_generic_new:
                 return r
             if existing_merchant.strip().lower() == new_merchant.strip().lower():
@@ -637,6 +651,65 @@ class TestTransactionDeduplication(unittest.TestCase):
         row = self.cur.fetchone()
         self.assertEqual(row[0], 1)
         self.assertEqual(row[1], "John Smith")
+
+    def test_dedup_premier_and_hsbc_same_amount_same_vendor_saves_hsbc(self):
+        ts = 100000
+        # First row arrives as Premier
+        self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (5, -1550, 'Costa Coffee', 'Premier', ?, 'EXPENSE')", (ts,))
+        # Second row arrives as HSBC with same amount and same vendor
+        dup = self.simulate_find_duplicate(1550, "HSBC", 1, ts + 3000, "Costa Coffee")
+        self.assertIsNotNone(dup, "Premier and HSBC with same amount and same vendor must be detected as duplicate")
+        # Update existing record to save the HSBC one
+        self.cur.execute("UPDATE transactions SET accountId = 1, source = 'HSBC' WHERE id = ?", (dup[0],))
+        self.cur.execute("SELECT COUNT(*), source, merchant FROM transactions")
+        row = self.cur.fetchone()
+        self.assertEqual(row[0], 1)
+        self.assertEqual(row[1], "HSBC")
+        self.assertEqual(row[2], "Costa Coffee")
+
+    def test_dedup_premier_and_hsbc_unknown_vendor_same_amount_saves_hsbc(self):
+        ts = 100000
+        # First row arrives as Premier with unknown vendor
+        self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (5, -2000, NULL, 'Premier', ?, 'EXPENSE')", (ts,))
+        # Second row arrives as HSBC with same amount and unknown vendor
+        dup = self.simulate_find_duplicate(2000, "HSBC", 1, ts + 4000, None)
+        self.assertIsNotNone(dup, "Premier and HSBC unknown transaction with same amount within window must be duplicate")
+        self.cur.execute("UPDATE transactions SET accountId = 1, source = 'HSBC' WHERE id = ?", (dup[0],))
+        self.cur.execute("SELECT COUNT(*), source FROM transactions")
+        row = self.cur.fetchone()
+        self.assertEqual(row[0], 1)
+        self.assertEqual(row[1], "HSBC")
+
+    def test_dedup_prefers_exact_vendor_over_closer_unknown_candidate(self):
+        ts = 100000
+        # Row 1: Premier with Costa Coffee at t=100s
+        self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (5, -1550, 'Costa Coffee', 'Premier', ?, 'EXPENSE')", (ts,))
+        # Row 2: HSBC with Unknown vendor at t=102s
+        self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (1, -1550, NULL, 'HSBC', ?, 'EXPENSE')", (ts + 2000,))
+        # Incoming HSBC notification with Costa Coffee at t=103s should match Row 1 (Costa Coffee) first
+        dup = self.simulate_find_duplicate(1550, "HSBC", 1, ts + 3000, "Costa Coffee")
+        self.assertIsNotNone(dup)
+        self.assertEqual(dup[3], "Costa Coffee")
+
+    def test_unknown_transactions_different_amount_and_different_time_not_duplicate(self):
+        ts = 100000
+        # 1. Unknown transaction of £12.00 at t=100s
+        dup1 = self.simulate_find_duplicate(1200, "HSBC", 1, ts, None)
+        self.assertIsNone(dup1)
+        self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (1, -1200, NULL, 'HSBC', ?, 'EXPENSE')", (ts,))
+
+        # 2. Unknown transaction of £35.00 at t=500s (different amount and different time)
+        dup2 = self.simulate_find_duplicate(3500, "HSBC", 1, ts + 400000, None)
+        self.assertIsNone(dup2, "Unknown transaction with different amount and different time must NOT be duplicate")
+        self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (1, -3500, NULL, 'HSBC', ?, 'EXPENSE')", (ts + 400000,))
+
+        # 3. Unknown transaction of £12.00 at t=500s (same amount, different time outside window)
+        dup3 = self.simulate_find_duplicate(1200, "HSBC", 1, ts + 400000, None)
+        self.assertIsNone(dup3, "Unknown transaction at different time outside window must NOT be duplicate")
+        self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (1, -1200, NULL, 'HSBC', ?, 'EXPENSE')", (ts + 400000,))
+
+        self.cur.execute("SELECT COUNT(*) FROM transactions")
+        self.assertEqual(self.cur.fetchone()[0], 3)
 
 
 if __name__ == "__main__":

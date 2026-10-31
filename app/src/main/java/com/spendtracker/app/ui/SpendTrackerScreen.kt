@@ -11,8 +11,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -35,7 +33,6 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -141,7 +138,7 @@ fun SpendTrackerScreen(container: AppContainer) {
         topBar = {
             HeaderBar(
                 title = "Spend Tracker",
-                subtitle = if (deduplicatedAccounts.isEmpty()) "Multi-bank · Nullified transfers" else "${deduplicatedAccounts.take(2).joinToString(" & ") { it.name.trim() }} · Nullified transfers",
+                subtitle = if (deduplicatedAccounts.isEmpty()) "Real-time cash flow & spend tracker" else deduplicatedAccounts.take(3).joinToString(" · ") { it.name.trim() },
                 onAddClick = { showSheet = true },
                 actions = {
                     IconButton(onClick = { showSettings = true }) {
@@ -233,7 +230,14 @@ fun SpendTrackerScreen(container: AppContainer) {
                         onClick = { selectedTab = index },
                         shape = SegmentedButtonDefaults.itemShape(index, tabs.size)
                     ) {
-                        Text(tabTitle, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Text(
+                            tabTitle,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
             }
@@ -382,12 +386,13 @@ private fun TransactionsFeed(
     modifier: Modifier = Modifier
 ) {
     // Exclude internal transfers and excludeFromSpending rows from spending/income totals
-    val nonTransferTxs = transactions.filter { !it.excludeFromSpending && it.type != TransactionType.TRANSFER && it.categoryKey != "INTERNAL_TRANSFER" }
+    val visibleTransactions = remember(transactions) {
+        transactions.filter { it.type != TransactionType.TRANSFER && it.categoryKey != "INTERNAL_TRANSFER" }
+    }
+    val nonTransferTxs = visibleTransactions.filter { !it.excludeFromSpending }
     val totalSpent = nonTransferTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
     val totalIncome = nonTransferTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
     val netRemaining = totalIncome - totalSpent
-    val transferCount = transactions.count { it.type == TransactionType.TRANSFER || it.categoryKey == "INTERNAL_TRANSFER" || it.excludeFromSpending }
-    val transferVolume = transactions.filter { it.type == TransactionType.TRANSFER || it.categoryKey == "INTERNAL_TRANSFER" }.sumOf { it.amountMinor }
 
     val deduplicatedAccounts = remember(accounts) {
         accounts
@@ -401,17 +406,16 @@ private fun TransactionsFeed(
     }
 
     val filtered = when {
-        filterType == "EXPENSE" -> transactions.filter { it.type == TransactionType.EXPENSE && !it.excludeFromSpending }
-        filterType == "INCOME" -> transactions.filter { it.type == TransactionType.INCOME && !it.excludeFromSpending }
-        filterType == "TRANSFER" -> transactions.filter { it.type == TransactionType.TRANSFER || it.categoryKey == "INTERNAL_TRANSFER" || it.excludeFromSpending }
+        filterType == "EXPENSE" -> visibleTransactions.filter { it.type == TransactionType.EXPENSE && !it.excludeFromSpending }
+        filterType == "INCOME" -> visibleTransactions.filter { it.type == TransactionType.INCOME && !it.excludeFromSpending }
         filterType.startsWith("BANK_") -> {
             val bankKey = filterType.removePrefix("BANK_").trim().lowercase(Locale.ROOT)
-            transactions.filter {
+            visibleTransactions.filter {
                 normalizeBankName(it.accountName).lowercase(Locale.ROOT) == bankKey ||
                 normalizeBankName(it.source).lowercase(Locale.ROOT) == bankKey
             }
         }
-        else -> transactions
+        else -> visibleTransactions
     }
 
     val dayGroups = remember(filtered) { groupTransactionsByDay(filtered) }
@@ -442,18 +446,12 @@ private fun TransactionsFeed(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "Net Spending (Transfers Nullified)",
+                            "Total Spending",
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFFEDE9FE))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text("🔄 Transfers Excluded", fontSize = 10.sp, color = Color(0xFF6D28D9), fontWeight = FontWeight.Bold)
-                        }
                     }
 
                     Row(
@@ -465,7 +463,11 @@ private fun TransactionsFeed(
                             text = formatMoney(totalSpent),
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp)
                         )
 
                         // Remaining / Saved Pill
@@ -491,29 +493,39 @@ private fun TransactionsFeed(
                                     text = "$pillLabel${formatMoney(kotlin.math.abs(netRemaining))}",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = pillTextColor
+                                    color = pillTextColor,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
                     }
 
-                    @OptIn(ExperimentalLayoutApi::class)
-                    FlowRow(
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(15.dp))
-                            Text("Out: ${formatMoney(totalSpent)}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Out: ${formatMoney(totalSpent)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(15.dp))
-                            Text("In: +${formatMoney(totalIncome)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF059669), fontWeight = FontWeight.SemiBold)
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Icon(Icons.Default.SwapHoriz, contentDescription = null, tint = Color(0xFF7C3AED), modifier = Modifier.size(15.dp))
-                            Text("Transfers: ${formatMoney(transferVolume)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF7C3AED), fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "In: +${formatMoney(totalIncome)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF059669),
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
                     }
                 }
@@ -591,19 +603,28 @@ private fun TransactionsFeed(
                                         "Out: ${formatMoney(accSpent)}",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Normal,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         "In: +${formatMoney(accIncome)}",
                                         fontSize = 11.sp,
                                         color = Color(0xFF059669),
-                                        fontWeight = FontWeight.Medium
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = "${if (isAccPositive) "Rem: +" else "Rem: -"}${formatMoney(kotlin.math.abs(accRemaining))}",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isAccPositive) Color(0xFF059669) else MaterialTheme.colorScheme.error
+                                        color = if (isAccPositive) Color(0xFF059669) else MaterialTheme.colorScheme.error,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
@@ -621,14 +642,13 @@ private fun TransactionsFeed(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 val baseFilters = listOf(
-                    "ALL" to "All (${transactions.size})",
+                    "ALL" to "All (${visibleTransactions.size})",
                     "EXPENSE" to "Outflow",
-                    "INCOME" to "Inflow",
-                    "TRANSFER" to "🔄 Transfers (${transferCount})"
+                    "INCOME" to "Inflow"
                 )
                 val bankFilters = deduplicatedAccounts.map { acc ->
                     val cleanName = normalizeBankName(acc.name)
-                    val count = transactions.count {
+                    val count = visibleTransactions.count {
                         normalizeBankName(it.accountName).equals(cleanName, ignoreCase = true) ||
                         normalizeBankName(it.source).equals(cleanName, ignoreCase = true)
                     }
@@ -640,7 +660,7 @@ private fun TransactionsFeed(
                     FilterChip(
                         selected = filterType == key,
                         onClick = { onFilterChange(key) },
-                        label = { Text(label, fontSize = 12.sp) },
+                        label = { Text(label, fontSize = 12.sp, maxLines = 1, softWrap = false) },
                         shape = RoundedCornerShape(20.dp),
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -768,20 +788,20 @@ private fun TransactionRowItem(
     onClick: () -> Unit,
     onCategoryClick: () -> Unit
 ) {
-    val isTransfer = tx.type == TransactionType.TRANSFER || tx.categoryKey == "INTERNAL_TRANSFER" || tx.excludeFromSpending
-    val isUnknownVendor = !isTransfer && (
-        tx.merchant.isNullOrBlank() ||
+    val isUnknownVendor = tx.merchant.isNullOrBlank() ||
         tx.merchant.equals("Chase Payment", ignoreCase = true) ||
         tx.merchant.equals("HSBC Payment", ignoreCase = true) ||
         tx.merchant.equals("Money In", ignoreCase = true) ||
         tx.merchant.equals("Money Out", ignoreCase = true) ||
         tx.merchant.equals("Card Payment", ignoreCase = true) ||
-        tx.merchant.equals("Payment", ignoreCase = true)
-    )
+        tx.merchant.equals("Payment", ignoreCase = true) ||
+        tx.merchant.equals("Unknown", ignoreCase = true) ||
+        tx.merchant.equals("Unknown Vendor", ignoreCase = true) ||
+        tx.merchant.equals("Transaction", ignoreCase = true)
 
     val timeStr = if (tx.timestamp > 0) {
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(tx.timestamp))
-    } else ""
+    } else "—"
 
     Card(
         modifier = Modifier
@@ -798,77 +818,97 @@ private fun TransactionRowItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Category Emoji or Transfer icon
+            // Category Emoji Box (uniform 42dp)
             Box(
                 modifier = Modifier
                     .size(42.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(
-                        if (isTransfer) Color(0xFFEDE9FE)
-                        else parseColorHex(tx.categoryColorHex)
-                    ),
+                    .background(parseColorHex(tx.categoryColorHex)),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = if (isTransfer) "🔄" else tx.categoryEmoji,
+                    text = tx.categoryEmoji,
                     fontSize = 20.sp
                 )
             }
 
-            // Transaction Details
+            // Transaction Details (fixed 2-row grid: 22dp + 6dp + 22dp = 50dp)
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                if (isUnknownVendor) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
+                // Row 1: Merchant or Unknown Vendor (fixed 22dp height)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(22.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (isUnknownVendor) {
                         Text(
                             text = "Unknown Vendor",
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.error
+                            color = MaterialTheme.colorScheme.error,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         Surface(
                             color = MaterialTheme.colorScheme.errorContainer,
                             shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onClick() }
+                            modifier = Modifier
+                                .height(20.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { onClick() }
                         ) {
-                            Text(
-                                "✏️ Tap to set",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
+                            Box(
+                                modifier = Modifier.padding(horizontal = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "✏️ Set",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
                         }
+                    } else {
+                        Text(
+                            text = tx.merchant?.takeIf { it.isNotEmpty() } ?: "Transaction",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
-                } else {
-                    Text(
-                        text = tx.merchant?.takeIf { it.isNotEmpty() }
-                            ?: if (isTransfer) "${tx.source} ➔ ${tx.destinationAccountName ?: "HSBC"}" else "Transaction",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
                 }
 
-                @OptIn(ExperimentalLayoutApi::class)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                // Row 2: Source badge + Category pill (fixed 22dp single-line row, never wraps)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(22.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     // Source badge (Chase / HSBC / Monzo)
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
+                            .height(20.dp)
+                            .clip(RoundedCornerShape(6.dp))
                             .background(
                                 when {
                                     tx.source.contains("Chase", ignoreCase = true) -> Color(0xFFDBEAFE)
@@ -876,12 +916,15 @@ private fun TransactionRowItem(
                                     else -> MaterialTheme.colorScheme.surfaceVariant
                                 }
                             )
-                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                            .padding(horizontal = 6.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = tx.source,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
                             color = when {
                                 tx.source.contains("Chase", ignoreCase = true) -> Color(0xFF1E40AF)
                                 tx.source.contains("HSBC", ignoreCase = true) -> Color(0xFF991B1B)
@@ -892,74 +935,72 @@ private fun TransactionRowItem(
 
                     // Tappable Category pill
                     Surface(
-                        color = if (isTransfer) Color(0xFFEDE9FE) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                         shape = RoundedCornerShape(6.dp),
                         modifier = Modifier
+                            .height(20.dp)
+                            .weight(1f, fill = false)
                             .clip(RoundedCornerShape(6.dp))
-                            .clickable { if (!isTransfer) onCategoryClick() else onClick() }
+                            .clickable { onCategoryClick() }
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            modifier = Modifier.padding(horizontal = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
                             Text(
-                                text = if (isTransfer) "🔄 Internal Transfer" else "${tx.categoryEmoji} ${tx.categoryName}",
+                                text = "${tx.categoryEmoji} ${tx.categoryName}",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = if (isTransfer) Color(0xFF6D28D9) else MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
-                            if (!isTransfer) {
-                                Text("▼", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
+                            Text(
+                                "▼",
+                                fontSize = 8.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
                     }
                 }
             }
 
-            // Amount and Timestamp column (aligned to end)
+            // Amount and Timestamp column (fixed 2-row grid: 22dp + 6dp + 22dp = 50dp, aligned to end)
             Column(
                 horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(3.dp)
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text(
-                    text = when {
-                        isTransfer -> formatMoney(tx.amountMinor)
-                        tx.type == TransactionType.INCOME -> "+${formatMoney(tx.amountMinor)}"
-                        else -> "−${formatMoney(tx.amountMinor)}"
-                    },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = when {
-                        isTransfer -> Color(0xFF7C3AED)
-                        tx.type == TransactionType.INCOME -> Color(0xFF059669)
-                        else -> Color(0xFFDC2626)
-                    }
-                )
+                Box(
+                    modifier = Modifier.height(22.dp),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    Text(
+                        text = if (tx.type == TransactionType.INCOME) "+${formatMoney(tx.amountMinor)}" else "−${formatMoney(tx.amountMinor)}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        color = if (tx.type == TransactionType.INCOME) Color(0xFF059669) else Color(0xFFDC2626)
+                    )
+                }
 
-                if (timeStr.isNotEmpty()) {
+                Box(
+                    modifier = Modifier.height(22.dp),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
                     Text(
                         text = timeStr,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        softWrap = false
                     )
-                }
-
-                if (isTransfer || tx.excludeFromSpending) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xFFEDE9FE))
-                            .padding(horizontal = 5.dp, vertical = 1.dp)
-                    ) {
-                        Text(
-                            "Nullified",
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF6D28D9)
-                        )
-                    }
                 }
             }
         }

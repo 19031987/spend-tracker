@@ -1,6 +1,9 @@
 package com.spendtracker.app.parser
 
 import com.spendtracker.app.data.isMerchantDuplicate
+import com.spendtracker.app.data.isTransactionDuplicate
+import com.spendtracker.app.data.normalizeBankName
+import com.spendtracker.app.data.resolvePreferredBankSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -178,5 +181,145 @@ class SpendParserTest {
         assertTrue(isMerchantDuplicate("John Smith", null, "HSBC"))
         assertTrue(isMerchantDuplicate("HSBC", "John Smith", "HSBC"))
         assertTrue(isMerchantDuplicate(null, null, "HSBC"))
+        assertTrue(isMerchantDuplicate("Unknown Vendor", "Unknown", "HSBC"))
+    }
+
+    @Test
+    fun `premier bank pipe format resolves source to HSBC`() {
+        val parsed = SpendParser.parse(hsbcPkg, "Money Out", "£15.50 transaction | Costa Coffee | PREMIER")
+        assertNotNull(parsed)
+        assertEquals(SpendParser.TYPE_OUT, parsed!!.type)
+        assertEquals(15.50, parsed.amount, 0.001)
+        assertEquals("Costa Coffee", parsed.merchant)
+        assertEquals("HSBC", parsed.source)
+        assertEquals("HSBC", normalizeBankName("Premier"))
+        assertEquals("HSBC", normalizeBankName("PREMIER"))
+        assertEquals("HSBC", normalizeBankName("HSBC Premier"))
+    }
+
+    @Test
+    fun `same amount and same vendor by Premier and HSBC is duplicate and saves HSBC`() {
+        val ts = 1_700_000_000_000L
+        assertTrue(
+            isTransactionDuplicate(
+                existingAmountMinor = -1550L,
+                existingMerchant = "Costa Coffee",
+                existingSource = "Premier",
+                existingTimestamp = ts,
+                newAmountMinor = -1550L,
+                newMerchant = "Costa Coffee",
+                newSource = "HSBC",
+                newTimestamp = ts + 5_000L
+            )
+        )
+        assertEquals("HSBC", resolvePreferredBankSource("Premier", "HSBC"))
+        assertEquals("HSBC", resolvePreferredBankSource("HSBC", "Premier"))
+    }
+
+    @Test
+    fun `unknown transaction with same amount by Premier and HSBC is duplicate and saves HSBC`() {
+        val ts = 1_700_000_000_000L
+        assertTrue(
+            isTransactionDuplicate(
+                existingAmountMinor = -2500L,
+                existingMerchant = null,
+                existingSource = "Premier",
+                existingTimestamp = ts,
+                newAmountMinor = -2500L,
+                newMerchant = "Unknown Vendor",
+                newSource = "HSBC",
+                newTimestamp = ts + 10_000L
+            )
+        )
+        assertEquals("HSBC", resolvePreferredBankSource("Premier", "HSBC"))
+    }
+
+    @Test
+    fun `unknown transactions with different amount and different time are not duplicates`() {
+        val ts = 1_700_000_000_000L
+        // Different amount AND different time -> NOT duplicate
+        assertFalse(
+            isTransactionDuplicate(
+                existingAmountMinor = -1200L,
+                existingMerchant = null,
+                existingSource = "Premier",
+                existingTimestamp = ts,
+                newAmountMinor = -3500L,
+                newMerchant = null,
+                newSource = "HSBC",
+                newTimestamp = ts + 3_600_000L
+            )
+        )
+        // Different amount at same time -> NOT duplicate
+        assertFalse(
+            isTransactionDuplicate(
+                existingAmountMinor = -1200L,
+                existingMerchant = null,
+                existingSource = "Premier",
+                existingTimestamp = ts,
+                newAmountMinor = -3500L,
+                newMerchant = null,
+                newSource = "HSBC",
+                newTimestamp = ts + 2_000L
+            )
+        )
+        // Same amount at different time -> NOT duplicate
+        assertFalse(
+            isTransactionDuplicate(
+                existingAmountMinor = -1200L,
+                existingMerchant = null,
+                existingSource = "Premier",
+                existingTimestamp = ts,
+                newAmountMinor = -1200L,
+                newMerchant = null,
+                newSource = "HSBC",
+                newTimestamp = ts + 3_600_000L
+            )
+        )
+    }
+
+    @Test
+    fun `merchant Premier Inn is preserved and not confused with Premier bank`() {
+        val parsed = SpendParser.parse(chasePkg, "Chase", "You spent £65.00 at Premier Inn")
+        assertNotNull(parsed)
+        assertEquals("Premier Inn", parsed!!.merchant)
+        assertEquals("Chase", parsed.source)
+
+        val parsedNoPkg = SpendParser.parse("", "Card Alert", "You spent £65.00 at Premier Inn")
+        assertNotNull(parsedNoPkg)
+        assertEquals("Premier Inn", parsedNoPkg!!.merchant)
+        assertEquals("Card Payment", parsedNoPkg.source)
+    }
+
+    @Test
+    fun `standalone Premier title or package resolves source to HSBC`() {
+        val parsed = SpendParser.parse("", "Premier", "You spent £15.50 at Costa Coffee")
+        assertNotNull(parsed)
+        assertEquals(SpendParser.TYPE_OUT, parsed!!.type)
+        assertEquals("Costa Coffee", parsed.merchant)
+        assertEquals("HSBC", parsed.source)
+
+        val parsedUnknown = SpendParser.parse("Premier Account", "Premier", "£25.00 card payment")
+        assertNotNull(parsedUnknown)
+        assertEquals(SpendParser.TYPE_OUT, parsedUnknown!!.type)
+        assertEquals("", parsedUnknown.merchant)
+        assertTrue(parsedUnknown.merchantIsFallback)
+        assertEquals("HSBC", parsedUnknown.source)
+    }
+
+    @Test
+    fun `pipe format with Unknown vendor or no title keeps expense direction and HSBC source`() {
+        val parsedUnknown = SpendParser.parse(hsbcPkg, "HSBC", "£25.00 transaction | Unknown | PREMIER")
+        assertNotNull(parsedUnknown)
+        assertEquals(SpendParser.TYPE_OUT, parsedUnknown!!.type)
+        assertEquals("", parsedUnknown.merchant)
+        assertTrue(parsedUnknown.merchantIsFallback)
+        assertEquals("HSBC", parsedUnknown.source)
+
+        val parsedExpenseNoTitle = SpendParser.parse("Premier Account", "", "£15.50 transaction | Costa Coffee | PREMIER")
+        assertNotNull(parsedExpenseNoTitle)
+        assertEquals(SpendParser.TYPE_OUT, parsedExpenseNoTitle!!.type)
+        assertEquals("Costa Coffee", parsedExpenseNoTitle.merchant)
+        assertEquals("HSBC", parsedExpenseNoTitle.source)
     }
 }

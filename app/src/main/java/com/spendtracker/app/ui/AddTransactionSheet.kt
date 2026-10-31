@@ -128,11 +128,10 @@ fun AddTransactionSheet(
         ) {
             Text("Record Transaction", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
 
-            // 3-way Direction Selector: Money Out vs Money In vs Between Accounts
+            // 2-way Direction Selector: Money Out vs Money In
             val types = listOf(
                 TransactionType.EXPENSE to "↓ Money Out",
-                TransactionType.INCOME to "↑ Money In",
-                TransactionType.TRANSFER to "🔄 Between Accounts"
+                TransactionType.INCOME to "↑ Money In"
             )
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 types.forEachIndexed { index, (t, label) ->
@@ -140,11 +139,7 @@ fun AddTransactionSheet(
                         selected = type == t,
                         onClick = {
                             type = t
-                            if (t == TransactionType.TRANSFER) {
-                                selectedCategoryKey = "INTERNAL_TRANSFER"
-                            } else {
-                                selectedCategoryKey = null
-                            }
+                            selectedCategoryKey = null
                             autoAssignedCategory = null
                             localError = null
                         },
@@ -153,7 +148,8 @@ fun AddTransactionSheet(
                         Text(
                             text = label,
                             maxLines = 1,
-                            fontSize = 11.sp,
+                            softWrap = false,
+                            fontSize = 12.sp,
                             fontWeight = if (type == t) FontWeight.Bold else FontWeight.Medium
                         )
                     }
@@ -169,7 +165,8 @@ fun AddTransactionSheet(
                 Text("Date", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     val days = listOf(0 to "Today", 1 to "Yesterday", 2 to "2 Days Ago")
                     days.forEach { (offset, label) ->
@@ -177,6 +174,7 @@ fun AddTransactionSheet(
                         Surface(
                             modifier = Modifier
                                 .weight(1f)
+                                .height(38.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .clickable {
                                     selectedDayOffset = offset
@@ -186,14 +184,17 @@ fun AddTransactionSheet(
                             shape = RoundedCornerShape(10.dp)
                         ) {
                             Box(
-                                modifier = Modifier.padding(vertical = 8.dp),
+                                modifier = Modifier.padding(horizontal = 4.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = label,
-                                    fontSize = 12.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -204,6 +205,7 @@ fun AddTransactionSheet(
                     Surface(
                         modifier = Modifier
                             .weight(1.2f)
+                            .height(38.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .clickable {
                                 val cal = java.util.Calendar.getInstance()
@@ -230,7 +232,7 @@ fun AddTransactionSheet(
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Box(
-                            modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
+                            modifier = Modifier.padding(horizontal = 4.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -238,7 +240,9 @@ fun AddTransactionSheet(
                                 fontSize = 11.sp,
                                 fontWeight = if (isCustomSelected) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isCustomSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -246,54 +250,52 @@ fun AddTransactionSheet(
             }
 
             // Payee / Merchant Name (Live classification trigger)
-            if (type != TransactionType.TRANSFER) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    OutlinedTextField(
-                        value = merchantText,
-                        onValueChange = { input ->
-                            merchantText = input
-                            val result = onEvaluateCategory(input)
-                            when (result) {
-                                is Classification.Matched -> {
-                                    selectedCategoryKey = result.categoryKey
-                                    val catName = categories.firstOrNull { it.key == result.categoryKey }?.name ?: result.categoryKey
-                                    autoAssignedCategory = catName
-                                }
-                                is Classification.Unknown -> {
-                                    autoAssignedCategory = null
-                                }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                OutlinedTextField(
+                    value = merchantText,
+                    onValueChange = { input ->
+                        merchantText = input
+                        val result = onEvaluateCategory(input)
+                        when (result) {
+                            is Classification.Matched -> {
+                                selectedCategoryKey = result.categoryKey
+                                val catName = categories.firstOrNull { it.key == result.categoryKey }?.name ?: result.categoryKey
+                                autoAssignedCategory = catName
                             }
-                        },
-                        label = { Text("Payee / Merchant Name") },
-                        placeholder = { Text("e.g. Tesco, Shell, Starbucks, Netflix...") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                            is Classification.Unknown -> {
+                                autoAssignedCategory = null
+                            }
+                        }
+                    },
+                    label = { Text("Payee / Merchant Name") },
+                    placeholder = { Text("e.g. Tesco, Shell, Starbucks, Netflix...") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
 
-                    // Monarch-style hint when detected: [⚡ Auto-assigned: Groceries] with quick one-click "Change" action
-                    AnimatedVisibility(visible = autoAssignedCategory != null) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFFECFDF5))
-                                .border(1.dp, Color(0xFFA7F3D0), RoundedCornerShape(8.dp))
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                // Monarch-style hint when detected: [⚡ Auto-assigned: Groceries] with quick one-click "Change" action
+                AnimatedVisibility(visible = autoAssignedCategory != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFFECFDF5))
+                            .border(1.dp, Color(0xFFA7F3D0), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "⚡ Auto-assigned: ${autoAssignedCategory.orEmpty()}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF065F46),
+                            fontWeight = FontWeight.Bold
+                        )
+                        TextButton(
+                            onClick = { showCategoryPicker = true }
                         ) {
-                            Text(
-                                "⚡ Auto-assigned: ${autoAssignedCategory.orEmpty()}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF065F46),
-                                fontWeight = FontWeight.Bold
-                            )
-                            TextButton(
-                                onClick = { showCategoryPicker = true }
-                            ) {
-                                Text("Change", color = Color(0xFF047857), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            }
+                            Text("Change", color = Color(0xFF047857), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
                 }
@@ -305,17 +307,9 @@ fun AddTransactionSheet(
                 label = { Text("Amount") },
                 prefix = {
                     Text(
-                        text = when (type) {
-                            TransactionType.EXPENSE -> "−£ "
-                            TransactionType.INCOME -> "+£ "
-                            TransactionType.TRANSFER -> "£ "
-                        },
+                        text = if (type == TransactionType.INCOME) "+£ " else "−£ ",
                         fontWeight = FontWeight.Bold,
-                        color = when (type) {
-                            TransactionType.EXPENSE -> Color(0xFFDC2626)
-                            TransactionType.INCOME -> Color(0xFF059669)
-                            TransactionType.TRANSFER -> Color(0xFF7C3AED)
-                        }
+                        color = if (type == TransactionType.INCOME) Color(0xFF059669) else Color(0xFFDC2626)
                     )
                 },
                 placeholder = { Text("0.00") },
@@ -326,126 +320,86 @@ fun AddTransactionSheet(
             )
 
             AccountPicker(
-                label = if (type == TransactionType.TRANSFER) "From account" else "Account",
+                label = "Account",
                 accounts = deduplicatedAccounts,
                 selected = effectiveSource,
                 onSelected = { sourceId = it.id }
             )
 
-            AnimatedVisibility(visible = type == TransactionType.TRANSFER) {
-                AccountPicker(
-                    label = "To account",
-                    accounts = deduplicatedAccounts.filter { it.id != effectiveSource?.id },
-                    selected = effectiveDestination,
-                    onSelected = { destinationId = it.id }
-                )
-            }
+            // Category Picker Row with Uncategorized fallback pill (uniform 32dp icon box)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Category", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
 
-            AnimatedVisibility(visible = type == TransactionType.TRANSFER) {
-                Row(
+                Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFFEDE9FE))
-                        .border(1.dp, Color(0xFFDDD6FE), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { showCategoryPicker = true },
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFFDDD6FE)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("🔄", fontSize = 18.sp)
-                    }
-                    Column {
-                        Text(
-                            "Category: Internal Transfer",
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF5B21B6),
-                            fontSize = 13.sp
-                        )
-                        Text(
-                            "Nullified from spending calculations (excluded from net spend)",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF6D28D9),
-                            fontSize = 11.sp
-                        )
-                    }
-                }
-            }
-
-            // Category Picker Row with Uncategorized fallback pill
-            AnimatedVisibility(visible = type != TransactionType.TRANSFER) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Category", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-
-                    Surface(
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .clickable { showCategoryPicker = true },
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(14.dp)
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            if (activeCategory != null) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        if (activeCategory != null) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(parseColorHex(activeCategory.colorHex)),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(parseColorHex(activeCategory.colorHex)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(activeCategory.emoji, fontSize = 16.sp)
-                                    }
-                                    Text(
-                                        activeCategory.name,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                    Text(activeCategory.emoji, fontSize = 16.sp)
                                 }
-                            } else {
-                                // Uncategorized distinct pill
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(0xFFFEF3C7))
-                                            .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(8.dp)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text("❓", fontSize = 14.sp)
-                                    }
-                                    Text(
-                                        "Uncategorized",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = Color(0xFFB45309),
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
+                                Text(
+                                    activeCategory.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
                             }
+                        } else {
+                            // Uncategorized distinct pill (uniform 32dp icon box)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFFFEF3C7))
+                                        .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(8.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("❓", fontSize = 16.sp)
+                                }
+                                Text(
+                                    "Uncategorized",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = Color(0xFFB45309),
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                        }
 
-                            TextButton(onClick = { showCategoryPicker = true }) {
-                                Text("Choose", fontWeight = FontWeight.Bold)
-                            }
+                        TextButton(onClick = { showCategoryPicker = true }) {
+                            Text("Choose", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -454,12 +408,7 @@ fun AddTransactionSheet(
             OutlinedTextField(
                 value = note,
                 onValueChange = { note = it },
-                label = {
-                    Text(if (type == TransactionType.TRANSFER) "Transfer Note (optional)" else "Note (optional)")
-                },
-                placeholder = {
-                    if (type == TransactionType.TRANSFER) Text("e.g. Savings Buffer, Card Payoff")
-                },
+                label = { Text("Note (optional)") },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
             )
@@ -488,25 +437,6 @@ fun AddTransactionSheet(
                     when {
                         amount == null -> localError = "Enter a valid amount (max 2 decimals)"
                         source == null -> localError = "Select an account"
-                        type == TransactionType.TRANSFER -> {
-                            val dest = effectiveDestination
-                            if (dest == null) {
-                                localError = "Create a second account to transfer between"
-                            } else {
-                                localError = null
-                                onSubmit(
-                                    NewTransaction.Transfer(
-                                        sourceAccountId = source.id,
-                                        destinationAccountId = dest.id,
-                                        amountMinor = amount,
-                                        note = note,
-                                        timestamp = txTimestamp,
-                                        sourceName = source.name,
-                                        destinationName = dest.name
-                                    )
-                                )
-                            }
-                        }
                         else -> {
                             localError = null
                             onSubmit(

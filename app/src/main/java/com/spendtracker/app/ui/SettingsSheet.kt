@@ -217,7 +217,9 @@ private fun CategoriesTabContent(
         }
 
         groups.forEach { group ->
-            val groupCats = categories.filter { it.groupId == group.id && !it.isHidden }
+            val groupCats = categories.filter {
+                it.groupId == group.id && !it.isHidden && it.type != TransactionType.TRANSFER && it.key != "INTERNAL_TRANSFER"
+            }
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -346,7 +348,7 @@ private fun RulesTabContent(
                             expanded = dropdownExpanded,
                             onDismissRequest = { dropdownExpanded = false }
                         ) {
-                            categories.filter { !it.isHidden }.forEach { c ->
+                            categories.filter { !it.isHidden && it.type != TransactionType.TRANSFER && it.key != "INTERNAL_TRANSFER" }.forEach { c ->
                                 DropdownMenuItem(
                                     text = { Text("${c.emoji} ${c.name}") },
                                     onClick = {
@@ -396,6 +398,9 @@ private fun RulesTabContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -403,13 +408,20 @@ private fun RulesTabContent(
                             "\"${r.pattern}\"",
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
-                        Text("➔", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("➔", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false)
                         Text(
                             "${cat?.emoji.orEmpty()} ${cat?.name ?: r.categoryKey}",
                             fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
 

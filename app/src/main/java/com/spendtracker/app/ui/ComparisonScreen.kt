@@ -795,7 +795,12 @@ fun ComparisonBreakdownCard(
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f, fill = false)
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
                 )
 
                 Row(
@@ -807,16 +812,20 @@ fun ComparisonBreakdownCard(
                             text = formatCurrency(item.currentValue),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            softWrap = false
                         )
                         Text(
                             text = "prev: ${formatCurrency(item.previousValue)}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
 
-                    // Delta badge
+                    // Delta badge (fixed minimum width so currency column stays aligned across rows)
                     val diff = item.difference
                     val pct = item.percentageChange
                     val isUp = diff >= 0
@@ -827,13 +836,21 @@ fun ComparisonBreakdownCard(
                         color = badgeBg,
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text(
-                            text = "${if (isUp) "+" else ""}${String.format(Locale.getDefault(), "%.0f", pct)}%",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = badgeColor,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .width(52.dp)
+                                .padding(horizontal = 4.dp, vertical = 3.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "${if (isUp) "+" else ""}${String.format(Locale.getDefault(), "%.0f", pct)}%",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = badgeColor,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
                     }
                 }
             }

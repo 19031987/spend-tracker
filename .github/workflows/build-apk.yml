@@ -63,10 +63,23 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.8.6
-        name: "SpendTracker Release v1.8.6 (Retroactive Transaction Repair & Vendor Fix)"
+        tag_name: v1.8.7
+        name: "SpendTracker Release v1.8.7 (Premier/HSBC Deduplication, Transfer Removal & Alignment Fix)"
         body: |
-          ### SpendTracker v1.8.6 - Retroactive Transaction Repair & Vendor Fix
+          ### SpendTracker v1.8.7 - Premier/HSBC Deduplication, Transfer Removal & Record Alignment Fix
+          - 🏦 **Premier & HSBC Duplicate Transaction Resolution**:
+            - When a transaction with the same amount and same vendor (or an unknown vendor transaction with the same amount within the deduplication window) is reported across `Premier` and `HSBC`, it is detected as a duplicate and saved under `HSBC`.
+            - Unknown vendor transactions with different amounts or different times are never treated as duplicates.
+            - Retroactively consolidates and deduplicates existing `Premier` and `HSBC` records in Room and SQLite on startup.
+          - 🚫 **Removed Between-Account (`🔄 Between Accounts` / `TRANSFER`) Feature**:
+            - Removed `🔄 Between Accounts` (`TRANSFER`) toggle, `To account` selector, and `Internal Transfer` banners from Add & Edit Transaction sheets.
+            - Removed `🔄 Transfers` filter chip and transfer counters/badges from the Transactions dashboard and Hero Cash Flow card.
+            - Removed dual-leg internal transfer insertion from `SpendNotificationListenerService` and auto-cleaned legacy `TRANSFER` / `INTERNAL_TRANSFER` rows on startup.
+          - 📐 **Strict Record Alignment Across Unknown Vendor, Known Vendor, and Money In (`IN`) Rows**:
+            - Enforced a uniform 2-row fixed-height (`22dp` + `6dp` + `22dp`) grid inside `TransactionRowItem` for both the middle details column and right amount/time column.
+            - Prevented `Unknown Vendor` + `✏️ Set` badge from wrapping onto two lines on narrow screens.
+            - Replaced multi-line `FlowRow` on the secondary metadata line with a single-line `22dp` `Row` so `INCOME` categories (`💰 Other income`) and long category/bank pills never wrap or jitter vertically.
+            - Standardized category icon boxes (`32dp`), date filter buttons (`38dp`), bank account summary cards, and comparison/settings rows to prevent layout shifts.
           - 🔄 **Retroactive Past Transaction Auto-Repair**:
             - On app startup, automatically scans previously saved transactions in Room and legacy SQLite databases.
             - Re-parses any past notifications containing structured pipe alerts (e.g. `£50.00 transaction | TRIPURA JHANSI RANCHASE | HSBC ADVANCE`).

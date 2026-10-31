@@ -13,22 +13,74 @@ data class TransferIds(val sourceId: Long, val destinationId: Long)
 private const val SPEND_WHERE =
     "type = 'EXPENSE' AND excludeFromSpending = 0 AND (category IS NULL OR category != 'INTERNAL_TRANSFER') AND timestamp >= :start AND timestamp < :end"
 
-fun isMerchantDuplicate(existingMerchant: String?, newMerchant: String?, sourceName: String? = null): Boolean {
-    fun isGenericOrBlank(m: String?): Boolean {
-        if (m.isNullOrBlank()) return true
-        val trimmed = m.trim()
-        if (trimmed.equals("Card Payment", ignoreCase = true) ||
-            trimmed.equals("Payment", ignoreCase = true) ||
-            (!sourceName.isNullOrBlank() && trimmed.equals(sourceName.trim(), ignoreCase = true))
-        ) return true
-        return false
-    }
+fun isUnknownOrGenericMerchant(m: String?, sourceName: String? = null): Boolean {
+    if (m.isNullOrBlank()) return true
+    val trimmed = m.trim()
+    if (trimmed.equals("Card Payment", ignoreCase = true) ||
+        trimmed.equals("Payment", ignoreCase = true) ||
+        trimmed.equals("Unknown", ignoreCase = true) ||
+        trimmed.equals("Unknown Vendor", ignoreCase = true) ||
+        trimmed.equals("Transaction", ignoreCase = true) ||
+        trimmed.equals("Money In", ignoreCase = true) ||
+        trimmed.equals("Money Out", ignoreCase = true) ||
+        trimmed.equals("HSBC Payment", ignoreCase = true) ||
+        trimmed.equals("Chase Payment", ignoreCase = true) ||
+        trimmed.equals("Premier Payment", ignoreCase = true) ||
+        trimmed.equals("HSBC", ignoreCase = true) ||
+        trimmed.equals("Premier", ignoreCase = true) ||
+        trimmed.equals("Chase", ignoreCase = true) ||
+        (!sourceName.isNullOrBlank() && trimmed.equals(sourceName.trim(), ignoreCase = true))
+    ) return true
+    return false
+}
 
-    val existingGeneric = isGenericOrBlank(existingMerchant)
-    val newGeneric = isGenericOrBlank(newMerchant)
+fun isPremierOrHsbcBank(bank: String?): Boolean {
+    if (bank.isNullOrBlank()) return false
+    return normalizeBankName(bank).equals("HSBC", ignoreCase = true)
+}
+
+fun isSameOrEquivalentBank(bankA: String?, bankB: String?): Boolean {
+    if (bankA.isNullOrBlank() || bankB.isNullOrBlank()) return false
+    if (bankA.trim().equals(bankB.trim(), ignoreCase = true)) return true
+    if (isPremierOrHsbcBank(bankA) && isPremierOrHsbcBank(bankB)) return true
+    return normalizeBankName(bankA).equals(normalizeBankName(bankB), ignoreCase = true)
+}
+
+fun resolvePreferredBankSource(existingSource: String?, newSource: String?): String {
+    if (isPremierOrHsbcBank(existingSource) || isPremierOrHsbcBank(newSource)) {
+        return "HSBC"
+    }
+    return normalizeBankName(newSource ?: existingSource)
+}
+
+fun isMerchantDuplicate(existingMerchant: String?, newMerchant: String?, sourceName: String? = null): Boolean {
+    val existingGeneric = isUnknownOrGenericMerchant(existingMerchant, sourceName)
+    val newGeneric = isUnknownOrGenericMerchant(newMerchant, sourceName)
 
     if (existingGeneric || newGeneric) return true
-    return existingMerchant!!.trim().equals(newMerchant!!.trim(), ignoreCase = true)
+    val exTrim = existingMerchant!!.trim()
+    val newTrim = newMerchant!!.trim()
+    if (exTrim.equals(newTrim, ignoreCase = true)) return true
+    val exClean = com.spendtracker.app.parser.SpendParser.cleanMerchantName(exTrim, sourceName ?: "")
+    val newClean = com.spendtracker.app.parser.SpendParser.cleanMerchantName(newTrim, sourceName ?: "")
+    return exClean.isNotBlank() && exClean.equals(newClean, ignoreCase = true)
+}
+
+fun isTransactionDuplicate(
+    existingAmountMinor: Long,
+    existingMerchant: String?,
+    existingSource: String?,
+    existingTimestamp: Long,
+    newAmountMinor: Long,
+    newMerchant: String?,
+    newSource: String?,
+    newTimestamp: Long,
+    windowMillis: Long = 60_000L
+): Boolean {
+    if (kotlin.math.abs(existingAmountMinor) != kotlin.math.abs(newAmountMinor)) return false
+    if (kotlin.math.abs(existingTimestamp - newTimestamp) > windowMillis) return false
+    if (!isSameOrEquivalentBank(existingSource, newSource)) return false
+    return isMerchantDuplicate(existingMerchant, newMerchant, resolvePreferredBankSource(existingSource, newSource))
 }
 
 @Dao
@@ -45,13 +97,20 @@ abstract class TransactionDao {
 
     /**
      * Time-window fingerprinting deduplication:
-     * isDuplicate = exists where |t_new - t_existing| <= delta_t AND amount matches AND source bank matches.
+     * isDuplicate = exists where |t_new - t_existing| <= delta_t AND amount matches AND source bank matches (including Premier <-> HSBC).
      */
     @Query(
         """
         SELECT * FROM transactions
         WHERE ABS(amount) = :absAmountMinor
-          AND (LOWER(source) = LOWER(:sourceName) OR accountId = :accountId)
+          AND (
+              LOWER(TRIM(source)) = LOWER(TRIM(:sourceName))
+              OR accountId = :accountId
+              OR (
+                  LOWER(TRIM(:sourceName)) IN ('hsbc', 'premier', 'hsbc premier', 'premier account', 'premier bank', 'hsbc advance', 'advance', 'advance account')
+                  AND LOWER(TRIM(source)) IN ('hsbc', 'premier', 'hsbc premier', 'premier account', 'premier bank', 'hsbc advance', 'advance', 'advance account')
+              )
+          )
           AND ABS(timestamp - :timestamp) <= :windowMillis
         ORDER BY ABS(timestamp - :timestamp) ASC
         LIMIT 1
@@ -66,13 +125,20 @@ abstract class TransactionDao {
     ): TransactionEntity?
 
     /**
-     * Finds all candidates within the time window matching amount and bank.
+     * Finds all candidates within the time window matching amount and bank (including Premier <-> HSBC).
      */
     @Query(
         """
         SELECT * FROM transactions
         WHERE ABS(amount) = :absAmountMinor
-          AND (LOWER(source) = LOWER(:sourceName) OR accountId = :accountId)
+          AND (
+              LOWER(TRIM(source)) = LOWER(TRIM(:sourceName))
+              OR accountId = :accountId
+              OR (
+                  LOWER(TRIM(:sourceName)) IN ('hsbc', 'premier', 'hsbc premier', 'premier account', 'premier bank', 'hsbc advance', 'advance', 'advance account')
+                  AND LOWER(TRIM(source)) IN ('hsbc', 'premier', 'hsbc premier', 'premier account', 'premier bank', 'hsbc advance', 'advance', 'advance account')
+              )
+          )
           AND ABS(timestamp - :timestamp) <= :windowMillis
         ORDER BY ABS(timestamp - :timestamp) ASC
         """
@@ -86,7 +152,7 @@ abstract class TransactionDao {
     ): List<TransactionEntity>
 
     /**
-     * Deduplicates taking into account the sender/merchant name.
+     * Deduplicates taking into account the sender/merchant name, preferring exact known-vendor matches first.
      */
     suspend fun findMatchingDuplicate(
         absAmountMinor: Long,
@@ -97,6 +163,11 @@ abstract class TransactionDao {
         windowMillis: Long = 60_000L
     ): TransactionEntity? {
         val candidates = findDuplicates(absAmountMinor, sourceName, accountId, timestamp, windowMillis)
+        if (!isUnknownOrGenericMerchant(merchant, sourceName)) {
+            candidates.firstOrNull {
+                !isUnknownOrGenericMerchant(it.merchant, sourceName) && isMerchantDuplicate(it.merchant, merchant, sourceName)
+            }?.let { return it }
+        }
         return candidates.firstOrNull { isMerchantDuplicate(it.merchant, merchant, sourceName) }
     }
 

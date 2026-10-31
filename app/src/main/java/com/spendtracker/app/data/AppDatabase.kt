@@ -107,7 +107,8 @@ fun cleanupAndConsolidateAccounts(db: SupportSQLiteDatabase) {
         // 2. Group by canonical normalized name (case-insensitive)
         val grouped = allAccounts.groupBy { it.normName.lowercase(java.util.Locale.ROOT) }
         for ((_, group) in grouped) {
-            val canonical = group.minByOrNull { it.id } ?: continue
+            val canonical = group.firstOrNull { it.rawName.trim().equals(it.normName, ignoreCase = true) }
+                ?: group.minByOrNull { it.id } ?: continue
             val canonicalId = canonical.id
             val canonicalName = canonical.normName
 
@@ -167,16 +168,7 @@ fun cleanupAndConsolidateAccounts(db: SupportSQLiteDatabase) {
         // Clean up any invalid destinationAccountId
         db.execSQL("UPDATE transactions SET destinationAccountId = NULL WHERE destinationAccountId IS NOT NULL AND destinationAccountId NOT IN (SELECT id FROM accounts)")
 
-        // 4. Update transactions.source to canonical account name
-        db.execSQL("""
-            UPDATE transactions
-            SET source = (
-                SELECT name FROM accounts WHERE accounts.id = transactions.accountId
-            )
-            WHERE accountId IS NOT NULL AND accountId IN (SELECT id FROM accounts)
-        """.trimIndent())
-
-        // 5. Ensure core default accounts exist if missing
+        // 4. Ensure core default accounts exist if missing
         val defaultBanks = listOf("Chase", "HSBC", "Credit Card")
         for (b in defaultBanks) {
             val lower = b.lowercase(java.util.Locale.ROOT)
@@ -187,6 +179,31 @@ fun cleanupAndConsolidateAccounts(db: SupportSQLiteDatabase) {
                 db.execSQL("INSERT OR IGNORE INTO accounts(name) VALUES (?)", arrayOf(b))
             }
         }
+
+        // 4b. Link any transaction whose source or note indicates Premier/HSBC directly to the HSBC account
+        val hsbcCursor = db.query("SELECT id FROM accounts WHERE LOWER(TRIM(name)) = 'hsbc' LIMIT 1")
+        if (hsbcCursor.moveToFirst()) {
+            val hsbcId = hsbcCursor.getLong(0)
+            db.execSQL(
+                """
+                UPDATE transactions
+                SET accountId = $hsbcId, source = 'HSBC'
+                WHERE LOWER(TRIM(source)) IN ('hsbc', 'hsbc uk', 'hsbc bank', 'premier', 'hsbc premier', 'premier account', 'premier bank', 'advance', 'hsbc advance', 'advance account')
+                   OR LOWER(note) LIKE 'captured from premier%'
+                   OR LOWER(note) LIKE 'captured from hsbc%'
+                """.trimIndent()
+            )
+        }
+        hsbcCursor.close()
+
+        // 5. Update transactions.source to canonical account name
+        db.execSQL("""
+            UPDATE transactions
+            SET source = (
+                SELECT name FROM accounts WHERE accounts.id = transactions.accountId
+            )
+            WHERE accountId IS NOT NULL AND accountId IN (SELECT id FROM accounts)
+        """.trimIndent())
 
         // 5b. Purge unwanted 'Messages', 'Savings', 'Others' accounts and remap any linked transactions
         try {
@@ -240,6 +257,8 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
             val currentAmount = cursor.getLong(1)
             val note = cursor.getString(2) ?: ""
             val source = cursor.getString(3) ?: ""
+            val existingMerchant = if (cursor.isNull(4)) null else cursor.getString(4)
+            val existingType = cursor.getString(5) ?: "EXPENSE"
 
             val cleanNote = note
                 .replace(Regex("(?i)^Captured from [^:]+:\\s*"), "")
@@ -248,12 +267,18 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
 
             val parsed = com.spendtracker.app.parser.SpendParser.parse(source, "", cleanNote)
             if (parsed != null && parsed.merchant.isNotBlank()) {
-                val newType = if (parsed.type == com.spendtracker.app.parser.SpendParser.TYPE_IN) "INCOME" else "EXPENSE"
+                val hasExplicitInSignal = Regex("(?i)\\bmoney[ -]in\\b").containsMatchIn(note) ||
+                    cleanNote.trimStart().startsWith("+")
+                val resolvedType = if (existingType == "EXPENSE" && !hasExplicitInSignal && !isUnknownOrGenericMerchant(existingMerchant, source)) {
+                    "EXPENSE"
+                } else {
+                    if (parsed.type == com.spendtracker.app.parser.SpendParser.TYPE_IN) "INCOME" else "EXPENSE"
+                }
                 val absMinor = kotlin.math.abs(currentAmount)
-                val newAmount = if (newType == "INCOME") absMinor else -absMinor
+                val newAmount = if (resolvedType == "INCOME") absMinor else -absMinor
                 db.execSQL(
                     "UPDATE transactions SET merchant = ?, type = ?, amount = ? WHERE id = ?",
-                    arrayOf(parsed.merchant, newType, newAmount, txId)
+                    arrayOf(parsed.merchant, resolvedType, newAmount, txId)
                 )
             }
         }
@@ -314,12 +339,12 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
     }
 
     try {
-        // 3. Clear literal 'Money In' / 'Money Out' as merchant name and fix inverted sign
+        // 3. Clear literal 'Money In' / 'Money Out' / generic unknown labels as merchant name and fix inverted sign
         db.execSQL(
             """
             UPDATE transactions
             SET merchant = NULL
-            WHERE merchant IN ('Money In', 'Money Out')
+            WHERE merchant IN ('Money In', 'Money Out', 'Unknown', 'Unknown Vendor', 'Transaction', 'Card Payment', 'Payment', 'HSBC Payment', 'Chase Payment', 'Premier Payment', 'Premier', 'HSBC')
             """.trimIndent()
         )
         db.execSQL(
@@ -332,8 +357,181 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
             )
             """.trimIndent()
         )
+        // 4. Remove between-account transfer records and normalize missing/mismatched default categories
+        db.execSQL(
+            """
+            DELETE FROM transactions
+            WHERE type = 'TRANSFER' OR category = 'INTERNAL_TRANSFER'
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            UPDATE categories
+            SET isHidden = 1
+            WHERE `key` = 'INTERNAL_TRANSFER' OR type = 'TRANSFER'
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            UPDATE transactions
+            SET category = 'OTHER_INCOME'
+            WHERE type = 'INCOME' AND (category IS NULL OR category = 'OTHER_EXPENSE' OR category = 'Money In' OR category = 'Transfers In')
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            UPDATE transactions
+            SET category = 'OTHER_EXPENSE'
+            WHERE type = 'EXPENSE' AND (category IS NULL OR category = 'General Spend')
+            """.trimIndent()
+        )
+
+        // 5. Deduplicate transactions in Room (including Premier <-> HSBC duplicates with same amount & vendor,
+        //    or unknown vendor with same amount within the time window), always saving the HSBC one.
+        //    Unknown transactions with different amount or different time are NOT considered duplicates.
+        val hsbcAccCursor = db.query("SELECT id FROM accounts WHERE LOWER(TRIM(name)) = 'hsbc' LIMIT 1")
+        val hsbcAccountId = if (hsbcAccCursor.moveToFirst()) hsbcAccCursor.getLong(0) else null
+        hsbcAccCursor.close()
+
+        data class RoomTxRow(
+            val id: Long,
+            var accountId: Long,
+            var amount: Long,
+            var category: String?,
+            var merchant: String?,
+            var note: String?,
+            var source: String?,
+            val timestamp: Long,
+            var type: String
+        )
+
+        val txCursor = db.query(
+            "SELECT id, accountId, amount, category, merchant, note, source, timestamp, type FROM transactions ORDER BY timestamp ASC, id ASC"
+        )
+        val allRows = mutableListOf<RoomTxRow>()
+        while (txCursor.moveToNext()) {
+            allRows.add(
+                RoomTxRow(
+                    id = txCursor.getLong(0),
+                    accountId = txCursor.getLong(1),
+                    amount = txCursor.getLong(2),
+                    category = if (txCursor.isNull(3)) null else txCursor.getString(3),
+                    merchant = if (txCursor.isNull(4)) null else txCursor.getString(4),
+                    note = if (txCursor.isNull(5)) null else txCursor.getString(5),
+                    source = if (txCursor.isNull(6)) null else txCursor.getString(6),
+                    timestamp = txCursor.getLong(7),
+                    type = txCursor.getString(8) ?: "EXPENSE"
+                )
+            )
+        }
+        txCursor.close()
+
+        val keptRows = mutableListOf<RoomTxRow>()
+        val duplicateIdsToDelete = mutableListOf<Long>()
+
+        fun isCandidateMatch(kept: RoomTxRow, row: RoomTxRow, requireBothKnown: Boolean): Boolean {
+            if (kotlin.math.abs(kept.amount) != kotlin.math.abs(row.amount)) return false
+            if (!isSameOrEquivalentBank(kept.source ?: "HSBC", row.source ?: "HSBC")) return false
+            val preferredBank = resolvePreferredBankSource(kept.source, row.source)
+            val bothKnown = !isUnknownOrGenericMerchant(kept.merchant, preferredBank) &&
+                !isUnknownOrGenericMerchant(row.merchant, preferredBank)
+            if (requireBothKnown && !bothKnown) return false
+            if (!isMerchantDuplicate(kept.merchant, row.merchant, preferredBank)) return false
+
+            val involvesPremier = (kept.source?.contains("premier", ignoreCase = true) == true) ||
+                (row.source?.contains("premier", ignoreCase = true) == true) ||
+                (kept.note?.contains("premier", ignoreCase = true) == true) ||
+                (row.note?.contains("premier", ignoreCase = true) == true)
+
+            val windowMillis = if (bothKnown) 600_000L else if (involvesPremier) 300_000L else 180_000L
+            return kotlin.math.abs(kept.timestamp - row.timestamp) <= windowMillis
+        }
+
+        for (row in allRows) {
+            val match = keptRows.lastOrNull { kept -> isCandidateMatch(kept, row, requireBothKnown = true) }
+                ?: keptRows.lastOrNull { kept -> isCandidateMatch(kept, row, requireBothKnown = false) }
+
+            if (match != null) {
+                val preferredBank = resolvePreferredBankSource(match.source, row.source)
+                val targetAccountId = if (preferredBank.equals("HSBC", ignoreCase = true) && hsbcAccountId != null) {
+                    hsbcAccountId
+                } else {
+                    match.accountId
+                }
+                val enrichedMerchant = if (isUnknownOrGenericMerchant(match.merchant, preferredBank) &&
+                    !isUnknownOrGenericMerchant(row.merchant, preferredBank)) {
+                    row.merchant
+                } else if (isUnknownOrGenericMerchant(match.merchant, preferredBank)) {
+                    null
+                } else {
+                    match.merchant
+                }
+                val matchCatIsDefault = match.category.isNullOrBlank() || match.category == "OTHER_EXPENSE" || match.category == "OTHER_INCOME"
+                val rowCatIsSpecific = !row.category.isNullOrBlank() && row.category != "OTHER_EXPENSE" && row.category != "OTHER_INCOME"
+                val useRowCategoryAndType = matchCatIsDefault && rowCatIsSpecific
+
+                val enrichedCategory = if (useRowCategoryAndType) row.category else match.category
+                val enrichedType = if (useRowCategoryAndType) {
+                    row.type
+                } else if (match.type == "EXPENSE" && row.type == "INCOME" && (row.note?.contains("money in", ignoreCase = true) == true)) {
+                    "INCOME"
+                } else {
+                    match.type
+                }
+                val absAmt = kotlin.math.abs(match.amount)
+                val enrichedAmount = if (enrichedType == "INCOME") absAmt else -absAmt
+
+                val rawPreferredNote = when {
+                    match.note.isNullOrBlank() && !row.note.isNullOrBlank() -> row.note
+                    match.note?.contains("Premier", ignoreCase = true) == true &&
+                        row.note?.contains("HSBC", ignoreCase = true) == true &&
+                        !isUnknownOrGenericMerchant(row.merchant, preferredBank) -> row.note
+                    else -> match.note
+                }
+                val enrichedNote = rawPreferredNote?.replace(
+                    Regex("(?i)^Captured from\\s+(?:HSBC\\s+)?Premier(?:\\s+Account|\\s+Bank)?"),
+                    "Captured from $preferredBank"
+                )
+
+                match.accountId = targetAccountId
+                match.source = preferredBank
+                match.merchant = enrichedMerchant
+                match.category = enrichedCategory
+                match.type = enrichedType
+                match.amount = enrichedAmount
+                match.note = enrichedNote
+
+                db.execSQL(
+                    "UPDATE transactions SET accountId = ?, source = ?, merchant = ?, category = ?, type = ?, amount = ?, note = ? WHERE id = ?",
+                    arrayOf(targetAccountId, preferredBank, enrichedMerchant, enrichedCategory, enrichedType, enrichedAmount, enrichedNote, match.id)
+                )
+                duplicateIdsToDelete.add(row.id)
+            } else {
+                if (isPremierOrHsbcBank(row.source) || row.note?.contains("Captured from Premier", ignoreCase = true) == true) {
+                    val targetAccountId = hsbcAccountId ?: row.accountId
+                    val cleanNote = row.note?.replace(
+                        Regex("(?i)^Captured from\\s+(?:HSBC\\s+)?Premier(?:\\s+Account|\\s+Bank)?"),
+                        "Captured from HSBC"
+                    )
+                    if (row.source != "HSBC" || row.accountId != targetAccountId || row.note != cleanNote) {
+                        row.source = "HSBC"
+                        row.accountId = targetAccountId
+                        row.note = cleanNote
+                        db.execSQL(
+                            "UPDATE transactions SET accountId = ?, source = 'HSBC', note = ? WHERE id = ?",
+                            arrayOf(targetAccountId, cleanNote, row.id)
+                        )
+                    }
+                }
+                keptRows.add(row)
+            }
+        }
+
+        if (duplicateIdsToDelete.isNotEmpty()) {
+            db.execSQL("DELETE FROM transactions WHERE id IN (${duplicateIdsToDelete.joinToString(",")})")
+        }
     } catch (e: Exception) {
-        android.util.Log.w("AppDatabase", "Clean Money In labels notice: ${e.message}")
+        android.util.Log.w("AppDatabase", "Clean Money In labels and deduplicate notice: ${e.message}")
     }
 }
 
@@ -392,12 +590,6 @@ abstract class AppDatabase : RoomDatabase() {
                         super.onOpen(db)
                         cleanupAndConsolidateAccounts(db)
                         cleanupAndRepairTransactions(db, context.applicationContext)
-                        db.execSQL(
-                            """
-                            INSERT OR IGNORE INTO categories(`key`, groupId, name, emoji, colorHex, type, isBuiltIn, isHidden)
-                            VALUES ('INTERNAL_TRANSFER', 6, 'Internal Transfer', '🔄', '#EDE9FE', 'TRANSFER', 1, 0)
-                            """.trimIndent()
-                        )
                     }
                 })
                 .build()

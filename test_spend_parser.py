@@ -16,7 +16,7 @@ I = re.IGNORECASE
 
 KNOWN_SOURCES = [
     "Chase", "Monzo", "Revolut", "Amex", "Barclays", "Apple Pay", "Google Pay", "Samsung Pay",
-    "Starling", "HSBC", "PayPal", "Santander", "NatWest", "Lloyds", "Halifax", "Nationwide",
+    "Starling", "HSBC Premier", "HSBC Advance", "HSBC", "PayPal", "Santander", "NatWest", "Lloyds", "Halifax", "Nationwide",
 ]
 
 BANK_PACKAGE_HINTS = [
@@ -38,10 +38,14 @@ SMS_PACKAGES = ["com.google.android.apps.messaging", "com.samsung.android.messag
 BANK_CONTENT_WORDS = [(re.compile(r"\b(?:%s)\b" % w, I), n) for w, n in [
     ("chase", "Chase"), ("monzo", "Monzo"), ("revolut", "Revolut"),
     ("amex|american express", "Amex"), ("barclays|barclaycard", "Barclays"),
-    ("starling", "Starling"), ("hsbc", "HSBC"), ("paypal", "PayPal"),
+    ("starling", "Starling"),
+    ("hsbc|hsbc premier|premier account|premier bank|(?<!at )(?<!to )premier(?!\\s+(?:inn|stores?|league|foods?|express|convenience|taxi))|hsbc advance|advance account", "HSBC"),
+    ("paypal", "PayPal"),
     ("santander", "Santander"), ("natwest", "NatWest"), ("lloyds", "Lloyds"),
     ("halifax", "Halifax"), ("nationwide", "Nationwide"),
 ]]
+PREMIER_SOURCE_WORDS = re.compile(r"^\s*(?:hsbc\s+)?(?:premier|advance)(?:\s+(?:account|bank|banking|alert|alerts|card))?\s*$", I)
+PIPE_PREMIER_SUFFIX = re.compile(r"\|\s*(?:hsbc\s+)?(?:premier|advance)(?:\s+(?:account|bank|banking))?\s*$", I)
 GOOGLE_PAY_WORDS = re.compile(r"\b(?:google pay|google wallet|gpay)\b", I)
 APPLE_PAY_WORDS = re.compile(r"\bapple pay\b", I)
 SAMSUNG_PAY_WORDS = re.compile(r"\bsamsung (?:pay|wallet)\b", I)
@@ -126,9 +130,13 @@ CATEGORY_RULES_IN = {
 
 def detect_source(pkg: str, content: str) -> str:
     pkg = pkg.lower()
+    if PREMIER_SOURCE_WORDS.match(pkg) or "premier" in pkg or "hsbc" in pkg:
+        return "HSBC"
     for hint, name in BANK_PACKAGE_HINTS:
         if hint in pkg:
             return name
+    if PREMIER_SOURCE_WORDS.match(content) or PIPE_PREMIER_SUFFIX.search(content):
+        return "HSBC"
     hits = [(m.start(), n) for r, n in BANK_CONTENT_WORDS for m in [r.search(content)] if m]
     if hits:
         return min(hits)[1]
@@ -144,6 +152,8 @@ def detect_source(pkg: str, content: str) -> str:
 def classify_package(pkg: str) -> str:
     if not pkg:
         return "TRUSTED"
+    if PREMIER_SOURCE_WORDS.match(pkg) or "premier" in pkg or pkg in ("credit card", "savings", "others", "card payment", "apple pay", "google pay", "samsung pay", "first direct"):
+        return "FINANCE"
     if any(h in pkg for h, _ in BANK_PACKAGE_HINTS) or any(h in pkg for h in WALLET_PACKAGE_HINTS) \
             or any(h in pkg for h in FINTECH_PACKAGE_HINTS):
         return "FINANCE"
@@ -175,6 +185,9 @@ ACTION_WORDS = {
 }
 
 
+PREM_ADV_LOWER = re.compile(r"^(?:hsbc\s+)?(?:premier|advance)(?:\s+(?:account|bank|uk))?$", I)
+
+
 def is_usable_name(c) -> bool:
     if c is None:
         return False
@@ -187,7 +200,7 @@ def is_usable_name(c) -> bool:
             low = low[len(s):].strip(" :-\t")
     if len(low) < 2:
         return False
-    if low in ACTION_WORDS:
+    if low in ACTION_WORDS or low in ("money in", "money out") or PREM_ADV_LOWER.match(low):
         return False
     words = set(re.findall(r"[a-z0-9]+", low))
     if words.intersection(ACTION_WORDS):
@@ -242,37 +255,44 @@ def categorize(text: str, tx_type: str = TYPE_OUT) -> str:
 
 
 def extract_merchant(tx_type, text, amount_end, title, source):
+    def is_real_merchant(m):
+        if not is_usable_name(m):
+            return False
+        low = m.strip().lower()
+        return low not in ("unknown", "unknown vendor")
+
     if tx_type == TYPE_IN:
         m = IN_SENT_YOU.search(text)
-        if m and is_usable_name(m.group(1)):
+        if m and is_real_merchant(m.group(1)):
             return m.group(1).strip(), False
         m = IN_PAID_YOU.search(text)
-        if m and is_usable_name(m.group(1)):
+        if m and is_real_merchant(m.group(1)):
             return m.group(1).strip(), False
         for m in IN_FROM.finditer(text):
-            if is_usable_name(m.group(1)):
+            if is_real_merchant(m.group(1)):
                 return m.group(1).strip(), False
     else:
         # Prefer merchant after amount ("£4.20 at Costa")
         tail = text[amount_end:] if 0 <= amount_end <= len(text) else ""
         for m in OUT_AT_TO.finditer(tail):
-            if is_usable_name(m.group(1)):
+            if is_real_merchant(m.group(1)):
                 return m.group(1).strip(), False
         m = OUT_DD.search(text)
-        if m and is_usable_name(m.group(1)):
+        if m and is_real_merchant(m.group(1)):
             return m.group(1).strip(), False
         for m in OUT_AT_TO.finditer(text):
-            if is_usable_name(m.group(1)):
+            if is_real_merchant(m.group(1)):
                 return m.group(1).strip(), False
         m = OUT_PAID_VENDOR.search(text)
-        if m and is_usable_name(m.group(1)):
+        if m and is_real_merchant(m.group(1)):
             return m.group(1).strip(), False
         m = OUT_VENDOR_AMOUNT.search(text)
-        if m and is_usable_name(m.group(1)):
+        if m and is_real_merchant(m.group(1)):
             return m.group(1).strip(), False
     t = (title or "").strip()
     if t and not GENERIC_TITLE.search(t) and find_first_money(t) is None \
-            and not any(r.search(t) for r, _ in BANK_CONTENT_WORDS) and is_usable_name(t):
+            and not PREMIER_SOURCE_WORDS.match(t) \
+            and not any(r.search(t) for r, _ in BANK_CONTENT_WORDS) and is_real_merchant(t):
         return t, False
     return "", True
 
@@ -357,17 +377,26 @@ def parse_spend(pkg: str, title, text):
             tx_type = TYPE_OUT
         elif STRONG_IN.search(content):
             tx_type = TYPE_IN
+        elif WEAK_OUT.search(pipe_segs[0]) and (
+            pipe_segs[1].strip().lower() in ("unknown", "unknown vendor", "card payment")
+            or categorize(pipe_segs[1], TYPE_OUT) != "General Spend"
+        ):
+            tx_type = TYPE_OUT
         else:
             tx_type = TYPE_IN
 
         seg2 = pipe_segs[2]
         detected = detect_source("", seg2)
         source = seg2.strip() if detected == "Card Payment" and seg2.strip() else (detected if detected != "Card Payment" else detect_source(pkg, content))
-        cleaned = clean_merchant(pipe_segs[1], source)
-        final_merchant = cleaned if cleaned else pipe_segs[1].strip()
+        raw_pipe_merchant = pipe_segs[1].strip()
+        is_generic_pipe_merchant = raw_pipe_merchant.lower() in (
+            "unknown", "unknown vendor", "card payment", "payment", "transaction", "money in", "money out", "hsbc", "premier", "chase"
+        )
+        cleaned = "" if is_generic_pipe_merchant else clean_merchant(raw_pipe_merchant, source)
+        final_merchant = "" if is_generic_pipe_merchant else (cleaned if cleaned else raw_pipe_merchant)
         direction = "INCOMING" if tx_type == TYPE_IN else "OUTGOING"
         return {"type": tx_type, "direction": direction, "source": source, "amount": amount, "currency": currency,
-                "merchant": final_merchant, "merchantIsFallback": False,
+                "merchant": final_merchant, "merchantIsFallback": is_generic_pipe_merchant,
                 "category": categorize("%s %s" % (final_merchant, content), tx_type)}
 
     if IGNORE.search(content) or PROMO.search(content):
@@ -440,6 +469,18 @@ class TestSpendParser(unittest.TestCase):
     def test_pipe_format_hsbc_money_out_counterpart(self):
         # Counterpart "Money Out" notification
         self.check(parse_spend(HSBC, "Money Out", "£15.50 transaction | Costa Coffee | HSBC ADVANCE"),
+                   TYPE_OUT, 15.5, "Costa Coffee", "Dining & Drinks", "HSBC")
+
+    def test_pipe_format_premier_and_hsbc_premier_resolve_to_hsbc(self):
+        self.check(parse_spend(HSBC, "Money Out", "£15.50 transaction | Costa Coffee | PREMIER"),
+                   TYPE_OUT, 15.5, "Costa Coffee", "Dining & Drinks", "HSBC")
+        self.check(parse_spend("", "Premier", "You spent £15.50 at Costa Coffee"),
+                   TYPE_OUT, 15.5, "Costa Coffee", "Dining & Drinks", "HSBC")
+        self.check(parse_spend("Premier", "Premier", "£25.00 card payment"),
+                   TYPE_OUT, 25.0, "", "General Spend", "HSBC")
+        self.check(parse_spend(HSBC, "HSBC", "£25.00 transaction | Unknown | PREMIER"),
+                   TYPE_OUT, 25.0, "", "General Spend", "HSBC")
+        self.check(parse_spend(HSBC, "", "£15.50 transaction | Costa Coffee | PREMIER"),
                    TYPE_OUT, 15.5, "Costa Coffee", "Dining & Drinks", "HSBC")
 
     def test_pipe_format_hsbc_money_out_groceries(self):

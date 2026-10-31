@@ -18,7 +18,9 @@ fun normalizeBankName(raw: String?, fallback: String = "Others"): String {
     val lower = trimmed.lowercase(Locale.ROOT)
     return when {
         lower == "chase" || lower == "chase bank" || lower == "chase uk" || lower.startsWith("chase ") || lower.endsWith(" chase") -> "Chase"
-        lower == "hsbc" || lower == "hsbc uk" || lower == "hsbc bank" || lower.startsWith("hsbc ") || lower.endsWith(" hsbc") -> "HSBC"
+        lower == "hsbc" || lower == "hsbc uk" || lower == "hsbc bank" || lower.startsWith("hsbc ") || lower.endsWith(" hsbc") ||
+            lower == "premier" || lower == "premier account" || lower == "premier bank" || lower.startsWith("premier ") || lower.endsWith(" premier") ||
+            lower == "advance" || lower == "advance account" || lower == "advance bank" -> "HSBC"
         lower == "monzo" || lower == "monzo bank" || lower.startsWith("monzo ") || lower.endsWith(" monzo") -> "Monzo"
         lower == "starling" || lower == "starling bank" || lower.startsWith("starling ") || lower.endsWith(" starling") -> "Starling"
         lower == "revolut" || lower == "revolut bank" || lower.startsWith("revolut ") || lower.endsWith(" revolut") -> "Revolut"
@@ -160,8 +162,9 @@ abstract class AccountDao {
         var deleted = 0
         for ((_, group) in grouped) {
             if (group.size > 1) {
-                val canonical = group.minByOrNull { it.id }!!
-                val canonicalName = normalizeBankName(canonical.name)
+                val canonicalName = normalizeBankName(group.first().name)
+                val canonical = group.firstOrNull { it.name.trim().equals(canonicalName, ignoreCase = true) }
+                    ?: group.minByOrNull { it.id }!!
                 if (canonical.name != canonicalName) {
                     update(canonical.copy(name = canonicalName))
                 }

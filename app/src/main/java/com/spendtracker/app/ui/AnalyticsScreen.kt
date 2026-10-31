@@ -325,13 +325,16 @@ private fun CategoryRow(share: CategoryShare) {
             Text(
                 share.category.label,
                 style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.weight(1f),
-                maxLines = 1
+                modifier = Modifier.weight(1f).padding(end = 8.dp),
+                maxLines = 1,
+                softWrap = false,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
             )
             Text(
                 "${formatMoney(share.amountMinor)} · ${"%.0f".format(share.percent)}%",
                 style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1
+                maxLines = 1,
+                softWrap = false
             )
         }
         LinearProgressIndicator(
