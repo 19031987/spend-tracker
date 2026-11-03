@@ -63,10 +63,25 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.8.7
-        name: "SpendTracker Release v1.8.7 (Premier/HSBC Deduplication, Transfer Removal & Alignment Fix)"
+        tag_name: v1.8.8
+        name: "SpendTracker Release v1.8.8 (Monthly Reset, Carry Over Salary & Full-Width Amount UI Fix)"
         body: |
-          ### SpendTracker v1.8.7 - Premier/HSBC Deduplication, Transfer Removal & Record Alignment Fix
+          ### SpendTracker v1.8.8 - Monthly Reset, Carry Over Salary & Full-Width Amount UI Fix
+          - 💰 **Full-Width Spending Amount Display (Fixes `34...` Truncation)**:
+            - Redesigned the Hero Cash Flow Card so the primary spending amount is given dedicated full width (`headlineLarge`, bold).
+            - Repositioned the status pill (`Saved: +...` / `Deficit: -...`) into the top header row alongside the month label.
+            - Eliminates horizontal squeeze and removes ellipsis truncation (`34...`), ensuring the full currency and amount are always clearly visible.
+          - 🔄 **Monthly Spending Reset**:
+            - Monthly spending (`monthSpent`) and income (`monthIncome`) now strictly aggregate transactions within the current calendar month.
+            - Spending automatically resets to zero on the 1st of every month for a clean monthly spend tracking cycle.
+          - 💼 **Carry Over Salary & Prior Savings**:
+            - Net savings and salary credits from prior months (`timestamp < startOfMonth`) carry over into available funds (`carriedOverSalary`).
+            - Total available net balance is calculated as `carriedOverSalary + monthIncome - monthSpent`, ensuring salary received in preceding months is preserved and not lost.
+            - Added an informative `Carried: +£...` breakdown tag on the home page when prior carryover exists.
+          - 🏦 **Synchronized Bank Accounts**:
+            - Bank source breakdown cards now track current month spending while preserving carried-over account balances.
+          - 🖥️ **Updated Simulator**:
+            - Synchronized `generate_simulator.py` and `simulator/index.html` with identical monthly reset and salary carryover metrics.
           - 🏦 **Premier & HSBC Duplicate Transaction Resolution**:
             - When a transaction with the same amount and same vendor (or an unknown vendor transaction with the same amount within the deduplication window) is reported across `Premier` and `HSBC`, it is detected as a duplicate and saved under `HSBC`.
             - Unknown vendor transactions with different amounts or different times are never treated as duplicates.

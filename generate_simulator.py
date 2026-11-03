@@ -2181,21 +2181,50 @@ html_content = '''<!DOCTYPE html>
         function renderTotals() {
             // Transfers and excludeFromSpending transactions are strictly excluded from spending!
             const nonTransferTxs = transactions.filter(t => !t.excludeFromSpending && t.type !== 'TRANSFER' && t.categoryId !== 'cat_transfer');
-            const expenses = nonTransferTxs
+
+            // Start of current month: spending resets every month, while salary & balance carry over
+            const now = new Date();
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+            const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+            const currentMonthName = monthNames[now.getMonth()];
+
+            const cashflowLabel = document.querySelector('.cashflow-label');
+            if (cashflowLabel) cashflowLabel.textContent = `${currentMonthName.toUpperCase()} CASH FLOW (MONTHLY RESET)`;
+
+            // Current month transactions (resets each month)
+            const currentMonthTxs = nonTransferTxs.filter(t => (t.timestamp || 0) >= startOfMonth);
+            const expenses = currentMonthTxs
                 .filter(t => t.type === 'EXPENSE')
                 .reduce((sum, t) => sum + t.amount, 0);
 
-            const income = nonTransferTxs
+            const income = currentMonthTxs
                 .filter(t => t.type === 'INCOME')
                 .reduce((sum, t) => sum + t.amount, 0);
 
-            const net = income - expenses;
+            // Carry over salary & savings from previous months
+            const priorTxs = nonTransferTxs.filter(t => (t.timestamp || 0) < startOfMonth);
+            const priorIncome = priorTxs.filter(t => t.type === 'INCOME').reduce((sum, t) => sum + t.amount, 0);
+            const priorExpenses = priorTxs.filter(t => t.type === 'EXPENSE').reduce((sum, t) => sum + t.amount, 0);
+            const carryOverSalary = priorIncome - priorExpenses;
+
+            // Total available net balance: carried over salary/funds + this month's income - this month's expenses
+            const net = carryOverSalary + income - expenses;
 
             document.getElementById('tvMoneyOutMonth').textContent = `-${activeCurrency}${expenses.toFixed(2)}`;
             document.getElementById('tvMoneyInMonth').textContent = `+${activeCurrency}${income.toFixed(2)}`;
 
             const netEl = document.getElementById('tvNetCashFlow');
             const statusEl = document.getElementById('cashflowStatusBadge');
+            const subtitleEl = document.getElementById('tvNetSubtitle');
+
+            if (subtitleEl) {
+                if (carryOverSalary !== 0) {
+                    subtitleEl.textContent = `Net available balance · Carried salary/funds: ${carryOverSalary >= 0 ? '+' : ''}${activeCurrency}${carryOverSalary.toFixed(2)}`;
+                } else {
+                    subtitleEl.textContent = `${currentMonthName} net cash balance`;
+                }
+            }
+
             if (net >= 0) {
                 netEl.textContent = `+${activeCurrency}${net.toFixed(2)}`;
                 netEl.style.color = 'var(--money-in-green)';
@@ -2211,24 +2240,26 @@ html_content = '''<!DOCTYPE html>
             }
 
             // Ratio bar
-            const spentPercent = income > 0 ? Math.min(100, Math.round((expenses / income) * 100)) : 100;
+            const spentPercent = income > 0 ? Math.min(100, Math.round((expenses / income) * 100)) : (expenses > 0 ? 100 : 0);
             document.getElementById('ratioBarFill').style.width = `${spentPercent}%`;
             document.getElementById('tvRatioText').textContent = `${spentPercent}% of income spent`;
             document.getElementById('tvSavingsText').textContent = `${Math.max(0, 100 - spentPercent)}% saved`;
 
-            // Bank Accounts (Chase & HSBC) breakdown
-            const chaseExpenses = nonTransferTxs
-                .filter(t => t.type === 'EXPENSE' && (t.source === 'Chase' || !t.source))
+            // Bank Accounts (Chase & HSBC) breakdown for current month with carryover
+            const chaseTxs = nonTransferTxs.filter(t => t.source === 'Chase' || !t.source);
+            const chaseExpenses = chaseTxs
+                .filter(t => (t.timestamp || 0) >= startOfMonth && t.type === 'EXPENSE')
                 .reduce((sum, t) => sum + t.amount, 0);
-            const chaseIncome = nonTransferTxs
-                .filter(t => t.type === 'INCOME' && (t.source === 'Chase' || !t.source))
+            const chaseIncome = chaseTxs
+                .filter(t => (t.timestamp || 0) >= startOfMonth && t.type === 'INCOME')
                 .reduce((sum, t) => sum + t.amount, 0);
 
-            const hsbcExpenses = nonTransferTxs
-                .filter(t => t.type === 'EXPENSE' && t.source === 'HSBC')
+            const hsbcTxs = nonTransferTxs.filter(t => t.source === 'HSBC');
+            const hsbcExpenses = hsbcTxs
+                .filter(t => (t.timestamp || 0) >= startOfMonth && t.type === 'EXPENSE')
                 .reduce((sum, t) => sum + t.amount, 0);
-            const hsbcIncome = nonTransferTxs
-                .filter(t => t.type === 'INCOME' && t.source === 'HSBC')
+            const hsbcIncome = hsbcTxs
+                .filter(t => (t.timestamp || 0) >= startOfMonth && t.type === 'INCOME')
                 .reduce((sum, t) => sum + t.amount, 0);
 
             const chaseSpentEl = document.getElementById('chaseSpentVal');

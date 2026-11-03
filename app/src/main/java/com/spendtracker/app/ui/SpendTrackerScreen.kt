@@ -390,9 +390,47 @@ private fun TransactionsFeed(
         transactions.filter { it.type != TransactionType.TRANSFER && it.categoryKey != "INTERNAL_TRANSFER" }
     }
     val nonTransferTxs = visibleTransactions.filter { !it.excludeFromSpending }
-    val totalSpent = nonTransferTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
-    val totalIncome = nonTransferTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
-    val netRemaining = totalIncome - totalSpent
+
+    // Start of Current Month: spending resets every month, while salary & balance carry over
+    val calNow = remember { java.util.Calendar.getInstance() }
+    val startOfMonth = remember {
+        java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.DAY_OF_MONTH, 1)
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+    val currentMonthName = remember {
+        java.text.SimpleDateFormat("MMMM", java.util.Locale.getDefault()).format(calNow.time)
+    }
+
+    // Monthly Reset: Current month spending and income
+    val currentMonthTxs = remember(nonTransferTxs, startOfMonth) {
+        nonTransferTxs.filter { it.timestamp >= startOfMonth }
+    }
+    val monthSpent = remember(currentMonthTxs) {
+        currentMonthTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
+    }
+    val monthIncome = remember(currentMonthTxs) {
+        currentMonthTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
+    }
+
+    // Carry Over Salary & Balance: unspent salary/funds from previous months
+    val priorTxs = remember(nonTransferTxs, startOfMonth) {
+        nonTransferTxs.filter { it.timestamp < startOfMonth }
+    }
+    val priorIncome = remember(priorTxs) {
+        priorTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
+    }
+    val priorSpent = remember(priorTxs) {
+        priorTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
+    }
+    val carriedOverSalary = priorIncome - priorSpent
+
+    // Total available net balance: carried salary/savings + this month's income - this month's spending
+    val netRemaining = carriedOverSalary + monthIncome - monthSpent
 
     val deduplicatedAccounts = remember(accounts) {
         accounts
@@ -425,7 +463,7 @@ private fun TransactionsFeed(
         contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Hero Cash Flow card
+        // Hero Cash Flow card (Monthly Spending resets each month, Salary & Balance carry over)
         item {
             Card(
                 modifier = Modifier
@@ -438,50 +476,32 @@ private fun TransactionsFeed(
             ) {
                 Column(
                     modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    // Top Row: Month Label & Saved/Available Pill (moved here so amount below has full width)
+                    val isPositive = netRemaining >= 0
+                    val pillBgColor = if (isPositive) Color(0xFFDCFCE7) else Color(0xFFFEE2E2)
+                    val pillTextColor = if (isPositive) Color(0xFF15803D) else Color(0xFFB91C1C)
+                    val pillLabel = if (isPositive) "Saved: +" else "Deficit: -"
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "Total Spending",
+                            text = "$currentMonthName Spending",
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = formatMoney(totalSpent),
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp)
-                        )
-
-                        // Remaining / Saved Pill
-                        val isPositive = netRemaining >= 0
-                        val pillBgColor = if (isPositive) Color(0xFFDCFCE7) else Color(0xFFFEE2E2)
-                        val pillTextColor = if (isPositive) Color(0xFF15803D) else Color(0xFFB91C1C)
-                        val pillLabel = if (isPositive) "Saved / Left: +" else "Deficit: -"
 
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = pillBgColor
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
@@ -501,6 +521,18 @@ private fun TransactionsFeed(
                         }
                     }
 
+                    // Main Amount Row: Dedicated full-width display so amount NEVER truncates into "34..."
+                    Text(
+                        text = formatMoney(monthSpent),
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Breakdown Row: Monthly In & Out + Carried Over Salary / Balance
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -509,7 +541,7 @@ private fun TransactionsFeed(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(15.dp))
                             Text(
-                                "Out: ${formatMoney(totalSpent)}",
+                                "Out: ${formatMoney(monthSpent)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
@@ -519,10 +551,20 @@ private fun TransactionsFeed(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(15.dp))
                             Text(
-                                "In: +${formatMoney(totalIncome)}",
+                                "In: +${formatMoney(monthIncome)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color(0xFF059669),
                                 fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                        if (carriedOverSalary != 0L) {
+                            Text(
+                                text = "Carried: ${if (carriedOverSalary > 0) "+" else ""}${formatMoney(carriedOverSalary)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Medium,
                                 maxLines = 1,
                                 softWrap = false
                             )
@@ -557,8 +599,13 @@ private fun TransactionsFeed(
                                 normalizeBankName(it.source).equals(cleanName, ignoreCase = true) ||
                                 normalizeBankName(it.accountName).equals(cleanName, ignoreCase = true)
                             }
-                            val accSpent = accTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
-                            val accIncome = accTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
+                            val accCurrentTxs = accTxs.filter { it.timestamp >= startOfMonth }
+                            val accSpent = accCurrentTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
+                            val accIncome = accCurrentTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
+                            val accPriorIncome = accTxs.filter { it.timestamp < startOfMonth && it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
+                            val accPriorSpent = accTxs.filter { it.timestamp < startOfMonth && it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
+                            val accCarriedOver = accPriorIncome - accPriorSpent
+                            val accRemaining = accCarriedOver + accIncome - accSpent
 
                             val (cardBgColor, badgeColor) = when (cleanName.lowercase(Locale.ROOT)) {
                                 "chase" -> Color(0xFF1E3A8A).copy(alpha = 0.08f) to Color(0xFF1D4ED8)
@@ -597,7 +644,6 @@ private fun TransactionsFeed(
                                         }
                                         Text(cleanName, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
-                                    val accRemaining = accIncome - accSpent
                                     val isAccPositive = accRemaining >= 0
                                     Text(
                                         "Out: ${formatMoney(accSpent)}",
@@ -605,8 +651,7 @@ private fun TransactionsFeed(
                                         fontWeight = FontWeight.Normal,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
-                                        softWrap = false,
-                                        overflow = TextOverflow.Ellipsis
+                                        softWrap = false
                                     )
                                     Text(
                                         "In: +${formatMoney(accIncome)}",
@@ -614,8 +659,7 @@ private fun TransactionsFeed(
                                         color = Color(0xFF059669),
                                         fontWeight = FontWeight.Medium,
                                         maxLines = 1,
-                                        softWrap = false,
-                                        overflow = TextOverflow.Ellipsis
+                                        softWrap = false
                                     )
                                     Text(
                                         text = "${if (isAccPositive) "Rem: +" else "Rem: -"}${formatMoney(kotlin.math.abs(accRemaining))}",
@@ -623,8 +667,7 @@ private fun TransactionsFeed(
                                         fontWeight = FontWeight.Bold,
                                         color = if (isAccPositive) Color(0xFF059669) else MaterialTheme.colorScheme.error,
                                         maxLines = 1,
-                                        softWrap = false,
-                                        overflow = TextOverflow.Ellipsis
+                                        softWrap = false
                                     )
                                 }
                             }
