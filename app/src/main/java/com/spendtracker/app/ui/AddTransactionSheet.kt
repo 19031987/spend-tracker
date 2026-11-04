@@ -19,10 +19,15 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import com.spendtracker.app.ui.components.AccountDropdownSelector
+import com.spendtracker.app.ui.util.CurrencyUtils
+import com.spendtracker.app.ui.util.DateUtils
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -39,8 +44,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import java.math.BigDecimal
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -159,21 +162,19 @@ fun AddTransactionSheet(
             // Day / Date Selector (Today, Yesterday, 2 Days Ago, Custom Date)
             val context = androidx.compose.ui.platform.LocalContext.current
             var customTimestamp by rememberSaveable { mutableStateOf<Long?>(null) }
-            val dateFormatter = remember { SimpleDateFormat("d MMM yyyy", Locale.getDefault()) }
 
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Date", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                Row(
+                LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     val days = listOf(0 to "Today", 1 to "Yesterday", 2 to "2 Days Ago")
-                    days.forEach { (offset, label) ->
+                    items(days) { (offset, label) ->
                         val isSelected = selectedDayOffset == offset && customTimestamp == null
                         Surface(
                             modifier = Modifier
-                                .weight(1f)
                                 .height(38.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .clickable {
@@ -184,66 +185,65 @@ fun AddTransactionSheet(
                             shape = RoundedCornerShape(10.dp)
                         ) {
                             Box(
-                                modifier = Modifier.padding(horizontal = 4.dp),
+                                modifier = Modifier.padding(horizontal = 12.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = label,
-                                    fontSize = 11.sp,
+                                    fontSize = 12.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
-                                    softWrap = false,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    softWrap = false
                                 )
                             }
                         }
                     }
 
                     // 4th option: Pick Date from Calendar
-                    val isCustomSelected = customTimestamp != null
-                    Surface(
-                        modifier = Modifier
-                            .weight(1.2f)
-                            .height(38.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                val cal = java.util.Calendar.getInstance()
-                                if (customTimestamp != null) {
-                                    cal.timeInMillis = customTimestamp!!
-                                }
-                                android.app.DatePickerDialog(
-                                    context,
-                                    { _, year, month, dayOfMonth ->
-                                        val selectedCal = java.util.Calendar.getInstance().apply {
-                                            set(java.util.Calendar.YEAR, year)
-                                            set(java.util.Calendar.MONTH, month)
-                                            set(java.util.Calendar.DAY_OF_MONTH, dayOfMonth)
-                                        }
-                                        customTimestamp = selectedCal.timeInMillis
-                                        selectedDayOffset = -1
-                                    },
-                                    cal.get(java.util.Calendar.YEAR),
-                                    cal.get(java.util.Calendar.MONTH),
-                                    cal.get(java.util.Calendar.DAY_OF_MONTH)
-                                ).show()
-                            },
-                        color = if (isCustomSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier.padding(horizontal = 4.dp),
-                            contentAlignment = Alignment.Center
+                    item {
+                        val isCustomSelected = customTimestamp != null
+                        Surface(
+                            modifier = Modifier
+                                .height(38.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    val cal = java.util.Calendar.getInstance()
+                                    if (customTimestamp != null) {
+                                        cal.timeInMillis = customTimestamp!!
+                                    }
+                                    android.app.DatePickerDialog(
+                                        context,
+                                        { _, year, month, dayOfMonth ->
+                                            val selectedCal = java.util.Calendar.getInstance().apply {
+                                                set(java.util.Calendar.YEAR, year)
+                                                set(java.util.Calendar.MONTH, month)
+                                                set(java.util.Calendar.DAY_OF_MONTH, dayOfMonth)
+                                            }
+                                            customTimestamp = selectedCal.timeInMillis
+                                            selectedDayOffset = -1
+                                        },
+                                        cal.get(java.util.Calendar.YEAR),
+                                        cal.get(java.util.Calendar.MONTH),
+                                        cal.get(java.util.Calendar.DAY_OF_MONTH)
+                                    ).show()
+                                },
+                            color = if (isCustomSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(10.dp)
                         ) {
-                            Text(
-                                text = if (customTimestamp != null) "📅 ${dateFormatter.format(Date(customTimestamp!!))}" else "📅 Pick Date",
-                                fontSize = 11.sp,
-                                fontWeight = if (isCustomSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isCustomSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
+                            Box(
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (customTimestamp != null) "📅 ${DateUtils.formatDateYear(customTimestamp!!)}" else "📅 Pick Date",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isCustomSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isCustomSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
                         }
                     }
                 }
@@ -319,11 +319,11 @@ fun AddTransactionSheet(
                 shape = RoundedCornerShape(12.dp)
             )
 
-            AccountPicker(
+            AccountDropdownSelector(
                 label = "Account",
                 accounts = deduplicatedAccounts,
                 selected = effectiveSource,
-                onSelected = { sourceId = it.id }
+                onAccountSelected = { sourceId = it.id }
             )
 
             // Category Picker Row with Uncategorized fallback pill (uniform 32dp icon box)
@@ -481,48 +481,5 @@ fun AddTransactionSheet(
     }
 }
 
-@Composable
-private fun AccountPicker(
-    label: String,
-    accounts: List<AccountEntity>,
-    selected: AccountEntity?,
-    onSelected: (AccountEntity) -> Unit
-) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    val uniqueAccounts = remember(accounts) {
-        accounts
-            .map { it.copy(name = normalizeBankName(it.name)) }
-            .distinctBy { it.name.lowercase(Locale.ROOT) }
-            .sortedBy { it.name }
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-        Box {
-            OutlinedButton(
-                onClick = { expanded = true },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text(selected?.name?.trim() ?: "Select account", maxLines = 1, modifier = Modifier.weight(1f))
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                uniqueAccounts.forEach { account ->
-                    DropdownMenuItem(
-                        text = { Text(account.name.trim()) },
-                        onClick = {
-                            onSelected(account)
-                            expanded = false
-                        }
-                    )
-                }
-            }
-        }
-    }
-}
-
 /** "12.34" or "12,34" to 1234. Returns null if invalid, <= 0, or has more than 2 decimals. */
-internal fun parseMinorUnits(input: String): Long? {
-    val value = input.trim().replace(',', '.').toBigDecimalOrNull() ?: return null
-    if (value.signum() <= 0 || value.stripTrailingZeros().scale() > 2) return null
-    return runCatching { value.multiply(BigDecimal(100)).longValueExact() }.getOrNull()
-}
+internal fun parseMinorUnits(input: String): Long? = CurrencyUtils.parseDecimalToMinor(input)

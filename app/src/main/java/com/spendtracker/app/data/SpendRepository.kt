@@ -487,6 +487,13 @@ class SpendRepository(
         return ExportFormatter.toCsv(rows)
     }
 
+    private data class SpendWindowTotals(
+        val curTotal: Long,
+        val prevTotal: Long,
+        val curRows: List<BucketTotal>,
+        val prevRows: List<BucketTotal>
+    )
+
     /** Windows are computed when the flow is collected, so each new collection gets a fresh "today". */
     fun observeAnalytics(period: Period): Flow<AnalyticsSnapshot> = flow {
         val today = LocalDate.now(clock)
@@ -495,22 +502,29 @@ class SpendRepository(
         val cur = currentWindow.toRange(clock.zone)
         val prev = previousWindow.toRange(clock.zone)
 
+        val windowTotalsFlow = combine(
+            transactionDao.observeTotalSpend(cur.start, cur.end),
+            transactionDao.observeTotalSpend(prev.start, prev.end),
+            bucketFlow(period, cur),
+            bucketFlow(period, prev)
+        ) { curTotal, prevTotal, curRows, prevRows ->
+            SpendWindowTotals(curTotal, prevTotal, curRows, prevRows)
+        }
+
         emitAll(
             combine(
-                transactionDao.observeTotalSpend(cur.start, cur.end),
-                transactionDao.observeTotalSpend(prev.start, prev.end),
-                bucketFlow(period, cur),
-                bucketFlow(period, prev),
-                transactionDao.observeCategoryTotals(cur.start, cur.end)
-            ) { curTotal, prevTotal, curRows, prevRows, cats ->
+                windowTotalsFlow,
+                transactionDao.observeCategoryTotals(cur.start, cur.end),
+                catalogDao.observeCategories()
+            ) { windowData, cats, categoryEntities ->
                 AnalyticsSnapshot(
                     period = period,
-                    currentTotal = curTotal,
-                    previousTotal = prevTotal,
+                    currentTotal = windowData.curTotal,
+                    previousTotal = windowData.prevTotal,
                     bars = ChartBucketing.build(
-                        currentWindow, previousWindow, curRows, prevRows, locale
+                        currentWindow, previousWindow, windowData.curRows, windowData.prevRows, locale
                     ),
-                    categories = toShares(cats, curTotal)
+                    categories = toShares(cats, windowData.curTotal, categoryEntities)
                 )
             }
         )
@@ -520,13 +534,31 @@ class SpendRepository(
         if (period == Period.YEAR) transactionDao.observeMonthlyTotals(range.start, range.end)
         else transactionDao.observeDailyTotals(range.start, range.end)
 
-    private fun toShares(rows: List<CategoryTotal>, total: Long): List<CategoryShare> {
+    internal fun toShares(
+        rows: List<CategoryTotal>,
+        total: Long,
+        categories: List<CategoryEntity> = emptyList()
+    ): List<CategoryShare> {
         if (total <= 0) return emptyList()
+        val catMap = categories.associateBy { it.key }
         return rows
-            .groupBy { TransactionCategory.fromName(it.category) }
-            .map { (category, group) ->
+            .groupBy { it.category }
+            .map { (catKey, group) ->
                 val amount = group.sumOf { it.total }
-                CategoryShare(category, amount, amount * 100f / total)
+                val catEntity = catMap[catKey]
+                val builtIn = TransactionCategory.fromName(catKey)
+                val categoryName = catEntity?.name
+                    ?: if (builtIn != TransactionCategory.OTHER_EXPENSE) builtIn.label
+                    else catKey.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
+                val emoji = catEntity?.emoji ?: ""
+                CategoryShare(
+                    category = builtIn,
+                    amountMinor = amount,
+                    percent = amount * 100f / total,
+                    categoryKey = catKey,
+                    categoryName = categoryName,
+                    categoryEmoji = emoji
+                )
             }
             .sortedByDescending { it.amountMinor }
     }

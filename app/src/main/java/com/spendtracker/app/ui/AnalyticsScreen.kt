@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -26,6 +27,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.text.font.FontWeight
+import com.spendtracker.app.ui.util.ColorUtils
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -37,18 +40,18 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spendtracker.app.domain.CategoryShare
 import com.spendtracker.app.domain.ChartBar
 import com.spendtracker.app.domain.Period
-import java.math.BigDecimal
-import java.text.NumberFormat
+import com.spendtracker.app.ui.components.BaselineBanner
+import com.spendtracker.app.ui.util.CurrencyUtils
 import kotlin.math.abs
 import kotlin.math.max
 
-fun formatMoney(minor: Long): String =
-    NumberFormat.getCurrencyInstance().format(BigDecimal.valueOf(minor).movePointLeft(2))
+fun formatMoney(minor: Long): String = CurrencyUtils.formatMinor(minor)
 
 @Composable
 fun AnalyticsScreen(
@@ -85,7 +88,8 @@ fun AnalyticsContent(
                     SegmentedButton(
                         selected = state.period == p,
                         onClick = { onPeriodSelected(p) },
-                        shape = SegmentedButtonDefaults.itemShape(index, periods.size)
+                        shape = SegmentedButtonDefaults.itemShape(index, periods.size),
+                        icon = {}
                     ) { Text(p.label) }
                 }
             }
@@ -106,6 +110,18 @@ fun AnalyticsContent(
             }
         }
 
+        if (state.insights.isNotEmpty()) {
+            item {
+                Text(
+                    "Spending Insights",
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+            items(state.insights) { insight ->
+                SpendingInsightCard(insight)
+            }
+        }
+
         item { Text("Top categories", style = MaterialTheme.typography.titleMedium) }
 
         if (state.categories.isEmpty() && !state.isLoading) {
@@ -117,7 +133,7 @@ fun AnalyticsContent(
                 )
             }
         } else {
-            items(state.categories, key = { it.category.name }) { CategoryRow(it) }
+            items(state.categories, key = { it.categoryKey }) { CategoryRow(it) }
         }
 
         state.error?.let { msg ->
@@ -133,7 +149,7 @@ private fun SummaryCard(state: AnalyticsUiState) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -145,7 +161,9 @@ private fun SummaryCard(state: AnalyticsUiState) {
                     Text(
                         formatMoney(state.currentTotalMinor),
                         style = MaterialTheme.typography.headlineMedium,
-                        maxLines = 1
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
                     )
                     if (!state.isInitialPeriod) {
                         Text(
@@ -164,25 +182,118 @@ private fun SummaryCard(state: AnalyticsUiState) {
                 DeltaBadge(state.deltaPercent, state.currentTotalMinor, state.isInitialPeriod)
             }
 
+            MicroKpiStrip(state)
+
             if (state.isInitialPeriod) {
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text("🌱", fontSize = 12.sp)
-                        Text(
-                            state.onboardingMessage,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                    }
-                }
+                BaselineBanner(message = state.onboardingMessage)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MicroKpiStrip(state: AnalyticsUiState) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        KpiPill(
+            label = "Daily Avg",
+            value = CurrencyUtils.formatMinor(state.dailyAverageMinor),
+            modifier = Modifier.weight(1f)
+        )
+        KpiPill(
+            label = "Projected",
+            value = CurrencyUtils.formatMinor(state.projectedPeriodTotalMinor ?: state.currentTotalMinor),
+            modifier = Modifier.weight(1f)
+        )
+        val savingsColor = if (state.netSavingsMinor >= 0) {
+            ColorUtils.InflowGreen
+        } else {
+            ColorUtils.OutflowRed
+        }
+        KpiPill(
+            label = "Net Savings",
+            value = CurrencyUtils.formatSignedMinor(state.netSavingsMinor),
+            valueColor = savingsColor,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun KpiPill(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    valueColor: Color = MaterialTheme.colorScheme.onSurface
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = valueColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun SpendingInsightCard(insight: SpendingTrendInsight, modifier: Modifier = Modifier) {
+    ElevatedCard(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                        CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(insight.emoji, fontSize = 20.sp)
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = insight.title,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = insight.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -306,9 +417,10 @@ fun SpendBarChart(bars: List<ChartBar>, modifier: Modifier = Modifier) {
             )
 
             val layout = measurer.measure(bar.label, labelStyle, maxLines = 1)
+            val textX = (centerX - layout.size.width / 2f).coerceIn(0f, (size.width - layout.size.width).coerceAtLeast(0f))
             drawText(
                 layout,
-                topLeft = Offset(centerX - layout.size.width / 2f, chartHeight + 4.dp.toPx())
+                topLeft = Offset(textX, chartHeight + 4.dp.toPx())
             )
         }
     }
@@ -323,7 +435,7 @@ private fun CategoryRow(share: CategoryShare) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                share.category.label,
+                share.displayLabel,
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.weight(1f).padding(end = 8.dp),
                 maxLines = 1,

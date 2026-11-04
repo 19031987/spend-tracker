@@ -60,21 +60,15 @@ import com.spendtracker.app.data.CategoryEntity
 import com.spendtracker.app.data.CategoryGroupEntity
 import com.spendtracker.app.data.TransactionType
 
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.foundation.layout.fillMaxSize
+import com.spendtracker.app.ui.util.ColorUtils
 
 val DEFAULT_EMOJIS = listOf("🛒", "☕", "🍽️", "🛍️", "🎮", "🍿", "🏠", "⚡", "🚇", "⛽", "🚗", "💰", "🏋️", "📚", "💊", "✈️", "🏷️", "🔧")
 val DEFAULT_PASTEL_COLORS = listOf("#FED7AA", "#FBCFE8", "#DBEAFE", "#D1FAE5", "#DDD6FE", "#FDE68A", "#E2E8F0", "#CFFAFE", "#FCE7F3")
 
-fun parseColorHex(hex: String): Color {
-    return runCatching {
-        val clean = hex.removePrefix("#")
-        val parsed = clean.toLong(16)
-        if (clean.length == 6) Color(parsed or 0xFF000000L)
-        else Color(parsed)
-    }.getOrDefault(Color(0xFFFED7AA))
-}
+fun parseColorHex(hex: String): Color = ColorUtils.parseColorHex(hex)
 
 @Composable
 fun CategoryPickerDialog(

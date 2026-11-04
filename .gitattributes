@@ -1,0 +1,5 @@
+# Gradle wrapper scripts must keep LF endings and exec bits for Linux CI runners
+gradlew text eol=lf
+gradlew.bat text eol=crlf
+*.jar binary
+*.jks binary

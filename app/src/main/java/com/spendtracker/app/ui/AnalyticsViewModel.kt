@@ -2,25 +2,37 @@ package com.spendtracker.app.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.spendtracker.app.data.AccountEntity
 import com.spendtracker.app.data.SpendRepository
+import com.spendtracker.app.data.TransactionEntity
+import com.spendtracker.app.data.TransactionType
+import com.spendtracker.app.domain.AnalyticsSnapshot
 import com.spendtracker.app.domain.CategoryShare
 import com.spendtracker.app.domain.ChartBar
-import com.spendtracker.app.domain.NewTransaction
 import com.spendtracker.app.domain.Period
+import com.spendtracker.app.domain.PeriodCalculator
+import com.spendtracker.app.ui.util.CurrencyUtils
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
+import java.time.temporal.TemporalAdjusters
+import kotlin.math.abs
+
+data class SpendingTrendInsight(
+    val title: String,
+    val description: String,
+    val emoji: String
+)
 
 data class AnalyticsUiState(
     val period: Period = Period.WEEK,
@@ -29,8 +41,14 @@ data class AnalyticsUiState(
     val previousTotalMinor: Long = 0,
     /** Null when the previous period had no spend (percentage undefined) or during initial baseline period. */
     val deltaPercent: Double? = null,
+    val dailyAverageMinor: Long = 0,
+    val projectedPeriodTotalMinor: Long? = null,
+    val totalIncomeMinor: Long = 0,
+    val netSavingsMinor: Long = 0,
+    val savingsRatePercent: Double? = null,
     val bars: List<ChartBar> = emptyList(),
     val categories: List<CategoryShare> = emptyList(),
+    val insights: List<SpendingTrendInsight> = emptyList(),
     val error: String? = null,
     val isInitialPeriod: Boolean = false,
     val onboardingMessage: String = "Building your baseline: comparisons will appear after your first week/month"
@@ -64,14 +82,45 @@ class AnalyticsViewModel(private val repository: SpendRepository) : ViewModel() 
                     (snapshot.currentTotal - snapshot.previousTotal) * 100.0 / snapshot.previousTotal
                 } else null
 
+                val today = LocalDate.now()
+                val daysElapsed = calculateDaysElapsed(period, today)
+                val totalDays = calculateTotalDaysInPeriod(period, today)
+                val dailyAverage = if (daysElapsed > 0) snapshot.currentTotal / daysElapsed else 0L
+                val projectedTotal = dailyAverage * totalDays
+
+                val firstDayOfWeek = DayOfWeek.MONDAY
+                val currentWindow = PeriodCalculator.current(period, today, firstDayOfWeek)
+                val periodRange = currentWindow.toRange(ZoneId.systemDefault())
+
+                val currentTxs = transactions.filter {
+                    it.timestamp >= periodRange.start &&
+                    it.timestamp < periodRange.end &&
+                    !it.excludeFromSpending
+                }
+
+                val totalIncome = currentTxs
+                    .filter { it.type == TransactionType.INCOME }
+                    .sumOf { abs(it.amount) }
+
+                val netSavings = totalIncome - snapshot.currentTotal
+                val savingsRate = if (totalIncome > 0) (netSavings * 100.0 / totalIncome) else null
+
+                val insights = generateInsights(period, delta, snapshot, currentTxs)
+
                 AnalyticsUiState(
                     period = period,
                     isLoading = false,
                     currentTotalMinor = snapshot.currentTotal,
                     previousTotalMinor = snapshot.previousTotal,
                     deltaPercent = delta,
+                    dailyAverageMinor = dailyAverage,
+                    projectedPeriodTotalMinor = projectedTotal,
+                    totalIncomeMinor = totalIncome,
+                    netSavingsMinor = netSavings,
+                    savingsRatePercent = savingsRate,
                     bars = snapshot.bars,
                     categories = snapshot.categories,
+                    insights = insights,
                     isInitialPeriod = isInitial
                 )
             }
@@ -91,202 +140,81 @@ class AnalyticsViewModel(private val repository: SpendRepository) : ViewModel() 
     fun onPeriodSelected(period: Period) {
         selectedPeriod.update { period }
     }
-}
 
-data class AddTransactionUiState(
-    val isSaving: Boolean = false,
-    val error: String? = null
-)
-
-class AddTransactionViewModel(private val repository: SpendRepository) : ViewModel() {
-
-    val accounts: StateFlow<List<AccountEntity>> = repository.observeAccounts()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val groups: StateFlow<List<com.spendtracker.app.data.CategoryGroupEntity>> = repository.observeGroups()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val categories: StateFlow<List<com.spendtracker.app.data.CategoryEntity>> = repository.observeCategories()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val rules: StateFlow<List<com.spendtracker.app.data.MerchantRuleEntity>> = repository.observeRules()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val history: StateFlow<List<com.spendtracker.app.domain.HistoryEntry>> = repository.observeHistory()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    private val _state = MutableStateFlow(AddTransactionUiState())
-    val state: StateFlow<AddTransactionUiState> = _state.asStateFlow()
-
-    fun evaluateCategory(merchant: String): com.spendtracker.app.domain.Classification {
-        if (merchant.isBlank()) return com.spendtracker.app.domain.Classification.Unknown
-        val domainRules = rules.value.mapNotNull { r ->
-            runCatching {
-                com.spendtracker.app.domain.MerchantRule(
-                    id = r.id,
-                    matchType = com.spendtracker.app.domain.MatchType.valueOf(r.matchType),
-                    pattern = r.pattern,
-                    categoryKey = r.categoryKey
-                )
-            }.getOrNull()
-        }
-        val validKeys = categories.value.filter { !it.isHidden }.map { it.key }.toSet()
-        return com.spendtracker.app.domain.CategorizationEngine.classify(
-            merchant = merchant,
-            rules = domainRules,
-            history = history.value,
-            validKeys = validKeys
-        )
-    }
-
-    fun createCategory(
-        name: String,
-        groupId: Long?,
-        newGroupName: String?,
-        emoji: String,
-        colorHex: String,
-        type: com.spendtracker.app.data.TransactionType,
-        ruleMerchant: String?,
-        onComplete: (com.spendtracker.app.data.CategoryEntity) -> Unit
-    ) {
-        viewModelScope.launch {
-            try {
-                repository.createCategoryWithRule(
-                    name = name,
-                    groupId = groupId,
-                    newGroupName = newGroupName,
-                    emoji = emoji,
-                    colorHex = colorHex,
-                    type = type,
-                    alwaysMatchMerchant = ruleMerchant
-                )
-                // Retrieve updated category
-                val updatedCats = repository.observeCategories()
-                // Wait briefly for insertion or synthesize CategoryEntity
-                val fallbackCat = com.spendtracker.app.data.CategoryEntity(
-                    key = "c_new",
-                    groupId = groupId ?: 1L,
-                    name = name,
-                    emoji = emoji,
-                    colorHex = colorHex,
-                    type = type,
-                    isBuiltIn = false,
-                    isHidden = false
-                )
-                onComplete(fallbackCat)
-            } catch (e: Exception) {
-                _state.value = AddTransactionUiState(error = "Could not create category")
+    companion object {
+        fun calculateDaysElapsed(period: Period, today: LocalDate = LocalDate.now()): Long = when (period) {
+            Period.WEEK -> {
+                val startOfWeek = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                (ChronoUnit.DAYS.between(startOfWeek, today) + 1).coerceIn(1, 7)
             }
+            Period.MONTH -> today.dayOfMonth.toLong()
+            Period.YEAR -> today.dayOfYear.toLong()
         }
-    }
 
-    fun submit(transaction: NewTransaction, onSuccess: () -> Unit) {
-        if (_state.value.isSaving) return
-        _state.value = AddTransactionUiState(isSaving = true)
-        viewModelScope.launch {
-            try {
-                repository.add(transaction)
-                _state.value = AddTransactionUiState()
-                onSuccess()
-            } catch (e: IllegalArgumentException) {
-                _state.value = AddTransactionUiState(error = e.message)
-            } catch (e: Exception) {
-                _state.value = AddTransactionUiState(error = "Could not save transaction")
-            }
+        fun calculateTotalDaysInPeriod(period: Period, today: LocalDate = LocalDate.now()): Long = when (period) {
+            Period.WEEK -> 7L
+            Period.MONTH -> today.lengthOfMonth().toLong()
+            Period.YEAR -> today.lengthOfYear().toLong()
         }
-    }
 
-    fun clearError() {
-        _state.update { it.copy(error = null) }
-    }
-}
+        fun generateInsights(
+            period: Period,
+            deltaPercent: Double?,
+            snapshot: AnalyticsSnapshot,
+            currentTxs: List<TransactionEntity>
+        ): List<SpendingTrendInsight> {
+            val insights = mutableListOf<SpendingTrendInsight>()
+            if (snapshot.currentTotal <= 0) return insights
 
-class TransactionsViewModel(private val repository: SpendRepository) : ViewModel() {
-    val accounts: StateFlow<List<AccountEntity>> = repository.observeAccounts()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val groups: StateFlow<List<com.spendtracker.app.data.CategoryGroupEntity>> = repository.observeGroups()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val categories: StateFlow<List<com.spendtracker.app.data.CategoryEntity>> = repository.observeCategories()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val transactions: StateFlow<List<com.spendtracker.app.domain.TransactionItem>> = repository.observeTransactionItems()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    fun updateTransaction(
-        id: Long,
-        type: com.spendtracker.app.data.TransactionType,
-        accountId: Long,
-        destinationAccountId: Long?,
-        amountMinor: Long,
-        categoryKey: String?,
-        merchant: String?,
-        note: String?,
-        excludeFromSpending: Boolean,
-        ruleMerchant: String? = null,
-        onSuccess: () -> Unit
-    ) {
-        viewModelScope.launch {
-            try {
-                repository.updateTransaction(
-                    id = id,
-                    type = type,
-                    accountId = accountId,
-                    destinationAccountId = destinationAccountId,
-                    amountMinor = amountMinor,
-                    categoryKey = categoryKey,
-                    merchant = merchant,
-                    note = note,
-                    excludeFromSpending = excludeFromSpending
-                )
-                if (!ruleMerchant.isNullOrBlank() && !categoryKey.isNullOrBlank()) {
-                    repository.addRule("EXACT", ruleMerchant.trim(), categoryKey)
+            // 1. Pacing Insight
+            if (deltaPercent != null) {
+                val pacingText = if (deltaPercent > 5.0) {
+                    "Spending is running %.1f%% above previous %s.".format(deltaPercent, period.label.lowercase())
+                } else if (deltaPercent < -5.0) {
+                    "Spending is %.1f%% lower than previous %s. Great pacing!".format(abs(deltaPercent), period.label.lowercase())
+                } else {
+                    "Spending is on par with previous %s.".format(period.label.lowercase())
                 }
-                onSuccess()
-            } catch (e: Exception) {
-                // handle error
+                val emoji = if (deltaPercent > 5.0) "⚠️" else "✨"
+                insights.add(SpendingTrendInsight("Pacing & Run-Rate", pacingText, emoji))
             }
-        }
-    }
 
-    fun quickSetCategory(
-        id: Long,
-        categoryKey: String,
-        ruleMerchant: String? = null
-    ) {
-        viewModelScope.launch {
-            try {
-                val current = transactions.value.firstOrNull { it.id == id } ?: return@launch
-                repository.updateTransaction(
-                    id = id,
-                    type = current.type,
-                    accountId = current.accountId,
-                    destinationAccountId = current.destinationAccountId,
-                    amountMinor = current.amountMinor,
-                    categoryKey = categoryKey,
-                    merchant = current.merchant,
-                    note = current.note,
-                    excludeFromSpending = current.excludeFromSpending || categoryKey == "INTERNAL_TRANSFER"
+            // 2. Top Merchant Insight
+            val expenseTxs = currentTxs.filter {
+                it.type == TransactionType.EXPENSE &&
+                !it.merchant.isNullOrBlank() &&
+                (it.category == null || it.category != "INTERNAL_TRANSFER")
+            }
+            val topMerchantGroup = expenseTxs.groupBy { it.merchant!!.trim() }
+                .maxByOrNull { (_, list) -> list.sumOf { abs(it.amount) } }
+
+            if (topMerchantGroup != null) {
+                val merchantAmount = topMerchantGroup.value.sumOf { abs(it.amount) }
+                val merchantPct = (merchantAmount * 100.0 / snapshot.currentTotal).toInt()
+                val formattedAmount = CurrencyUtils.formatMinor(merchantAmount)
+                insights.add(
+                    SpendingTrendInsight(
+                        title = "Top Merchant",
+                        description = "${topMerchantGroup.key} represents $merchantPct% of total spend ($formattedAmount).",
+                        emoji = "🏆"
+                    )
                 )
-                if (!ruleMerchant.isNullOrBlank()) {
-                    repository.addRule("EXACT", ruleMerchant.trim(), categoryKey)
-                }
-            } catch (e: Exception) {
-                // handle error
             }
-        }
-    }
 
-    fun deleteTransaction(id: Long, onSuccess: () -> Unit) {
-        viewModelScope.launch {
-            try {
-                repository.delete(id)
-                onSuccess()
-            } catch (e: Exception) {
-                // handle error
+            // 3. Peak Spend Point Insight
+            val peakBar = snapshot.bars.maxByOrNull { it.current }
+            if (peakBar != null && peakBar.current > 0) {
+                val formattedPeak = CurrencyUtils.formatMinor(peakBar.current)
+                insights.add(
+                    SpendingTrendInsight(
+                        title = "Peak Spend Day",
+                        description = "${peakBar.label} was your highest spend point with $formattedPeak.",
+                        emoji = "📅"
+                    )
+                )
             }
+
+            return insights
         }
     }
 }
-

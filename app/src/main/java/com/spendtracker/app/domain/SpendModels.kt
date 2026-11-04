@@ -51,8 +51,14 @@ data class ChartBar(val label: String, val current: Long, val previous: Long)
 data class CategoryShare(
     val category: TransactionCategory,
     val amountMinor: Long,
-    val percent: Float
-)
+    val percent: Float,
+    val categoryKey: String = category.name,
+    val categoryName: String = category.label,
+    val categoryEmoji: String = ""
+) {
+    val displayLabel: String
+        get() = if (categoryEmoji.isNotBlank()) "$categoryEmoji $categoryName" else categoryName
+}
 
 data class AnalyticsSnapshot(
     val period: Period,

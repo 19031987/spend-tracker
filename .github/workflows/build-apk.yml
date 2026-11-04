@@ -27,17 +27,28 @@ jobs:
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v3
       with:
-        gradle-version: '8.4'
         cache-disabled: true
 
     - name: Accept Android SDK Licenses
       run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
 
+    - name: Unit Tests (Release)
+      env:
+        ANDROID_HOME: /usr/local/lib/android/sdk
+      run: |
+        if ! ./gradlew :app:testReleaseUnitTest --no-daemon --stacktrace > test.log 2>&1; then
+          echo "=== UNIT TESTS FAILED ==="
+          grep -E "(e: |error:|FAILURE:|BUILD FAILED|FAILED)" test.log | head -n 30 | while read -r line; do
+            echo "::error::$line"
+          done
+          exit 1
+        fi
+
     - name: Build Signed APK & Play Store App Bundle (AAB)
       env:
         ANDROID_HOME: /usr/local/lib/android/sdk
       run: |
-        if ! gradle :app:assembleRelease :app:bundleRelease -x test --no-daemon --stacktrace > build.log 2>&1; then
+        if ! ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace > build.log 2>&1; then
           echo "=== GRADLE BUILD FAILED ==="
           grep -E "(e: |error:|FAILURE:|BUILD FAILED|Caused by:)" build.log | head -n 30 | while read -r line; do
             echo "::error::$line"
@@ -63,10 +74,25 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.8.8
-        name: "SpendTracker Release v1.8.8 (Monthly Reset, Carry Over Salary & Full-Width Amount UI Fix)"
+        tag_name: v1.9.0
+        name: "SpendTracker Release v1.9.0 (Personal Finance Analytics, Real Compare Insights & Clean Architecture)"
         body: |
-          ### SpendTracker v1.8.8 - Monthly Reset, Carry Over Salary & Full-Width Amount UI Fix
+          ### SpendTracker v1.9.0 - Personal Finance Analytics, Real Compare Insights & Clean Architecture
+          - 📊 **Real Interval Comparison (Compare Tab)**:
+            - "By Time" mode now aggregates genuine Room transactions instead of placeholder data: 7 day buckets (Mon–Sun) for weekly, 4 week buckets (Days 1–7, 8–14, 15–21, 22–end) for monthly, and 12 calendar-month buckets for yearly comparisons.
+            - Spending aggregation excludes non-spending rows (internal transfers and excluded transactions).
+          - 💡 **Personal Finance Analytics (Analytics Tab)**:
+            - New Micro-KPI strip: Daily Average run-rate, Projected period total, and Net Savings.
+            - Income tracking with net savings and savings rate (%) for the selected period.
+            - Automated Spending Insights: pacing vs previous period, top merchant concentration, and peak spend day.
+          - 🏷️ **Custom Category Preservation**: Analytics category shares now display user-defined custom category names and emoji instead of collapsing to "Other".
+          - 🧹 **Clean Architecture Refactor**:
+            - Extracted shared utilities (`CurrencyUtils`, `DateUtils`, `ColorUtils`) and reusable UI components (`StatusBadge`, `CategoryBadge`, `TransactionRow`, `AccountSelector`, `MetricCard`).
+            - Split bundled ViewModels into single-responsibility ViewModels (Transactions, AddTransaction, Comparison, Analytics, Settings).
+            - Removed 558 lines of obsolete unreferenced `activity_main.xml`.
+          - 🎨 **Cosmetic & Layout Fixes**: Hero card 2-tier layout preventing 'In' / 'Carried' collision, tab label truncation fix, canvas x-clamping, and scrollable settings tabs.
+          - ✅ **Testing & CI**: Comprehensive JVM unit tests (72+) covering parsers, categorization, period math, chart bucketing, currency utils, interval comparisons, and analytics calculations; CI now runs release unit tests and uses the Gradle wrapper.
+          - 🔄 All v1.8.8 fixes included (Monthly Reset, Carry Over Salary, Full-Width Amount UI, Premier/HSBC dedup, and more):
           - 💰 **Full-Width Spending Amount Display (Fixes `34...` Truncation)**:
             - Redesigned the Hero Cash Flow Card so the primary spending amount is given dedicated full width (`headlineLarge`, bold).
             - Repositioned the status pill (`Saved: +...` / `Deficit: -...`) into the top header row alongside the month label.

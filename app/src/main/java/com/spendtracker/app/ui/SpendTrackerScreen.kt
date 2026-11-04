@@ -74,9 +74,13 @@ import com.spendtracker.app.AppContainer
 import com.spendtracker.app.data.TransactionType
 import com.spendtracker.app.data.normalizeBankName
 import com.spendtracker.app.domain.TransactionItem
-import java.math.BigDecimal
-import java.text.NumberFormat
-import java.text.SimpleDateFormat
+import com.spendtracker.app.ui.components.DayGroup
+import com.spendtracker.app.ui.components.StatusPill
+import com.spendtracker.app.ui.components.TransactionRowItem
+import com.spendtracker.app.ui.components.groupTransactionsByDay
+import com.spendtracker.app.ui.util.ColorUtils
+import com.spendtracker.app.ui.util.CurrencyUtils
+import com.spendtracker.app.ui.util.DateUtils
 import java.util.Date
 import java.util.Locale
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -228,7 +232,8 @@ fun SpendTrackerScreen(container: AppContainer) {
                     SegmentedButton(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
-                        shape = SegmentedButtonDefaults.itemShape(index, tabs.size)
+                        shape = SegmentedButtonDefaults.itemShape(index, tabs.size),
+                        icon = {}
                     ) {
                         Text(
                             tabTitle,
@@ -247,7 +252,7 @@ fun SpendTrackerScreen(container: AppContainer) {
                     // Transactions Screen
                     TransactionsFeed(
                         transactions = transactionsList,
-                        accounts = accounts,
+                        accounts = deduplicatedAccounts,
                         filterType = filterType,
                         onFilterChange = { filterType = it },
                         onTransactionClick = { editingTransaction = it },
@@ -392,19 +397,8 @@ private fun TransactionsFeed(
     val nonTransferTxs = visibleTransactions.filter { !it.excludeFromSpending }
 
     // Start of Current Month: spending resets every month, while salary & balance carry over
-    val calNow = remember { java.util.Calendar.getInstance() }
-    val startOfMonth = remember {
-        java.util.Calendar.getInstance().apply {
-            set(java.util.Calendar.DAY_OF_MONTH, 1)
-            set(java.util.Calendar.HOUR_OF_DAY, 0)
-            set(java.util.Calendar.MINUTE, 0)
-            set(java.util.Calendar.SECOND, 0)
-            set(java.util.Calendar.MILLISECOND, 0)
-        }.timeInMillis
-    }
-    val currentMonthName = remember {
-        java.text.SimpleDateFormat("MMMM", java.util.Locale.getDefault()).format(calNow.time)
-    }
+    val startOfMonth = remember { DateUtils.getStartOfMonthTimestamp() }
+    val currentMonthName = remember { DateUtils.formatCurrentMonthName() }
 
     // Monthly Reset: Current month spending and income
     val currentMonthTxs = remember(nonTransferTxs, startOfMonth) {
@@ -432,16 +426,7 @@ private fun TransactionsFeed(
     // Total available net balance: carried salary/savings + this month's income - this month's spending
     val netRemaining = carriedOverSalary + monthIncome - monthSpent
 
-    val deduplicatedAccounts = remember(accounts) {
-        accounts
-            .map { it.copy(name = normalizeBankName(it.name)) }
-            .filter {
-                val lower = it.name.lowercase(Locale.ROOT)
-                lower != "others" && lower != "messages" && lower != "savings" && lower != "messaging"
-            }
-            .distinctBy { it.name.lowercase(Locale.ROOT) }
-            .sortedBy { it.name }
-    }
+    val deduplicatedAccounts = accounts
 
     val filtered = when {
         filterType == "EXPENSE" -> visibleTransactions.filter { it.type == TransactionType.EXPENSE && !it.excludeFromSpending }
@@ -480,9 +465,6 @@ private fun TransactionsFeed(
                 ) {
                     // Top Row: Month Label & Saved/Available Pill (moved here so amount below has full width)
                     val isPositive = netRemaining >= 0
-                    val pillBgColor = if (isPositive) Color(0xFFDCFCE7) else Color(0xFFFEE2E2)
-                    val pillTextColor = if (isPositive) Color(0xFF15803D) else Color(0xFFB91C1C)
-                    val pillLabel = if (isPositive) "Saved: +" else "Deficit: -"
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -496,34 +478,15 @@ private fun TransactionsFeed(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = pillBgColor
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(
-                                    text = if (isPositive) "💰" else "⚠️",
-                                    fontSize = 12.sp
-                                )
-                                Text(
-                                    text = "$pillLabel${formatMoney(kotlin.math.abs(netRemaining))}",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = pillTextColor,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
-                        }
+                        StatusPill(
+                            isPositive = isPositive,
+                            amountMinor = kotlin.math.abs(netRemaining)
+                        )
                     }
 
                     // Main Amount Row: Dedicated full-width display so amount NEVER truncates into "34..."
                     Text(
-                        text = formatMoney(monthSpent),
+                        text = CurrencyUtils.formatMinor(monthSpent),
                         style = MaterialTheme.typography.headlineLarge,
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -532,16 +495,16 @@ private fun TransactionsFeed(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    // Breakdown Row: Monthly In & Out + Carried Over Salary / Balance
+                    // Breakdown Tier 1: Dedicated Outflow and Inflow with generous breathing room
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(15.dp))
+                            Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = ColorUtils.OutflowRed, modifier = Modifier.size(15.dp))
                             Text(
-                                "Out: ${formatMoney(monthSpent)}",
+                                "Out: ${CurrencyUtils.formatMinor(monthSpent)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
@@ -549,22 +512,35 @@ private fun TransactionsFeed(
                             )
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(15.dp))
+                            Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = ColorUtils.InflowGreen, modifier = Modifier.size(15.dp))
                             Text(
-                                "In: +${formatMoney(monthIncome)}",
+                                "In: +${CurrencyUtils.formatMinor(monthIncome)}",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF059669),
+                                color = ColorUtils.InflowGreen,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 softWrap = false
                             )
                         }
-                        if (carriedOverSalary != 0L) {
+                    }
+
+                    // Breakdown Tier 2: Dedicated Carried Over Salary / Balance row
+                    if (carriedOverSalary != 0L) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
-                                text = "Carried: ${if (carriedOverSalary > 0) "+" else ""}${formatMoney(carriedOverSalary)}",
+                                text = "Prior Balance Carried Over",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "${if (carriedOverSalary > 0) "+" else ""}${CurrencyUtils.formatMinor(carriedOverSalary)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.Medium,
+                                fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 softWrap = false
                             )
@@ -607,16 +583,7 @@ private fun TransactionsFeed(
                             val accCarriedOver = accPriorIncome - accPriorSpent
                             val accRemaining = accCarriedOver + accIncome - accSpent
 
-                            val (cardBgColor, badgeColor) = when (cleanName.lowercase(Locale.ROOT)) {
-                                "chase" -> Color(0xFF1E3A8A).copy(alpha = 0.08f) to Color(0xFF1D4ED8)
-                                "hsbc" -> Color(0xFFDC2626).copy(alpha = 0.08f) to Color(0xFFDC2626)
-                                "monzo" -> Color(0xFFF97316).copy(alpha = 0.08f) to Color(0xFFF97316)
-                                "starling" -> Color(0xFF0D9488).copy(alpha = 0.08f) to Color(0xFF0D9488)
-                                "revolut" -> Color(0xFF0284C7).copy(alpha = 0.08f) to Color(0xFF0284C7)
-                                "barclays" -> Color(0xFF0284C7).copy(alpha = 0.08f) to Color(0xFF0284C7)
-                                "santander" -> Color(0xFFDC2626).copy(alpha = 0.08f) to Color(0xFFDC2626)
-                                else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f) to MaterialTheme.colorScheme.primary
-                            }
+                            val (cardBgColor, badgeColor) = ColorUtils.getBankBrandColors(cleanName)
 
                             Card(
                                 modifier = Modifier
@@ -646,7 +613,7 @@ private fun TransactionsFeed(
                                     }
                                     val isAccPositive = accRemaining >= 0
                                     Text(
-                                        "Out: ${formatMoney(accSpent)}",
+                                        "Out: ${CurrencyUtils.formatMinor(accSpent)}",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Normal,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -654,20 +621,21 @@ private fun TransactionsFeed(
                                         softWrap = false
                                     )
                                     Text(
-                                        "In: +${formatMoney(accIncome)}",
+                                        "In: +${CurrencyUtils.formatMinor(accIncome)}",
                                         fontSize = 11.sp,
-                                        color = Color(0xFF059669),
+                                        color = ColorUtils.InflowGreen,
                                         fontWeight = FontWeight.Medium,
                                         maxLines = 1,
                                         softWrap = false
                                     )
                                     Text(
-                                        text = "${if (isAccPositive) "Rem: +" else "Rem: -"}${formatMoney(kotlin.math.abs(accRemaining))}",
+                                        text = "${if (isAccPositive) "Rem: +" else "Rem: -"}${CurrencyUtils.formatMinor(kotlin.math.abs(accRemaining))}",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isAccPositive) Color(0xFF059669) else MaterialTheme.colorScheme.error,
+                                        color = if (isAccPositive) ColorUtils.InflowGreen else MaterialTheme.colorScheme.error,
                                         maxLines = 1,
-                                        softWrap = false
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
@@ -748,7 +716,7 @@ private fun TransactionsFeed(
                         )
                         if (group.daySpendTotal > 0) {
                             Text(
-                                text = "Spent: ${formatMoney(group.daySpendTotal)}",
+                                text = "Spent: ${CurrencyUtils.formatMinor(group.daySpendTotal)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -762,287 +730,6 @@ private fun TransactionsFeed(
                         tx = tx,
                         onClick = { onTransactionClick(tx) },
                         onCategoryClick = { onCategoryPillClick(tx) }
-                    )
-                }
-            }
-        }
-    }
-}
-
-private data class DayGroup(
-    val dayKey: String,
-    val dayTitle: String,
-    val daySpendTotal: Long,
-    val items: List<TransactionItem>
-)
-
-private fun groupTransactionsByDay(transactions: List<TransactionItem>): List<DayGroup> {
-    if (transactions.isEmpty()) return emptyList()
-
-    val calNow = java.util.Calendar.getInstance()
-    val todayYear = calNow.get(java.util.Calendar.YEAR)
-    val todayDayOfYear = calNow.get(java.util.Calendar.DAY_OF_YEAR)
-
-    calNow.add(java.util.Calendar.DAY_OF_YEAR, -1)
-    val yestYear = calNow.get(java.util.Calendar.YEAR)
-    val yestDayOfYear = calNow.get(java.util.Calendar.DAY_OF_YEAR)
-
-    val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-    val headerDateFormat = SimpleDateFormat("d MMM", Locale.getDefault())
-    val fullDateFormat = SimpleDateFormat("EEEE, d MMM", Locale.getDefault())
-
-    val grouped = linkedMapOf<String, MutableList<TransactionItem>>()
-    for (tx in transactions) {
-        val key = if (tx.timestamp > 0) dateFormat.format(Date(tx.timestamp)) else "unknown"
-        grouped.getOrPut(key) { mutableListOf() }.add(tx)
-    }
-
-    return grouped.map { (key, items) ->
-        val firstTimestamp = items.firstOrNull()?.timestamp ?: 0L
-        val dayTitle = if (firstTimestamp > 0) {
-            val calTx = java.util.Calendar.getInstance().apply { timeInMillis = firstTimestamp }
-            val txYear = calTx.get(java.util.Calendar.YEAR)
-            val txDayOfYear = calTx.get(java.util.Calendar.DAY_OF_YEAR)
-            when {
-                txYear == todayYear && txDayOfYear == todayDayOfYear -> "Today · ${headerDateFormat.format(Date(firstTimestamp))}"
-                txYear == yestYear && txDayOfYear == yestDayOfYear -> "Yesterday · ${headerDateFormat.format(Date(firstTimestamp))}"
-                else -> fullDateFormat.format(Date(firstTimestamp))
-            }
-        } else {
-            "Other Transactions"
-        }
-
-        val daySpend = items
-            .filter { it.type == TransactionType.EXPENSE && !it.excludeFromSpending && it.categoryKey != "INTERNAL_TRANSFER" }
-            .sumOf { it.amountMinor }
-
-        DayGroup(
-            dayKey = key,
-            dayTitle = dayTitle,
-            daySpendTotal = daySpend,
-            items = items
-        )
-    }
-}
-
-@Composable
-private fun TransactionRowItem(
-    tx: TransactionItem,
-    onClick: () -> Unit,
-    onCategoryClick: () -> Unit
-) {
-    val isUnknownVendor = tx.merchant.isNullOrBlank() ||
-        tx.merchant.equals("Chase Payment", ignoreCase = true) ||
-        tx.merchant.equals("HSBC Payment", ignoreCase = true) ||
-        tx.merchant.equals("Money In", ignoreCase = true) ||
-        tx.merchant.equals("Money Out", ignoreCase = true) ||
-        tx.merchant.equals("Card Payment", ignoreCase = true) ||
-        tx.merchant.equals("Payment", ignoreCase = true) ||
-        tx.merchant.equals("Unknown", ignoreCase = true) ||
-        tx.merchant.equals("Unknown Vendor", ignoreCase = true) ||
-        tx.merchant.equals("Transaction", ignoreCase = true)
-
-    val timeStr = if (tx.timestamp > 0) {
-        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(tx.timestamp))
-    } else "—"
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Category Emoji Box (uniform 42dp)
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(parseColorHex(tx.categoryColorHex)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = tx.categoryEmoji,
-                    fontSize = 20.sp
-                )
-            }
-
-            // Transaction Details (fixed 2-row grid: 22dp + 6dp + 22dp = 50dp)
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                // Row 1: Merchant or Unknown Vendor (fixed 22dp height)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(22.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    if (isUnknownVendor) {
-                        Text(
-                            text = "Unknown Vendor",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.error,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        Surface(
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier
-                                .height(20.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable { onClick() }
-                        ) {
-                            Box(
-                                modifier = Modifier.padding(horizontal = 6.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    "✏️ Set",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
-                        }
-                    } else {
-                        Text(
-                            text = tx.merchant?.takeIf { it.isNotEmpty() } ?: "Transaction",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-
-                // Row 2: Source badge + Category pill (fixed 22dp single-line row, never wraps)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(22.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    // Source badge (Chase / HSBC / Monzo)
-                    Box(
-                        modifier = Modifier
-                            .height(20.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(
-                                when {
-                                    tx.source.contains("Chase", ignoreCase = true) -> Color(0xFFDBEAFE)
-                                    tx.source.contains("HSBC", ignoreCase = true) -> Color(0xFFFEE2E2)
-                                    else -> MaterialTheme.colorScheme.surfaceVariant
-                                }
-                            )
-                            .padding(horizontal = 6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = tx.source,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false,
-                            color = when {
-                                tx.source.contains("Chase", ignoreCase = true) -> Color(0xFF1E40AF)
-                                tx.source.contains("HSBC", ignoreCase = true) -> Color(0xFF991B1B)
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                        )
-                    }
-
-                    // Tappable Category pill
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier
-                            .height(20.dp)
-                            .weight(1f, fill = false)
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable { onCategoryClick() }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp)
-                        ) {
-                            Text(
-                                text = "${tx.categoryEmoji} ${tx.categoryName}",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                            Text(
-                                "▼",
-                                fontSize = 8.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Amount and Timestamp column (fixed 2-row grid: 22dp + 6dp + 22dp = 50dp, aligned to end)
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier.height(22.dp),
-                    contentAlignment = Alignment.CenterEnd
-                ) {
-                    Text(
-                        text = if (tx.type == TransactionType.INCOME) "+${formatMoney(tx.amountMinor)}" else "−${formatMoney(tx.amountMinor)}",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        softWrap = false,
-                        color = if (tx.type == TransactionType.INCOME) Color(0xFF059669) else Color(0xFFDC2626)
-                    )
-                }
-
-                Box(
-                    modifier = Modifier.height(22.dp),
-                    contentAlignment = Alignment.CenterEnd
-                ) {
-                    Text(
-                        text = timeStr,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        softWrap = false
                     )
                 }
             }

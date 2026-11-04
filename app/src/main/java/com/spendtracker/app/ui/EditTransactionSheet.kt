@@ -23,6 +23,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
+import com.spendtracker.app.ui.components.AccountDropdownSelector
+import com.spendtracker.app.ui.util.CurrencyUtils
+import com.spendtracker.app.ui.util.DateUtils
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -101,7 +104,7 @@ fun EditTransactionSheet(
     var merchantText by rememberSaveable { mutableStateOf(transaction.merchant ?: "") }
     var amountText by rememberSaveable {
         mutableStateOf(
-            BigDecimal.valueOf(transaction.amountMinor).movePointLeft(2).toPlainString()
+            CurrencyUtils.minorToDecimalString(transaction.amountMinor)
         )
     }
     var sourceId by rememberSaveable { mutableStateOf<Long?>(transaction.accountId) }
@@ -149,7 +152,7 @@ fun EditTransactionSheet(
             ) {
                 Column {
                     Text("Edit Transaction", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    val dateStr = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date(transaction.timestamp))
+                    val dateStr = DateUtils.formatDateTime(transaction.timestamp)
                     Text(dateStr, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 IconButton(onClick = { showDeleteConfirm = true }) {
@@ -210,11 +213,11 @@ fun EditTransactionSheet(
             )
 
             // Account Picker
-            AccountPicker(
+            AccountDropdownSelector(
                 label = "Account (Source)",
                 accounts = deduplicatedAccounts,
                 selected = effectiveSource,
-                onSelected = { sourceId = it.id }
+                onAccountSelected = { sourceId = it.id }
             )
 
             // Category Display / Picker (uniform 32dp icon box)
@@ -428,44 +431,5 @@ fun EditTransactionSheet(
                 showCategoryPicker = false
             }
         )
-    }
-}
-
-@Composable
-private fun AccountPicker(
-    label: String,
-    accounts: List<AccountEntity>,
-    selected: AccountEntity?,
-    onSelected: (AccountEntity) -> Unit
-) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    val uniqueAccounts = remember(accounts) {
-        accounts
-            .map { it.copy(name = normalizeBankName(it.name)) }
-            .distinctBy { it.name.lowercase(Locale.ROOT) }
-            .sortedBy { it.name }
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-        Box {
-            OutlinedButton(
-                onClick = { expanded = true },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text(selected?.name?.trim() ?: "Select account", maxLines = 1, modifier = Modifier.weight(1f))
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                uniqueAccounts.forEach { account ->
-                    DropdownMenuItem(
-                        text = { Text(account.name.trim()) },
-                        onClick = {
-                            onSelected(account)
-                            expanded = false
-                        }
-                    )
-                }
-            }
-        }
     }
 }

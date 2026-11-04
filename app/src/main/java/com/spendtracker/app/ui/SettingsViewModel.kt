@@ -24,10 +24,10 @@ data class SettingsUiState(
 )
 
 enum class SettingsTab(val label: String) {
-    CATEGORIES("Categories & Groups"),
-    RULES("Merchant Rules"),
+    CATEGORIES("Categories"),
+    RULES("Rules"),
     PREFERENCES("Preferences"),
-    DATA("Data Actions")
+    DATA("Data")
 }
 
 class SettingsViewModel(
