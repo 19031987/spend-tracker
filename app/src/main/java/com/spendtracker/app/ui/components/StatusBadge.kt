@@ -1,7 +1,6 @@
 package com.spendtracker.app.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -13,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.TrendingDown
 import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -27,13 +27,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.spendtracker.app.ui.util.ColorUtils
+import com.spendtracker.app.ui.theme.SpendTrackerTheme
 import com.spendtracker.app.ui.util.CurrencyUtils
 import java.util.Locale
 import kotlin.math.abs
 
 /**
- * Saved / Deficit status pill used in Hero and summary cards.
+ * Saved / Overspent status chip used in the hero summary.
  */
 @Composable
 fun StatusPill(
@@ -41,29 +41,31 @@ fun StatusPill(
     amountMinor: Long,
     modifier: Modifier = Modifier
 ) {
-    val pillBgColor = if (isPositive) ColorUtils.SurplusContainerLight else ColorUtils.DeficitContainerLight
-    val pillTextColor = if (isPositive) ColorUtils.SurplusTextLight else ColorUtils.DeficitTextLight
-    val pillLabel = if (isPositive) "Saved: +" else "Deficit: -"
+    val finance = SpendTrackerTheme.finance
+    val container = if (isPositive) finance.surplusContainer else finance.deficitContainer
+    val content = if (isPositive) finance.onSurplusContainer else finance.onDeficitContainer
+    val label = if (isPositive) "Left" else "Over"
 
     Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = pillBgColor,
+        shape = CircleShape,
+        color = container,
         modifier = modifier
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            modifier = Modifier.padding(start = 8.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text(
-                text = if (isPositive) "💰" else "⚠️",
-                fontSize = 12.sp
+            Icon(
+                imageVector = if (isPositive) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
+                contentDescription = null,
+                tint = content,
+                modifier = Modifier.size(16.dp)
             )
             Text(
-                text = "$pillLabel${CurrencyUtils.formatMinor(amountMinor)}",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = pillTextColor,
+                text = "$label ${CurrencyUtils.formatMinor(amountMinor)}",
+                style = MaterialTheme.typography.labelLarge,
+                color = content,
                 maxLines = 1,
                 softWrap = false
             )
@@ -135,18 +137,10 @@ fun ComparisonBadge(
     referenceContext: String = "",
     modifier: Modifier = Modifier
 ) {
-    val isDark = isSystemInDarkTheme()
+    val finance = SpendTrackerTheme.finance
     val isPositive = percentageChange >= 0.0
-    val containerColor = if (isPositive) {
-        if (isDark) ColorUtils.SurplusContainerDark else ColorUtils.SurplusContainerLight
-    } else {
-        MaterialTheme.colorScheme.errorContainer
-    }
-    val contentColor = if (isPositive) {
-        if (isDark) ColorUtils.SurplusTextDark else ColorUtils.SurplusTextLight
-    } else {
-        MaterialTheme.colorScheme.onErrorContainer
-    }
+    val containerColor = if (isPositive) finance.surplusContainer else finance.deficitContainer
+    val contentColor = if (isPositive) finance.onSurplusContainer else finance.onDeficitContainer
 
     Surface(
         color = containerColor,
@@ -194,24 +188,21 @@ fun BaselineBanner(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
-        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = MaterialTheme.shapes.medium,
         modifier = modifier.fillMaxWidth()
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(26.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("🌱", fontSize = 13.sp)
-            }
+            Icon(
+                imageVector = Icons.Outlined.Insights,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.size(20.dp)
+            )
             Text(
                 text = message,
                 style = MaterialTheme.typography.bodySmall,

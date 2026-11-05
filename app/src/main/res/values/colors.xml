@@ -4,7 +4,8 @@
     <color name="pure_white">#FFFFFF</color>
     <color name="pure_black">#000000</color>
 
-    <color name="primary">#000000</color>
+    <color name="primary">#3D5AA8</color>
+    <color name="on_primary">#FFFFFF</color>
     <color name="primary_dark">#000000</color>
     <color name="accent">#000000</color>
 
@@ -16,7 +17,7 @@
     <color name="card_subtle_white">#F9FAFB</color>
 
     <!-- Current active defaults (Crisp White Material Base with Black Contrast) -->
-    <color name="bg_app">#FFFFFF</color>
+    <color name="bg_app">#FAF9FE</color>
     <color name="card_bg">#FFFFFF</color>
     <color name="card_subtle">#F3F4F6</color>
     <color name="card_border">#E5E7EB</color>

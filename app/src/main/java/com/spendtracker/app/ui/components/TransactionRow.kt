@@ -1,32 +1,28 @@
 package com.spendtracker.app.ui.components
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.spendtracker.app.domain.TransactionItem
 import com.spendtracker.app.data.TransactionType
-import com.spendtracker.app.ui.util.ColorUtils
+import com.spendtracker.app.domain.TransactionItem
+import com.spendtracker.app.ui.theme.SpendTrackerTheme
 import com.spendtracker.app.ui.util.CurrencyUtils
 import com.spendtracker.app.ui.util.DateUtils
 import java.text.SimpleDateFormat
@@ -90,197 +86,131 @@ fun groupTransactionsByDay(transactions: List<TransactionItem>): List<DayGroup> 
     }
 }
 
+private val GENERIC_MERCHANTS = setOf(
+    "chase payment", "hsbc payment", "money in", "money out", "card payment",
+    "payment", "unknown", "unknown vendor", "transaction"
+)
+
 /**
- * Standard 2-row fixed transaction item row with category box, merchant, bank badge,
- * category pill, signed amount, and time.
+ * Material list-style transaction row. Rows of the same day are stacked into one
+ * rounded group: pass [isFirst]/[isLast] so only the outer corners are rounded
+ * and a hairline divider separates the rows inside the group.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TransactionRowItem(
     tx: TransactionItem,
     onClick: () -> Unit,
     onCategoryClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isFirst: Boolean = true,
+    isLast: Boolean = true
 ) {
     val isUnknownVendor = tx.merchant.isNullOrBlank() ||
-        tx.merchant.equals("Chase Payment", ignoreCase = true) ||
-        tx.merchant.equals("HSBC Payment", ignoreCase = true) ||
-        tx.merchant.equals("Money In", ignoreCase = true) ||
-        tx.merchant.equals("Money Out", ignoreCase = true) ||
-        tx.merchant.equals("Card Payment", ignoreCase = true) ||
-        tx.merchant.equals("Payment", ignoreCase = true) ||
-        tx.merchant.equals("Unknown", ignoreCase = true) ||
-        tx.merchant.equals("Unknown Vendor", ignoreCase = true) ||
-        tx.merchant.equals("Transaction", ignoreCase = true)
+        tx.merchant.trim().lowercase(Locale.ROOT) in GENERIC_MERCHANTS
 
-    val timeStr = if (tx.timestamp > 0) {
-        DateUtils.formatTime(tx.timestamp)
-    } else "—"
+    val timeStr = if (tx.timestamp > 0) DateUtils.formatTime(tx.timestamp) else "—"
+    val corner = 20.dp
+    val shape = RoundedCornerShape(
+        topStart = if (isFirst) corner else 4.dp,
+        topEnd = if (isFirst) corner else 4.dp,
+        bottomStart = if (isLast) corner else 4.dp,
+        bottomEnd = if (isLast) corner else 4.dp
+    )
 
-    Card(
+    Surface(
+        onClick = onClick,
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            .padding(bottom = if (isLast) 0.dp else 2.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Category Emoji Box (uniform 42dp)
-            CategoryEmojiBox(
-                emoji = tx.categoryEmoji,
-                colorHex = tx.categoryColorHex
-            )
+            CategoryEmojiBox(emoji = tx.categoryEmoji, colorHex = tx.categoryColorHex)
 
-            // Transaction Details (fixed 2-row grid: 22dp + 6dp + 22dp = 50dp)
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                // Row 1: Merchant or Unknown Vendor (fixed 22dp height)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(22.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    if (isUnknownVendor) {
+                if (isUnknownVendor) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.clickable(onClick = onClick)
+                    ) {
                         Text(
-                            text = "Unknown Vendor",
+                            text = "Unknown vendor",
                             style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.error,
                             maxLines = 1,
-                            softWrap = false,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false)
                         )
-                        Surface(
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier
-                                .height(20.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable { onClick() }
-                        ) {
-                            Box(
-                                modifier = Modifier.padding(horizontal = 6.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    "✏️ Set",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
-                        }
-                    } else {
-                        Text(
-                            text = tx.merchant?.takeIf { it.isNotEmpty() } ?: "Transaction",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.fillMaxWidth()
+                        Icon(
+                            Icons.Outlined.Edit,
+                            contentDescription = "Set vendor",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(16.dp)
                         )
                     }
+                } else {
+                    Text(
+                        text = tx.merchant?.takeIf { it.isNotEmpty() } ?: "Transaction",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
 
-                // Row 2: Source badge + Category pill (fixed 22dp single-line row, never wraps)
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(22.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Source badge (Chase / HSBC / Monzo)
-                    Box(
-                        modifier = Modifier
-                            .height(20.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(
-                                when {
-                                    tx.source.contains("Chase", ignoreCase = true) -> Color(0xFFDBEAFE)
-                                    tx.source.contains("HSBC", ignoreCase = true) -> Color(0xFFFEE2E2)
-                                    else -> MaterialTheme.colorScheme.surfaceVariant
-                                }
-                            )
-                            .padding(horizontal = 6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = tx.source,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false,
-                            color = when {
-                                tx.source.contains("Chase", ignoreCase = true) -> Color(0xFF1E40AF)
-                                tx.source.contains("HSBC", ignoreCase = true) -> Color(0xFF991B1B)
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                        )
-                    }
-
-                    // Tappable Category pill
                     CategoryPill(
                         categoryName = tx.categoryName,
                         emoji = tx.categoryEmoji,
                         modifier = Modifier.weight(1f, fill = false),
                         onClick = onCategoryClick
                     )
-                }
-            }
-
-            // Amount and Timestamp column (fixed 2-row grid: 22dp + 6dp + 22dp = 50dp, aligned to end)
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier.height(22.dp),
-                    contentAlignment = Alignment.CenterEnd
-                ) {
-                    val isIncome = tx.type == TransactionType.INCOME
                     Text(
-                        text = CurrencyUtils.formatSignedMinor(tx.amountMinor, isPositive = isIncome),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        softWrap = false,
-                        color = if (isIncome) ColorUtils.InflowGreen else ColorUtils.OutflowRed
-                    )
-                }
-
-                Box(
-                    modifier = Modifier.height(22.dp),
-                    contentAlignment = Alignment.CenterEnd
-                ) {
-                    Text(
-                        text = timeStr,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
+                        text = tx.source,
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         softWrap = false
                     )
                 }
+            }
+
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                val isIncome = tx.type == TransactionType.INCOME
+                val finance = SpendTrackerTheme.finance
+                Text(
+                    text = CurrencyUtils.formatSignedMinor(tx.amountMinor, isPositive = isIncome),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    softWrap = false,
+                    color = if (isIncome) finance.income else MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = timeStr,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false
+                )
             }
         }
     }

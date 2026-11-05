@@ -1,0 +1,71 @@
+package com.spendtracker.app.ui.theme
+
+import androidx.compose.ui.graphics.Color
+
+/*
+ * SpendTracker palette — a calm indigo primary, neutral cool greys and a soft
+ * evergreen tertiary used for "good" financial signals. Tones follow the
+ * Material 3 tonal-palette structure so every role has an accessible on-color.
+ */
+
+// ---- Light -----------------------------------------------------------------
+internal val LightPrimary = Color(0xFF3D5AA8)
+internal val LightOnPrimary = Color(0xFFFFFFFF)
+internal val LightPrimaryContainer = Color(0xFFDCE2FF)
+internal val LightOnPrimaryContainer = Color(0xFF001849)
+internal val LightSecondary = Color(0xFF585E72)
+internal val LightOnSecondary = Color(0xFFFFFFFF)
+internal val LightSecondaryContainer = Color(0xFFDDE2F9)
+internal val LightOnSecondaryContainer = Color(0xFF151B2C)
+internal val LightTertiary = Color(0xFF256A4F)
+internal val LightOnTertiary = Color(0xFFFFFFFF)
+internal val LightTertiaryContainer = Color(0xFFADF2CF)
+internal val LightOnTertiaryContainer = Color(0xFF002115)
+internal val LightError = Color(0xFFBA1A1A)
+internal val LightOnError = Color(0xFFFFFFFF)
+internal val LightErrorContainer = Color(0xFFFFDAD6)
+internal val LightOnErrorContainer = Color(0xFF410002)
+internal val LightBackground = Color(0xFFFAF9FE)
+internal val LightOnBackground = Color(0xFF1A1B21)
+internal val LightSurface = Color(0xFFFAF9FE)
+internal val LightOnSurface = Color(0xFF1A1B21)
+internal val LightSurfaceVariant = Color(0xFFE2E2EC)
+internal val LightOnSurfaceVariant = Color(0xFF45464F)
+internal val LightOutline = Color(0xFF767680)
+internal val LightOutlineVariant = Color(0xFFC6C6D0)
+internal val LightSurfaceContainerLowest = Color(0xFFFFFFFF)
+internal val LightSurfaceContainerLow = Color(0xFFF4F3F9)
+internal val LightSurfaceContainer = Color(0xFFEEEDF3)
+internal val LightSurfaceContainerHigh = Color(0xFFE8E7ED)
+internal val LightSurfaceContainerHighest = Color(0xFFE3E2E8)
+
+// ---- Dark ------------------------------------------------------------------
+internal val DarkPrimary = Color(0xFFB4C5FF)
+internal val DarkOnPrimary = Color(0xFF032A75)
+internal val DarkPrimaryContainer = Color(0xFF23428E)
+internal val DarkOnPrimaryContainer = Color(0xFFDCE2FF)
+internal val DarkSecondary = Color(0xFFC1C6DD)
+internal val DarkOnSecondary = Color(0xFF2A3042)
+internal val DarkSecondaryContainer = Color(0xFF414659)
+internal val DarkOnSecondaryContainer = Color(0xFFDDE2F9)
+internal val DarkTertiary = Color(0xFF91D5B4)
+internal val DarkOnTertiary = Color(0xFF003827)
+internal val DarkTertiaryContainer = Color(0xFF02513A)
+internal val DarkOnTertiaryContainer = Color(0xFFADF2CF)
+internal val DarkError = Color(0xFFFFB4AB)
+internal val DarkOnError = Color(0xFF690005)
+internal val DarkErrorContainer = Color(0xFF93000A)
+internal val DarkOnErrorContainer = Color(0xFFFFDAD6)
+internal val DarkBackground = Color(0xFF121318)
+internal val DarkOnBackground = Color(0xFFE3E2E9)
+internal val DarkSurface = Color(0xFF121318)
+internal val DarkOnSurface = Color(0xFFE3E2E9)
+internal val DarkSurfaceVariant = Color(0xFF45464F)
+internal val DarkOnSurfaceVariant = Color(0xFFC6C6D0)
+internal val DarkOutline = Color(0xFF90909A)
+internal val DarkOutlineVariant = Color(0xFF45464F)
+internal val DarkSurfaceContainerLowest = Color(0xFF0D0E13)
+internal val DarkSurfaceContainerLow = Color(0xFF1A1B21)
+internal val DarkSurfaceContainer = Color(0xFF1E1F25)
+internal val DarkSurfaceContainerHigh = Color(0xFF292A2F)
+internal val DarkSurfaceContainerHighest = Color(0xFF34343A)
