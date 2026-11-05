@@ -1,10 +1,11 @@
 <resources>
-    <style name="Theme.SpendTracker" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <!-- Window-level theme. Compose draws the UI via SpendTrackerTheme; this only
+         keeps the launch window and system bars consistent with it. -->
+    <style name="Theme.SpendTracker" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/primary</item>
-        <item name="colorPrimaryDark">@color/primary_dark</item>
-        <item name="colorAccent">@color/accent</item>
+        <item name="colorOnPrimary">@color/on_primary</item>
         <item name="android:windowBackground">@color/bg_app</item>
-        <item name="android:statusBarColor">@color/bg_app</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 </resources>

@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
@@ -28,7 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.text.font.FontWeight
-import com.spendtracker.app.ui.util.ColorUtils
+import com.spendtracker.app.ui.theme.SpendTrackerTheme
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -98,7 +99,7 @@ fun AnalyticsContent(
         item { SummaryCard(state) }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            Card(modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
                         "This ${state.period.label.lowercase()} vs previous",
@@ -144,7 +145,7 @@ fun AnalyticsContent(
 
 @Composable
 private fun SummaryCard(state: AnalyticsUiState) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -208,9 +209,9 @@ private fun MicroKpiStrip(state: AnalyticsUiState) {
             modifier = Modifier.weight(1f)
         )
         val savingsColor = if (state.netSavingsMinor >= 0) {
-            ColorUtils.InflowGreen
+            SpendTrackerTheme.finance.income
         } else {
-            ColorUtils.OutflowRed
+            SpendTrackerTheme.finance.expense
         }
         KpiPill(
             label = "Net Savings",
@@ -230,8 +231,8 @@ private fun KpiPill(
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surface
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
@@ -258,9 +259,10 @@ private fun KpiPill(
 
 @Composable
 private fun SpendingInsightCard(insight: SpendingTrendInsight, modifier: Modifier = Modifier) {
-    ElevatedCard(
+    Card(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp)
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
         Row(
             modifier = Modifier

@@ -51,9 +51,9 @@ fun BiometricLockScreen(
         ) {
             Card(
                 modifier = Modifier.fillMaxWidth(0.92f),
-                shape = RoundedCornerShape(24.dp),
+                shape = MaterialTheme.shapes.extraLarge,
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
                 )
             ) {
                 Column(
@@ -81,7 +81,7 @@ fun BiometricLockScreen(
                     Spacer(modifier = Modifier.height(20.dp))
 
                     Text(
-                        text = "SpendTracker Locked",
+                        text = "Spend Tracker is locked",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -112,10 +112,7 @@ fun BiometricLockScreen(
                     Button(
                         onClick = onAuthenticateClick,
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary
-                        )
+                        contentPadding = ButtonDefaults.ButtonWithIconContentPadding
                     ) {
                         Icon(
                             Icons.Default.Fingerprint,
@@ -124,8 +121,7 @@ fun BiometricLockScreen(
                         )
                         Spacer(modifier = Modifier.size(8.dp))
                         Text(
-                            "Unlock with Fingerprint",
-                            fontWeight = FontWeight.Bold
+                            "Unlock"
                         )
                     }
 
@@ -133,8 +129,7 @@ fun BiometricLockScreen(
                         Spacer(modifier = Modifier.height(10.dp))
                         OutlinedButton(
                             onClick = onBypassFallback,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp)
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Icon(
                                 Icons.Default.Lock,
@@ -142,7 +137,7 @@ fun BiometricLockScreen(
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.size(8.dp))
-                            Text("Use Device Credentials")
+                            Text("Use device PIN")
                         }
                     }
                 }

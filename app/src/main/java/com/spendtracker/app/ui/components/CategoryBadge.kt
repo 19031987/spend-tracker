@@ -8,7 +8,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -16,7 +20,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -25,33 +28,33 @@ import androidx.compose.ui.unit.sp
 import com.spendtracker.app.ui.util.ColorUtils
 
 /**
- * Uniform category emoji box with customizable size and rounded corners.
+ * Category avatar: the category emoji on a soft tint of its colour.
+ * Circular by default to read as a Material list-item leading avatar.
  */
 @Composable
 fun CategoryEmojiBox(
     emoji: String,
     colorHex: String?,
-    size: Dp = 42.dp,
+    size: Dp = 44.dp,
     emojiSize: TextUnit = 20.sp,
-    cornerRadius: Dp = 12.dp,
+    cornerRadius: Dp? = null,
     modifier: Modifier = Modifier
 ) {
+    val shape = cornerRadius?.let { RoundedCornerShape(it) } ?: CircleShape
+    val tint = ColorUtils.parseColorHex(colorHex ?: "#FED7AA")
     Box(
         modifier = modifier
             .size(size)
-            .clip(RoundedCornerShape(cornerRadius))
-            .background(ColorUtils.parseColorHex(colorHex ?: "#FED7AA")),
+            .clip(shape)
+            .background(tint.copy(alpha = 0.55f)),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = emoji,
-            fontSize = emojiSize
-        )
+        Text(text = emoji, fontSize = emojiSize)
     }
 }
 
 /**
- * Reusable category badge / pill with optional click handler and chevron.
+ * Compact, tappable category chip shown under a transaction's merchant name.
  */
 @Composable
 fun CategoryPill(
@@ -61,39 +64,35 @@ fun CategoryPill(
     showChevron: Boolean = true,
     onClick: (() -> Unit)? = null
 ) {
-    val clickableModifier = if (onClick != null) {
-        Modifier.clickable(onClick = onClick)
-    } else Modifier
+    val clickableModifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
 
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-        shape = RoundedCornerShape(6.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = CircleShape,
         modifier = modifier
-            .height(20.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .height(24.dp)
+            .clip(CircleShape)
             .then(clickableModifier)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 6.dp),
+            modifier = Modifier.padding(start = 8.dp, end = if (showChevron) 4.dp else 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp)
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             Text(
                 text = "$emoji $categoryName",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
                 softWrap = false,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
             )
             if (showChevron) {
-                Text(
-                    "▼",
-                    fontSize = 8.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    softWrap = false
+                Icon(
+                    Icons.Default.ArrowDropDown,
+                    contentDescription = "Change category",
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }

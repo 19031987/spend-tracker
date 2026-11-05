@@ -7,9 +7,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,6 +17,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spendtracker.app.data.UserPreferences
 import com.spendtracker.app.ui.BiometricLockScreen
 import com.spendtracker.app.ui.SpendTrackerScreen
+import com.spendtracker.app.ui.theme.SpendTrackerTheme
 
 class MainActivity : AppCompatActivity() {
     private val container by lazy { AppContainer(applicationContext) }
@@ -55,9 +53,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            MaterialTheme(
-                colorScheme = if (isDark) darkColorScheme() else lightColorScheme()
-            ) {
+            SpendTrackerTheme(darkTheme = isDark) {
                 if (isAppAccessible) {
                     SpendTrackerScreen(container)
                 } else {

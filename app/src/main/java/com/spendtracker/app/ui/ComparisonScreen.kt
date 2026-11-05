@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.TrendingDown
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -56,6 +58,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.spendtracker.app.ui.components.BaselineBanner
 import com.spendtracker.app.ui.components.ComparisonBadge
 import com.spendtracker.app.ui.util.ColorUtils
+import com.spendtracker.app.ui.theme.SpendTrackerTheme
 import com.spendtracker.app.ui.util.CurrencyUtils
 import java.util.Locale
 import kotlin.math.abs
@@ -276,8 +279,9 @@ fun SummaryComparisonCard(
     state: ComparisonUiState,
     modifier: Modifier = Modifier
 ) {
-    ElevatedCard(
-        shape = MaterialTheme.shapes.medium,
+    Card(
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
@@ -398,13 +402,13 @@ fun ComparisonBreakdownCard(
     modifier: Modifier = Modifier
 ) {
     OutlinedCard(
-        shape = MaterialTheme.shapes.medium,
+        shape = MaterialTheme.shapes.large,
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // Top Row: Unit Label & Monetary Values + Percentage Pill
@@ -532,12 +536,10 @@ private fun LegendIndicator(color: Color, label: String) {
 }
 
 @Composable
-private fun successContainerColor(): Color =
-    if (isSystemInDarkTheme()) ColorUtils.SurplusContainerDark else ColorUtils.SurplusContainerLight
+private fun successContainerColor(): Color = SpendTrackerTheme.finance.surplusContainer
 
 @Composable
-private fun successTextColor(): Color =
-    if (isSystemInDarkTheme()) ColorUtils.SurplusTextDark else ColorUtils.SurplusTextLight
+private fun successTextColor(): Color = SpendTrackerTheme.finance.onSurplusContainer
 
 private fun formatCurrency(amount: Double): String =
     CurrencyUtils.formatMajor(amount)

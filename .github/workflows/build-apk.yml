@@ -74,9 +74,16 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v1.9.0
-        name: "SpendTracker Release v1.9.0 (Personal Finance Analytics, Real Compare Insights & Clean Architecture)"
+        tag_name: v2.0.0
+        name: "SpendTracker Release v2.0.0 (Material 3 Redesign)"
         body: |
+          ### SpendTracker v2.0.0 - Material 3 Redesign
+          - 🎨 **New Material 3 theme**: custom indigo colour scheme with matching light & dark palettes, tuned type scale and rounded shape system; system bars follow the in-app theme choice.
+          - 🧭 **Bottom navigation bar** (Activity / Insights / Compare) replaces the emoji segmented tabs; Material top app bar that tints on scroll; floating "Add" action button.
+          - 💳 **Cleaner home screen**: tonal hero card with auto-fitting monthly spend, Money in / Money out tiles and carried-over balance; outlined account cards; filter chips with check marks; day-grouped transaction lists with rounded list groups.
+          - 🌗 Money colours (income, surplus, overspend) now respect the app's own light/dark setting instead of the system setting.
+          - Insights, Compare and lock screens restyled to the same card and shape system.
+
           ### SpendTracker v1.9.0 - Personal Finance Analytics, Real Compare Insights & Clean Architecture
           - 📊 **Real Interval Comparison (Compare Tab)**:
             - "By Time" mode now aggregates genuine Room transactions instead of placeholder data: 7 day buckets (Mon–Sun) for weekly, 4 week buckets (Days 1–7, 8–14, 15–21, 22–end) for monthly, and 12 calendar-month buckets for yearly comparisons.
