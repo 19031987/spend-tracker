@@ -101,7 +101,8 @@ class SpendRepository(
                 note = tx.note,
                 source = acc?.name ?: normSource,
                 timestamp = tx.timestamp,
-                excludeFromSpending = tx.excludeFromSpending || isTransfer
+                excludeFromSpending = tx.excludeFromSpending || isTransfer,
+                needsReview = tx.needsReview
             )
         }
 
@@ -130,7 +131,8 @@ class SpendRepository(
                     categoryKey = if (existingCatDefault && itemCatSpecific) item.categoryKey else existing.categoryKey,
                     categoryName = if (existingCatDefault && itemCatSpecific) item.categoryName else existing.categoryName,
                     categoryEmoji = if (existingCatDefault && itemCatSpecific) item.categoryEmoji else existing.categoryEmoji,
-                    categoryColorHex = if (existingCatDefault && itemCatSpecific) item.categoryColorHex else existing.categoryColorHex
+                    categoryColorHex = if (existingCatDefault && itemCatSpecific) item.categoryColorHex else existing.categoryColorHex,
+                    needsReview = existing.needsReview || item.needsReview
                 )
             } else {
                 deduped.add(item)
@@ -275,6 +277,14 @@ class SpendRepository(
 
     suspend fun delete(transactionId: Long) {
         transactionDao.deleteWithPair(transactionId)
+    }
+
+    suspend fun setNeedsReview(id: Long, value: Boolean) {
+        transactionDao.setNeedsReview(id, value)
+    }
+
+    suspend fun markAllReviewed() {
+        transactionDao.markAllReviewed()
     }
 
     suspend fun addRule(matchType: String, pattern: String, categoryKey: String): Long {

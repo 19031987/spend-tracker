@@ -53,7 +53,7 @@ class TransactionsViewModel(private val repository: SpendRepository) : ViewModel
                     excludeFromSpending = excludeFromSpending
                 )
                 if (!ruleMerchant.isNullOrBlank() && !categoryKey.isNullOrBlank()) {
-                    repository.addRule("EXACT", ruleMerchant.trim(), categoryKey)
+                    repository.addRule("EQUALS", ruleMerchant.trim(), categoryKey)
                 }
                 onSuccess()
             } catch (e: Exception) {
@@ -82,7 +82,7 @@ class TransactionsViewModel(private val repository: SpendRepository) : ViewModel
                     excludeFromSpending = current.excludeFromSpending || categoryKey == "INTERNAL_TRANSFER"
                 )
                 if (!ruleMerchant.isNullOrBlank()) {
-                    repository.addRule("EXACT", ruleMerchant.trim(), categoryKey)
+                    repository.addRule("EQUALS", ruleMerchant.trim(), categoryKey)
                 }
             } catch (e: Exception) {
                 // handle error

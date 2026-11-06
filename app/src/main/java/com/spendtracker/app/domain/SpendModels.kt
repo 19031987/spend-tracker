@@ -108,7 +108,8 @@ data class TransactionItem(
     val note: String? = null,
     val source: String = "Chase",
     val timestamp: Long = 0L,
-    val excludeFromSpending: Boolean = false
+    val excludeFromSpending: Boolean = false,
+    val needsReview: Boolean = false
 )
 
 object ChartBucketing {

@@ -92,6 +92,12 @@ abstract class TransactionDao {
     @androidx.room.Update
     abstract suspend fun update(transaction: TransactionEntity)
 
+    @Query("UPDATE transactions SET needsReview = :value WHERE id = :id")
+    abstract suspend fun setNeedsReview(id: Long, value: Boolean)
+
+    @Query("UPDATE transactions SET needsReview = 0 WHERE needsReview = 1")
+    abstract suspend fun markAllReviewed(): Int
+
     @Query("SELECT * FROM transactions WHERE id = :id")
     abstract suspend fun getById(id: Long): TransactionEntity?
 
