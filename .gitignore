@@ -21,3 +21,8 @@ release-output/
 spending-tracker-apk/
 *.apk
 *.aab
+
+# Signing material must never be committed
+*.jks
+*.keystore
+keystore.properties
