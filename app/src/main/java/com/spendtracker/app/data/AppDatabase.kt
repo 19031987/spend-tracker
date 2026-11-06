@@ -89,6 +89,67 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE transactions ADD COLUMN needsReview INTEGER NOT NULL DEFAULT 0")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `budgets` (
+                `categoryKey` TEXT NOT NULL,
+                `amountMinor` INTEGER NOT NULL,
+                `rollover` INTEGER NOT NULL,
+                `updatedAt` INTEGER NOT NULL,
+                PRIMARY KEY(`categoryKey`)
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `recurring_items` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `merchantKey` TEXT NOT NULL,
+                `displayName` TEXT NOT NULL,
+                `categoryKey` TEXT,
+                `amountMinor` INTEGER NOT NULL,
+                `frequency` TEXT NOT NULL,
+                `anchorDate` INTEGER NOT NULL,
+                `status` TEXT NOT NULL,
+                `isIncome` INTEGER NOT NULL,
+                `createdAt` INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_recurring_items_merchantKey` ON `recurring_items` (`merchantKey`)")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `goals` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `name` TEXT NOT NULL,
+                `emoji` TEXT NOT NULL,
+                `colorHex` TEXT NOT NULL,
+                `targetMinor` INTEGER NOT NULL,
+                `targetDate` INTEGER,
+                `startingMinor` INTEGER NOT NULL,
+                `createdAt` INTEGER NOT NULL,
+                `archived` INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `goal_contributions` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `goalId` INTEGER NOT NULL,
+                `amountMinor` INTEGER NOT NULL,
+                `timestamp` INTEGER NOT NULL,
+                `note` TEXT
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_goal_contributions_goalId` ON `goal_contributions` (`goalId`)")
+    }
+}
+
 fun cleanupAndConsolidateAccounts(db: SupportSQLiteDatabase) {
     try {
         db.beginTransaction()
@@ -559,9 +620,13 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
         TransactionEntity::class,
         CategoryGroupEntity::class,
         CategoryEntity::class,
-        MerchantRuleEntity::class
+        MerchantRuleEntity::class,
+        BudgetEntity::class,
+        RecurringItemEntity::class,
+        GoalEntity::class,
+        GoalContributionEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -569,6 +634,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun transactionDao(): TransactionDao
     abstract fun accountDao(): AccountDao
     abstract fun catalogDao(): CatalogDao
+    abstract fun planningDao(): PlanningDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -579,7 +645,7 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 "spend_tracker_room.db"
             )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         db.execSQL("INSERT OR IGNORE INTO accounts(name) VALUES ('Chase'), ('HSBC'), ('Credit Card')")

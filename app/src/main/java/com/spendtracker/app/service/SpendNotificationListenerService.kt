@@ -203,7 +203,8 @@ class SpendNotificationListenerService : NotificationListenerService() {
                                 type = txType,
                                 excludeFromSpending = false,
                                 merchant = merchantName,
-                                source = sourceAccount.name
+                                source = sourceAccount.name,
+                                needsReview = true
                             )
 
                             val insertedId = roomDb.transactionDao().insert(transaction)

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.spendtracker.app.data.AppDatabase
+import com.spendtracker.app.data.PlanningRepository
 import com.spendtracker.app.data.SpendRepository
 import com.spendtracker.app.data.UserPreferences
 import com.spendtracker.app.ui.AddTransactionViewModel
@@ -15,6 +16,7 @@ class AppContainer(context: Context) {
     val db = AppDatabase.get(context)
     val preferences = UserPreferences(context)
     val repository = SpendRepository(db.transactionDao(), db.accountDao(), db.catalogDao())
+    val planningRepository = PlanningRepository(db.planningDao())
 
     val viewModelFactory = viewModelFactory {
         initializer { AnalyticsViewModel(repository) }

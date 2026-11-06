@@ -72,5 +72,6 @@ data class TransactionEntity(
     val pairedTransactionId: Long? = null,
     @ColumnInfo(defaultValue = "0") val excludeFromSpending: Boolean = false,
     val merchant: String? = null,
-    val source: String? = null
+    val source: String? = null,
+    @ColumnInfo(defaultValue = "0") val needsReview: Boolean = false
 )
