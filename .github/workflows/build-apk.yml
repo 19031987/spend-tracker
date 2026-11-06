@@ -94,9 +94,14 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v2.1.0
-        name: "SpendTracker Release v2.1.0 (Budgets, Recurring, Goals & Cash Flow)"
+        tag_name: v2.1.1
+        name: "SpendTracker Release v2.1.1 (Month-over-month comparison)"
         body: |
+          ### SpendTracker v2.1.1 - Month-over-month comparison
+          - 📈 **Compared with last month** card on Home: spending, income and savings this month-to-date against the same days of last month, plus the categories you're spending more and less on (green = better, red = worse).
+          - 🏠 The month summary now says how much more or less you've spent than this time last month.
+          - 🧭 Fixed bottom navigation labels wrapping and breaking alignment at larger font sizes.
+
           ### SpendTracker v2.1.0 - Budgets, Recurring, Goals & Cash Flow
           - 🏠 **Home dashboard**: this month's summary, budget left to spend, transactions to review, upcoming bills, top categories, goals and recent activity.
           - 🧭 **New navigation**: Home · Transactions · Cash flow · Budget · More.
