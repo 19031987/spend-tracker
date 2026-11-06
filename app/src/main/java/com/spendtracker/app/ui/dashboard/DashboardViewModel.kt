@@ -14,6 +14,8 @@ import com.spendtracker.app.data.TransactionType
 import com.spendtracker.app.domain.TransactionItem
 import com.spendtracker.app.domain.budget.BudgetCalculator
 import com.spendtracker.app.domain.budget.BudgetSummary
+import com.spendtracker.app.domain.dashboard.MonthComparison
+import com.spendtracker.app.domain.dashboard.MonthComparisonCalculator
 import com.spendtracker.app.domain.dashboard.MonthSummary
 import com.spendtracker.app.domain.dashboard.MonthSummaryCalculator
 import com.spendtracker.app.domain.dashboard.TopCategory
@@ -34,6 +36,8 @@ data class DashboardUiState(
     val isLoading: Boolean = true,
     val today: LocalDate = LocalDate.now(),
     val monthSummary: MonthSummary = MonthSummary(YearMonth.now(), 0L, 0L, 0L),
+    /** This month-to-date against the same days of last month. */
+    val comparison: MonthComparison? = null,
     /** Null when the user has no budgets. */
     val budget: BudgetSummary? = null,
     val reviewCount: Int = 0,
@@ -128,6 +132,7 @@ class DashboardViewModel(
             isLoading = false,
             today = today,
             monthSummary = MonthSummaryCalculator.summarize(transactions, month, zone),
+            comparison = MonthComparisonCalculator.compare(transactions, month, today, zone),
             budget = budget,
             reviewCount = transactions.count { it.needsReview },
             upcoming = upcoming,

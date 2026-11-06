@@ -31,12 +31,9 @@ This guide walks you through every step needed to build and publish **SpendTrack
 
 ---
 
-## 🔑 Keystore Signing Details (Already Configured)
-Your app bundle is signed with the production keystore:
-- **Keystore File:** `release-keystore.jks`
-- **Alias:** `spendtracker`
-- **Store Password:** `SpendTracker123!`
-- **Key Password:** `SpendTracker123!`
+## 🔑 Signing & automatic Play uploads
+No keystore or password is stored in this repository. See `docs/play-release-setup.md` for the
+GitHub secrets the release build needs and how Play Console uploads work.
 
 ---
 
