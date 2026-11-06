@@ -24,5 +24,11 @@ class AppContainer(context: Context) {
         initializer { SettingsViewModel(repository, preferences) }
         initializer { TransactionsViewModel(repository) }
         initializer { com.spendtracker.app.ui.ComparisonViewModel(repository) }
+        initializer { com.spendtracker.app.ui.dashboard.DashboardViewModel(repository, planningRepository) }
+        initializer { com.spendtracker.app.ui.budget.BudgetViewModel(repository, planningRepository) }
+        initializer { com.spendtracker.app.ui.cashflow.CashFlowViewModel(repository) }
+        initializer { com.spendtracker.app.ui.recurring.RecurringViewModel(repository, planningRepository) }
+        initializer { com.spendtracker.app.ui.goals.GoalsViewModel(planningRepository) }
+        initializer { com.spendtracker.app.ui.review.ReviewViewModel(repository) }
     }
 }

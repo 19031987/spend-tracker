@@ -74,9 +74,20 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v2.0.0
-        name: "SpendTracker Release v2.0.0 (Material 3 Redesign)"
+        tag_name: v2.1.0
+        name: "SpendTracker Release v2.1.0 (Budgets, Recurring, Goals & Cash Flow)"
         body: |
+          ### SpendTracker v2.1.0 - Budgets, Recurring, Goals & Cash Flow
+          - 🏠 **Home dashboard**: this month's summary, budget left to spend, transactions to review, upcoming bills, top categories, goals and recent activity.
+          - 🧭 **New navigation**: Home · Transactions · Cash flow · Budget · More.
+          - 💷 **Budgets**: per-category monthly budgets grouped by category group, "left to spend" with a today-pace marker, optional rollover, and suggested budgets from your last 3 months.
+          - 🔁 **Recurring**: detects regular bills and subscriptions from your history; approve or ignore suggestions; Upcoming, Calendar and All views with paid / different amount / upcoming / overdue status.
+          - 🎯 **Goals**: savings goals with target amount and date, add or withdraw money, progress ring, monthly amount needed and projected finish date.
+          - 📊 **Cash flow**: 6 or 12 month income vs spending chart, savings and savings rate, and breakdowns by category, group or merchant with drill-down.
+          - ✅ **Review inbox**: transactions captured from notifications are flagged for review; swipe or tap to mark reviewed, with undo.
+          - 🔎 **Search** transactions by merchant, category, note or amount, plus a "Needs review" filter.
+          - 🐛 Fixed rules created from the edit sheet being silently ignored.
+
           ### SpendTracker v2.0.0 - Material 3 Redesign
           - 🎨 **New Material 3 theme**: custom indigo colour scheme with matching light & dark palettes, tuned type scale and rounded shape system; system bars follow the in-app theme choice.
           - 🧭 **Bottom navigation bar** (Activity / Insights / Compare) replaces the emoji segmented tabs; Material top app bar that tints on scroll; floating "Add" action button.

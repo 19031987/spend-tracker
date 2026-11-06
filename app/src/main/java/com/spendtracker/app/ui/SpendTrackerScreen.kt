@@ -4,6 +4,33 @@ package com.spendtracker.app.ui
 
 import android.content.Intent
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
+import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.TaskAlt
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.OutlinedTextField
+import com.spendtracker.app.ui.budget.BudgetRoute
+import com.spendtracker.app.ui.budget.BudgetViewModel
+import com.spendtracker.app.ui.cashflow.CashFlowRoute
+import com.spendtracker.app.ui.cashflow.CashFlowViewModel
+import com.spendtracker.app.ui.dashboard.DashboardRoute
+import com.spendtracker.app.ui.dashboard.DashboardViewModel
+import com.spendtracker.app.ui.goals.GoalsRoute
+import com.spendtracker.app.ui.goals.GoalsViewModel
+import com.spendtracker.app.ui.recurring.RecurringRoute
+import com.spendtracker.app.ui.recurring.RecurringViewModel
+import com.spendtracker.app.ui.review.ReviewRoute
+import com.spendtracker.app.ui.review.ReviewViewModel
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -106,6 +133,12 @@ fun SpendTrackerScreen(container: AppContainer) {
     val addVm: AddTransactionViewModel = viewModel(factory = container.viewModelFactory)
     val settingsVm: SettingsViewModel = viewModel(factory = container.viewModelFactory)
     val transactionsVm: TransactionsViewModel = viewModel(factory = container.viewModelFactory)
+    val dashboardVm: DashboardViewModel = viewModel(factory = container.viewModelFactory)
+    val budgetVm: BudgetViewModel = viewModel(factory = container.viewModelFactory)
+    val cashFlowVm: CashFlowViewModel = viewModel(factory = container.viewModelFactory)
+    val recurringVm: RecurringViewModel = viewModel(factory = container.viewModelFactory)
+    val goalsVm: GoalsViewModel = viewModel(factory = container.viewModelFactory)
+    val reviewVm: ReviewViewModel = viewModel(factory = container.viewModelFactory)
 
     val accounts by transactionsVm.accounts.collectAsStateWithLifecycle()
     val groups by transactionsVm.groups.collectAsStateWithLifecycle()
@@ -113,7 +146,10 @@ fun SpendTrackerScreen(container: AppContainer) {
     val transactionsList by transactionsVm.transactions.collectAsStateWithLifecycle()
     val addState by addVm.state.collectAsStateWithLifecycle()
 
-    var selectedTab by rememberSaveable { mutableStateOf(0) } // 0: Transactions, 1: Analytics, 2: Compare
+    var selectedTab by rememberSaveable { mutableStateOf(MainTab.HOME.ordinal) }
+    // A secondary screen opened from More or a dashboard card, shown over the current tab.
+    var openDestination by rememberSaveable { mutableStateOf<String?>(null) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var showSheet by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showCategoryCreateSheet by rememberSaveable { mutableStateOf(false) }
@@ -150,20 +186,42 @@ fun SpendTrackerScreen(container: AppContainer) {
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val tabs = remember { MainTab.values().toList() }
+    val currentTab = tabs[selectedTab]
+    val destination = openDestination?.let { name -> MoreDestination.values().firstOrNull { it.name == name } }
+    val reviewCount = remember(transactionsList) { transactionsList.count { it.needsReview } }
+
+    BackHandler(enabled = destination != null) { openDestination = null }
+    BackHandler(enabled = destination == null && currentTab != MainTab.HOME) { selectedTab = MainTab.HOME.ordinal }
+
+    fun openTab(tab: MainTab) {
+        openDestination = null
+        selectedTab = tab.ordinal
+    }
+    fun open(dest: MoreDestination) {
+        openDestination = dest.name
+    }
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             HeaderBar(
-                title = tabs[selectedTab].title,
-                subtitle = if (deduplicatedAccounts.isEmpty()) {
-                    "Spend Tracker"
-                } else {
-                    deduplicatedAccounts.take(3).joinToString(" · ") { it.name.trim() }
+                title = destination?.title ?: currentTab.title,
+                subtitle = when {
+                    destination != null -> null
+                    deduplicatedAccounts.isEmpty() -> "Spend Tracker"
+                    else -> deduplicatedAccounts.take(3).joinToString(" · ") { it.name.trim() }
                 },
                 scrollBehavior = scrollBehavior,
+                onBack = if (destination != null) ({ openDestination = null }) else null,
                 actions = {
+                    if (destination == null && reviewCount > 0) {
+                        IconButton(onClick = { open(MoreDestination.REVIEW) }) {
+                            BadgedBox(badge = { Badge { Text(reviewCount.toString()) } }) {
+                                Icon(Icons.Outlined.TaskAlt, contentDescription = "Review transactions")
+                            }
+                        }
+                    }
                     IconButton(onClick = { showSettings = true }) {
                         Icon(Icons.Outlined.Settings, contentDescription = "Settings")
                     }
@@ -172,25 +230,25 @@ fun SpendTrackerScreen(container: AppContainer) {
         },
         bottomBar = {
             NavigationBar {
-                tabs.forEachIndexed { index, tab ->
-                    val selected = selectedTab == index
+                tabs.forEach { tab ->
+                    val selected = currentTab == tab && destination == null
                     NavigationBarItem(
                         selected = selected,
-                        onClick = { selectedTab = index },
+                        onClick = { openTab(tab) },
                         icon = {
                             Icon(
                                 if (selected) tab.selectedIcon else tab.icon,
                                 contentDescription = null
                             )
                         },
-                        label = { Text(tab.label) }
+                        label = { Text(tab.label, maxLines = 1) }
                     )
                 }
             }
         },
         floatingActionButton = {
             AnimatedVisibility(
-                visible = selectedTab == 0,
+                visible = destination == null && (currentTab == MainTab.HOME || currentTab == MainTab.TRANSACTIONS),
                 enter = scaleIn() + fadeIn(),
                 exit = scaleOut() + fadeOut()
             ) {
@@ -207,7 +265,7 @@ fun SpendTrackerScreen(container: AppContainer) {
                 .padding(padding)
                 .fillMaxSize()
         ) {
-            AnimatedVisibility(visible = !hasNotificationPermission) {
+            AnimatedVisibility(visible = !hasNotificationPermission && destination == null) {
                 NotificationAccessBanner(
                     onEnable = {
                         context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -215,28 +273,64 @@ fun SpendTrackerScreen(container: AppContainer) {
                 )
             }
 
-            when (selectedTab) {
-                0 -> TransactionsFeed(
-                    transactions = transactionsList,
-                    accounts = deduplicatedAccounts,
-                    filterType = filterType,
-                    onFilterChange = { filterType = it },
-                    onTransactionClick = { editingTransaction = it },
-                    onCategoryPillClick = { quickCategoryTx = it },
-                    // Leave room for the FAB so it never covers the last row.
-                    contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp),
-                    modifier = Modifier.weight(1f)
-                )
-                1 -> AnalyticsScreen(
-                    viewModel = analyticsVm,
-                    contentPadding = PaddingValues(0.dp),
-                    modifier = Modifier.weight(1f)
-                )
-                2 -> ComparisonScreen(
-                    viewModel = comparisonVm,
-                    contentPadding = PaddingValues(0.dp),
-                    modifier = Modifier.weight(1f)
-                )
+            val contentModifier = Modifier.weight(1f)
+            if (destination != null) {
+                when (destination) {
+                    MoreDestination.RECURRING -> RecurringRoute(viewModel = recurringVm, modifier = contentModifier)
+                    MoreDestination.GOALS -> GoalsRoute(viewModel = goalsVm, modifier = contentModifier)
+                    MoreDestination.REVIEW -> ReviewRoute(
+                        viewModel = reviewVm,
+                        onChangeCategory = { quickCategoryTx = it },
+                        onOpenTransaction = { editingTransaction = it },
+                        modifier = contentModifier
+                    )
+                    MoreDestination.INSIGHTS -> AnalyticsScreen(
+                        viewModel = analyticsVm,
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = contentModifier
+                    )
+                    MoreDestination.COMPARE -> ComparisonScreen(
+                        viewModel = comparisonVm,
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = contentModifier
+                    )
+                }
+            } else {
+                when (currentTab) {
+                    MainTab.HOME -> DashboardRoute(
+                        viewModel = dashboardVm,
+                        onOpenBudget = { openTab(MainTab.BUDGET) },
+                        onOpenRecurring = { open(MoreDestination.RECURRING) },
+                        onOpenReview = { open(MoreDestination.REVIEW) },
+                        onOpenGoals = { open(MoreDestination.GOALS) },
+                        onOpenCashFlow = { openTab(MainTab.CASH_FLOW) },
+                        onOpenTransactions = { openTab(MainTab.TRANSACTIONS) },
+                        onOpenTransaction = { editingTransaction = it },
+                        onCategoryClick = { quickCategoryTx = it },
+                        modifier = contentModifier
+                    )
+                    MainTab.TRANSACTIONS -> TransactionsFeed(
+                        transactions = transactionsList,
+                        accounts = deduplicatedAccounts,
+                        filterType = filterType,
+                        onFilterChange = { filterType = it },
+                        searchQuery = searchQuery,
+                        onSearchChange = { searchQuery = it },
+                        onTransactionClick = { editingTransaction = it },
+                        onCategoryPillClick = { quickCategoryTx = it },
+                        // Leave room for the FAB so it never covers the last row.
+                        contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp),
+                        modifier = contentModifier
+                    )
+                    MainTab.CASH_FLOW -> CashFlowRoute(viewModel = cashFlowVm, modifier = contentModifier)
+                    MainTab.BUDGET -> BudgetRoute(viewModel = budgetVm, modifier = contentModifier)
+                    MainTab.MORE -> MoreScreen(
+                        reviewCount = reviewCount,
+                        onOpen = { open(it) },
+                        onOpenSettings = { showSettings = true },
+                        modifier = contentModifier
+                    )
+                }
             }
         }
     }
@@ -345,6 +439,8 @@ private fun TransactionsFeed(
     accounts: List<com.spendtracker.app.data.AccountEntity>,
     filterType: String,
     onFilterChange: (String) -> Unit,
+    searchQuery: String,
+    onSearchChange: (String) -> Unit,
     onTransactionClick: (TransactionItem) -> Unit,
     onCategoryPillClick: (TransactionItem) -> Unit,
     contentPadding: PaddingValues,
@@ -388,7 +484,8 @@ private fun TransactionsFeed(
 
     val deduplicatedAccounts = accounts
 
-    val filtered = when {
+    val byFilter = when {
+        filterType == "REVIEW" -> visibleTransactions.filter { it.needsReview }
         filterType == "EXPENSE" -> visibleTransactions.filter { it.type == TransactionType.EXPENSE && !it.excludeFromSpending }
         filterType == "INCOME" -> visibleTransactions.filter { it.type == TransactionType.INCOME && !it.excludeFromSpending }
         filterType.startsWith("BANK_") -> {
@@ -399,6 +496,12 @@ private fun TransactionsFeed(
             }
         }
         else -> visibleTransactions
+    }
+    val query = searchQuery.trim()
+    val filtered = if (query.isEmpty()) byFilter else byFilter.filter { tx ->
+        listOfNotNull(tx.merchant, tx.categoryName, tx.note, tx.source, tx.accountName)
+            .any { it.contains(query, ignoreCase = true) } ||
+            CurrencyUtils.minorToDecimalString(tx.amountMinor).contains(query)
     }
 
     val dayGroups = remember(filtered) { groupTransactionsByDay(filtered) }
@@ -451,9 +554,32 @@ private fun TransactionsFeed(
             }
         }
 
+        item(key = "search") {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = onSearchChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 20.dp),
+                placeholder = { Text("Search merchant, category, note or amount") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { onSearchChange("") }) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear search")
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = CircleShape
+            )
+        }
+
         item(key = "filters") {
+            val reviewPending = visibleTransactions.count { it.needsReview }
             val baseFilters = listOf(
-                "ALL" to "All · ${visibleTransactions.size}",
+                "ALL" to "All · ${visibleTransactions.size}"
+            ) + (if (reviewPending > 0 || filterType == "REVIEW") listOf("REVIEW" to "Needs review · $reviewPending") else emptyList()) + listOf(
                 "EXPENSE" to "Money out",
                 "INCOME" to "Money in"
             )
@@ -534,9 +660,11 @@ private enum class MainTab(
     val icon: ImageVector,
     val selectedIcon: ImageVector
 ) {
-    TRANSACTIONS("Activity", "Activity", Icons.Outlined.ReceiptLong, Icons.Filled.ReceiptLong),
-    ANALYTICS("Insights", "Insights", Icons.Outlined.Insights, Icons.Filled.Insights),
-    COMPARE("Compare", "Compare", Icons.Outlined.CompareArrows, Icons.Filled.CompareArrows)
+    HOME("Home", "Overview", Icons.Outlined.Home, Icons.Filled.Home),
+    TRANSACTIONS("Activity", "Transactions", Icons.Outlined.ReceiptLong, Icons.Filled.ReceiptLong),
+    CASH_FLOW("Cash flow", "Cash flow", Icons.Outlined.BarChart, Icons.Filled.BarChart),
+    BUDGET("Budget", "Budget", Icons.Outlined.AccountBalanceWallet, Icons.Filled.AccountBalanceWallet),
+    MORE("More", "More", Icons.Outlined.Menu, Icons.Filled.Menu)
 }
 
 @Composable
