@@ -20,6 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.TrendingDown
+import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -45,9 +47,12 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spendtracker.app.domain.TransactionItem
 import com.spendtracker.app.domain.budget.BudgetSummary
+import com.spendtracker.app.domain.dashboard.CategoryChange
+import com.spendtracker.app.domain.dashboard.MonthComparison
 import com.spendtracker.app.domain.dashboard.MonthSummary
 import com.spendtracker.app.domain.dashboard.TopCategory
 import com.spendtracker.app.domain.goals.GoalProgress
@@ -114,7 +119,12 @@ fun DashboardScreen(
             GreetingHeader(today = uiState.today)
         }
         item(key = "month_summary") {
-            MonthSummaryHero(summary = uiState.monthSummary, onClick = onOpenCashFlow)
+            MonthSummaryHero(summary = uiState.monthSummary, comparison = uiState.comparison, onClick = onOpenCashFlow)
+        }
+        uiState.comparison?.let { comparison ->
+            item(key = "comparison") {
+                ComparisonCard(comparison = comparison, onOpen = onOpenCashFlow)
+            }
         }
         uiState.budget?.let { budget ->
             item(key = "budget") {
@@ -206,7 +216,7 @@ private fun GreetingHeader(today: LocalDate) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MonthSummaryHero(summary: MonthSummary, onClick: () -> Unit) {
+private fun MonthSummaryHero(summary: MonthSummary, comparison: MonthComparison?, onClick: () -> Unit) {
     val monthName: String = summary.month.month.getDisplayName(DateTextStyle.FULL, Locale.getDefault())
     val net: Long = summary.netRemainingMinor
     Card(
@@ -238,6 +248,10 @@ private fun MonthSummaryHero(summary: MonthSummary, onClick: () -> Unit) {
                 text = CurrencyUtils.formatMinor(summary.spentMinor),
                 style = MaterialTheme.typography.displaySmall
             )
+            if (comparison != null && comparison.hasPrevious && comparison.spentDeltaMinor != 0L) {
+                Spacer(Modifier.height(8.dp))
+                SpendTrendLine(comparison)
+            }
             Spacer(Modifier.height(20.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -688,6 +702,218 @@ private fun GoalsCard(goals: List<GoalProgress>, onOpen: () -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Month-over-month comparison
+// ---------------------------------------------------------------------------------------------
+
+private fun monthName(month: java.time.YearMonth): String =
+    month.month.getDisplayName(DateTextStyle.FULL, Locale.getDefault())
+
+private fun shortMonthName(month: java.time.YearMonth): String =
+    month.month.getDisplayName(DateTextStyle.SHORT, Locale.getDefault())
+
+/** "£120.50 less than this time in October" under the hero amount. */
+@Composable
+private fun SpendTrendLine(comparison: MonthComparison) {
+    val finance = SpendTrackerTheme.finance
+    val spentLess: Boolean = comparison.spentDeltaMinor < 0L
+    val container = if (spentLess) finance.surplusContainer else finance.deficitContainer
+    val content = if (spentLess) finance.onSurplusContainer else finance.onDeficitContainer
+    val amount: String = CurrencyUtils.formatMinor(kotlin.math.abs(comparison.spentDeltaMinor))
+    val word: String = if (spentLess) "less" else "more"
+    Surface(shape = CircleShape, color = container, contentColor = content) {
+        Row(
+            modifier = Modifier.padding(start = 8.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                imageVector = if (spentLess) Icons.Default.TrendingDown else Icons.Default.TrendingUp,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = "$amount $word than this time in ${monthName(comparison.previousMonth)}",
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 2
+            )
+        }
+    }
+}
+
+@Composable
+private fun ComparisonCard(comparison: MonthComparison, onOpen: () -> Unit) {
+    DashboardCard(title = "Compared with last month", onAction = onOpen, actionLabel = "Details") {
+        val current: String = shortMonthName(comparison.month)
+        val previous: String = shortMonthName(comparison.previousMonth)
+        val days: Int = comparison.dayOfMonth
+        Text(
+            text = if (days > 0) "1–$days $current vs 1–$days $previous" else "$current vs $previous",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        if (!comparison.hasPrevious) {
+            Text(
+                text = "Nothing recorded in ${monthName(comparison.previousMonth)} yet. " +
+                    "Comparisons appear once there is a month of history.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            return@DashboardCard
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            ComparisonMetricRow(
+                label = "Spending",
+                currentMinor = comparison.spentMinor,
+                previousMinor = comparison.previousSpentMinor,
+                deltaMinor = comparison.spentDeltaMinor,
+                higherIsGood = false
+            )
+            ComparisonMetricRow(
+                label = "Income",
+                currentMinor = comparison.incomeMinor,
+                previousMinor = comparison.previousIncomeMinor,
+                deltaMinor = comparison.incomeDeltaMinor,
+                higherIsGood = true
+            )
+            ComparisonMetricRow(
+                label = "Saved",
+                currentMinor = comparison.savedMinor,
+                previousMinor = comparison.previousSavedMinor,
+                deltaMinor = comparison.savedDeltaMinor,
+                higherIsGood = true
+            )
+        }
+        if (comparison.increased.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Spacer(Modifier.height(12.dp))
+            ComparisonSectionTitle("Spending more on")
+            comparison.increased.forEach { CategoryChangeRow(it) }
+        }
+        if (comparison.decreased.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Spacer(Modifier.height(12.dp))
+            ComparisonSectionTitle("Spending less on")
+            comparison.decreased.forEach { CategoryChangeRow(it) }
+        }
+    }
+}
+
+@Composable
+private fun ComparisonSectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(bottom = 4.dp)
+    )
+}
+
+@Composable
+private fun ComparisonMetricRow(
+    label: String,
+    currentMinor: Long,
+    previousMinor: Long,
+    deltaMinor: Long,
+    higherIsGood: Boolean
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+            Text(
+                text = "${CurrencyUtils.formatMinor(currentMinor)} vs ${CurrencyUtils.formatMinor(previousMinor)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        DeltaChip(deltaMinor = deltaMinor, changeFraction = null, higherIsGood = higherIsGood)
+    }
+}
+
+@Composable
+private fun CategoryChangeRow(change: CategoryChange) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        CategoryEmojiBox(emoji = change.emoji, colorHex = change.colorHex, size = 36.dp, emojiSize = 18.sp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = change.name,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "${CurrencyUtils.formatMinor(change.currentMinor)} vs ${CurrencyUtils.formatMinor(change.previousMinor)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        DeltaChip(deltaMinor = change.deltaMinor, changeFraction = change.changeFraction, higherIsGood = false)
+    }
+}
+
+/**
+ * Signed change with an arrow. Colour shows whether the move is good for the user:
+ * for spending a decrease is good, for income and savings an increase is good.
+ */
+@Composable
+private fun DeltaChip(deltaMinor: Long, changeFraction: Float?, higherIsGood: Boolean) {
+    val finance = SpendTrackerTheme.finance
+    val isUp: Boolean = deltaMinor > 0L
+    val neutral: Boolean = deltaMinor == 0L
+    val good: Boolean = if (higherIsGood) isUp else !isUp
+    val container = when {
+        neutral -> MaterialTheme.colorScheme.surfaceContainerHighest
+        good -> finance.surplusContainer
+        else -> finance.deficitContainer
+    }
+    val content = when {
+        neutral -> MaterialTheme.colorScheme.onSurfaceVariant
+        good -> finance.onSurplusContainer
+        else -> finance.onDeficitContainer
+    }
+    val amount: String = CurrencyUtils.formatMinor(kotlin.math.abs(deltaMinor))
+    val percent: String = changeFraction?.let { " · ${kotlin.math.abs(kotlin.math.round(it * 100f)).toInt()}%" } ?: ""
+    Surface(shape = CircleShape, color = container, contentColor = content) {
+        Row(
+            modifier = Modifier.padding(start = 6.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            if (!neutral) {
+                Icon(
+                    imageVector = if (isUp) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
+                    contentDescription = if (isUp) "Up" else "Down",
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+            Text(
+                text = if (neutral) "No change" else amount + percent,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                softWrap = false
+            )
         }
     }
 }

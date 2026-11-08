@@ -241,7 +241,16 @@ fun SpendTrackerScreen(container: AppContainer) {
                                 contentDescription = null
                             )
                         },
-                        label = { Text(tab.label, maxLines = 1) }
+                        label = {
+                            Text(
+                                text = tab.label,
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        alwaysShowLabel = true
                     )
                 }
             }
@@ -662,7 +671,7 @@ private enum class MainTab(
 ) {
     HOME("Home", "Overview", Icons.Outlined.Home, Icons.Filled.Home),
     TRANSACTIONS("Activity", "Transactions", Icons.Outlined.ReceiptLong, Icons.Filled.ReceiptLong),
-    CASH_FLOW("Cash flow", "Cash flow", Icons.Outlined.BarChart, Icons.Filled.BarChart),
+    CASH_FLOW("Cashflow", "Cash flow", Icons.Outlined.BarChart, Icons.Filled.BarChart),
     BUDGET("Budget", "Budget", Icons.Outlined.AccountBalanceWallet, Icons.Filled.AccountBalanceWallet),
     MORE("More", "More", Icons.Outlined.Menu, Icons.Filled.Menu)
 }

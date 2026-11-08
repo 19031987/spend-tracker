@@ -1,8 +1,23 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
 }
+
+// Release signing comes from environment variables (CI, set from GitHub secrets) or from an
+// untracked keystore.properties file (local builds). Nothing secret is committed to the repo.
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+
+fun signingValue(envName: String, propertyName: String): String? =
+    System.getenv(envName)?.takeIf { it.isNotBlank() }
+        ?: keystoreProperties.getProperty(propertyName)?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile: String? = signingValue("RELEASE_STORE_FILE", "storeFile")
 
 android {
     namespace = "com.spendtracker.app"
@@ -12,8 +27,8 @@ android {
         applicationId = "com.spendtracker.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 28
-        versionName = "2.1.0"
+        versionCode = 29
+        versionName = "2.1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -27,25 +42,25 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = rootProject.file("release-keystore.jks")
-            storePassword = "SpendTracker123!"
-            keyAlias = "spendtracker"
-            keyPassword = "SpendTracker123!"
+        if (releaseStoreFile != null) {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = signingValue("RELEASE_STORE_PASSWORD", "storePassword")
+                keyAlias = signingValue("RELEASE_KEY_ALIAS", "keyAlias")
+                keyPassword = signingValue("RELEASE_KEY_PASSWORD", "keyPassword")
+            }
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            // Without signing secrets (e.g. pull-request builds) the release output is unsigned.
+            signingConfig = if (releaseStoreFile != null) signingConfigs.getByName("release") else null
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-        }
-        debug {
-            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
