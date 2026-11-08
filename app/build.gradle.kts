@@ -55,8 +55,12 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Without signing secrets (e.g. pull-request builds) the release output is unsigned.
-            signingConfig = if (releaseStoreFile != null) signingConfigs.getByName("release") else null
+            // Release signing is optional. Without signing secrets (pull-request builds, or a main
+            // build before the RELEASE_* secrets exist) the release output is signed with the
+            // standard debug key so the APK still installs. Google Play rejects debug-signed bundles,
+            // so CI skips the Play upload in that case.
+            signingConfig = if (releaseStoreFile != null) signingConfigs.getByName("release")
+                            else signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

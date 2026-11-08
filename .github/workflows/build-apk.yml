@@ -53,12 +53,11 @@ jobs:
         if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
           echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
           echo "RELEASE_STORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "HAS_RELEASE_KEY=true" >> "$GITHUB_ENV"
           echo "Release signing key loaded from secrets."
-        elif [ "$GITHUB_REF" = "refs/heads/main" ]; then
-          echo "::error::RELEASE_KEYSTORE_BASE64 secret is missing; refusing to publish an unsigned release. See docs/play-release-setup.md"
-          exit 1
         else
-          echo "::warning::No signing secrets available; building an unsigned release for verification only."
+          echo "HAS_RELEASE_KEY=false" >> "$GITHUB_ENV"
+          echo "::warning::RELEASE_KEYSTORE_BASE64 secret is not set; the release build will be signed with the debug key (installable, but not accepted by Google Play). See docs/play-release-setup.md"
         fi
 
     - name: Build Signed APK & Play Store App Bundle (AAB)
@@ -96,6 +95,8 @@ jobs:
       with:
         tag_name: v2.1.1
         name: "SpendTracker Release v2.1.1 (Month-over-month comparison)"
+        # Marked as a pre-release when no signing secrets are configured (debug-signed build).
+        prerelease: ${{ env.HAS_RELEASE_KEY != 'true' }}
         body: |
           ### SpendTracker v2.1.1 - Month-over-month comparison
           - 📈 **Compared with last month** card on Home: spending, income and savings this month-to-date against the same days of last month, plus the categories you're spending more and less on (green = better, red = worse).
@@ -242,7 +243,7 @@ jobs:
 
     - name: Upload to Google Play (Internal testing)
       uses: r0adkll/upload-google-play@v1.1.3
-      if: github.ref == 'refs/heads/main' && env.HAS_PLAY_KEY == 'true'
+      if: github.ref == 'refs/heads/main' && env.HAS_PLAY_KEY == 'true' && env.HAS_RELEASE_KEY == 'true'
       with:
         serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
         packageName: com.spendtracker.app
