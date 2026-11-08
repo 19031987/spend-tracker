@@ -4,6 +4,11 @@ Release builds are signed from GitHub secrets. Every push to `main` builds the a
 release, and uploads the AAB to the Play Console **Internal testing** track. Promote it to Production
 yourself in Play Console: nothing reaches store users without your click.
 
+All secrets are **optional**. Without them, a push to `main` still builds and publishes a GitHub
+release, but the APK/AAB are signed with the standard Android debug key, the release is marked as a
+pre-release, and the Play upload is skipped. Debug-signed builds install fine on a phone (sideload)
+but Google Play does not accept them, so add the secrets below before releasing to the store.
+
 ## 1. One-time: first upload is manual
 
 Google's API cannot create an app or make its very first upload. If SpendTracker
@@ -50,8 +55,10 @@ Then add these in GitHub → **Settings → Secrets and variables → Actions �
 | `RELEASE_KEY_ALIAS` | key alias (`upload`, or `spendtracker` for the old key) |
 | `RELEASE_KEY_PASSWORD` | key password |
 
-Without `RELEASE_KEYSTORE_BASE64`, pull-request builds still compile and test (unsigned output), but a
-push to `main` fails on purpose rather than publishing an unsigned release.
+Without `RELEASE_KEYSTORE_BASE64`, builds (pull requests and `main`) still compile, test and publish,
+signed with the debug key; CI logs a warning and marks the GitHub release as a pre-release. Android
+treats the debug key and your release key as different apps' signatures, so switching from a
+debug-signed APK to a properly signed one later requires uninstalling first (which wipes local data).
 
 For local signed builds, create an untracked `keystore.properties` in the repo root:
 ```
@@ -69,6 +76,8 @@ keyPassword=…
    **Release apps to testing tracks** (and **Release to production** only if you later want CI to
    publish to production) for SpendTracker.
 3. GitHub secret `PLAY_SERVICE_ACCOUNT_JSON` = the full contents of the JSON key file.
+
+The Play upload only runs when both this secret and the signing secrets are present.
 
 Never paste keys or passwords into chats, issues or commits.
 
