@@ -1,9 +1,54 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git fetch:*)",
+      "Bash(ls:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(wc:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(pytest:*)",
+      "Bash(ruff check:*)",
+      "Bash(./gradlew :app:testDebugUnitTest:*)",
+      "Bash(./gradlew :app:testReleaseUnitTest:*)",
+      "Bash(./gradlew test:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./secrets.env)",
+      "Read(./**/keystore.properties)",
+      "Read(./**/*.jks)",
+      "Read(./**/*.keystore)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git reset --hard:*)"
+    ]
+  },
   "hooks": {
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/context_guard.py\"" }
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/context_guard.py\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_secrets.py\""
+          }
         ]
       }
     ],
@@ -11,7 +56,30 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/context_guard.py\"" }
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/context_guard.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/post_edit_check.py\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop_checks.py\"",
+            "timeout": 300
+          }
         ]
       }
     ]
