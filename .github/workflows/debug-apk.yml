@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   debug-apk:
@@ -43,9 +43,27 @@ jobs:
         find app/build/outputs/apk/debug -name "*.apk" -exec cp -v {} dist/ \;
         ls -la dist/
 
-    - name: Upload Debug APK
+    - name: Upload Debug APK (workflow artifact)
       uses: actions/upload-artifact@v4
       with:
         name: SpendTracker-debug-apk
         path: dist/*.apk
         if-no-files-found: error
+
+    - name: Publish Debug APK as GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: debug-latest
+        name: "SpendTracker Debug Build (latest)"
+        prerelease: true
+        body: |
+          Installable **debug** APK built from the latest `main`.
+
+          This is a debug build (signed with the standard Android debug key) for
+          testing on a device. It is not the Play Store release build.
+
+          To install: download `app-debug.apk` below on your Android phone and
+          open it (you may need to allow installing from unknown sources).
+        files: dist/*.apk
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
