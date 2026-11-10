@@ -1,0 +1,51 @@
+name: Build SpendTracker Debug APK
+
+# Builds an installable debug APK (auto-signed with the Android debug key).
+# No release signing secrets required. Useful for sharing a test build.
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  debug-apk:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
+      with:
+        cache-disabled: true
+
+    - name: Accept Android SDK Licenses
+      run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+
+    - name: Build Debug APK
+      env:
+        ANDROID_HOME: /usr/local/lib/android/sdk
+      run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+    - name: Collect APK
+      run: |
+        mkdir -p dist
+        find app/build/outputs/apk/debug -name "*.apk" -exec cp -v {} dist/ \;
+        ls -la dist/
+
+    - name: Upload Debug APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: SpendTracker-debug-apk
+        path: dist/*.apk
+        if-no-files-found: error
