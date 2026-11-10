@@ -55,6 +55,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.Canvas
+import com.spendtracker.app.domain.TransactionItem
 import com.spendtracker.app.domain.cashflow.BreakdownDimension
 import com.spendtracker.app.domain.cashflow.BreakdownRow
 import com.spendtracker.app.domain.cashflow.CashFlowMonth
@@ -76,7 +77,12 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 
 @Composable
-fun CashFlowRoute(viewModel: CashFlowViewModel, modifier: Modifier = Modifier) {
+fun CashFlowRoute(
+    viewModel: CashFlowViewModel,
+    modifier: Modifier = Modifier,
+    onOpenTransaction: (TransactionItem) -> Unit = {},
+    onOpenCategory: (TransactionItem) -> Unit = {}
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     CashFlowScreen(
         state = state,
@@ -88,6 +94,8 @@ fun CashFlowRoute(viewModel: CashFlowViewModel, modifier: Modifier = Modifier) {
         onShowIncomeChange = viewModel::setShowIncome,
         onOpenBreakdown = viewModel::openBreakdown,
         onCloseBreakdown = viewModel::closeBreakdown,
+        onOpenTransaction = onOpenTransaction,
+        onOpenCategory = onOpenCategory,
         modifier = modifier
     )
 }
@@ -104,6 +112,8 @@ fun CashFlowScreen(
     onShowIncomeChange: (Boolean) -> Unit,
     onOpenBreakdown: (BreakdownRow) -> Unit,
     onCloseBreakdown: () -> Unit,
+    onOpenTransaction: (TransactionItem) -> Unit = {},
+    onOpenCategory: (TransactionItem) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val report = state.report
@@ -153,7 +163,7 @@ fun CashFlowScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                    .padding(horizontal = 32.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
@@ -175,6 +185,8 @@ fun CashFlowScreen(
                 Text(
                     text = CurrencyUtils.formatMinor(drill.amountMinor),
                     style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    softWrap = false,
                     color = if (state.showIncome) SpendTrackerTheme.finance.income else MaterialTheme.colorScheme.onSurface
                 )
             }
@@ -187,8 +199,8 @@ fun CashFlowScreen(
                 itemsIndexed(drill.transactions, key = { _, tx -> tx.id }) { index, tx ->
                     TransactionRowItem(
                         tx = tx,
-                        onClick = {},
-                        onCategoryClick = {},
+                        onClick = { onOpenTransaction(tx) },
+                        onCategoryClick = { onOpenCategory(tx) },
                         isFirst = index == 0,
                         isLast = index == drill.transactions.lastIndex
                     )

@@ -331,7 +331,12 @@ fun SpendTrackerScreen(container: AppContainer) {
                         contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp),
                         modifier = contentModifier
                     )
-                    MainTab.CASH_FLOW -> CashFlowRoute(viewModel = cashFlowVm, modifier = contentModifier)
+                    MainTab.CASH_FLOW -> CashFlowRoute(
+                        viewModel = cashFlowVm,
+                        modifier = contentModifier,
+                        onOpenTransaction = { editingTransaction = it },
+                        onOpenCategory = { quickCategoryTx = it }
+                    )
                     MainTab.BUDGET -> BudgetRoute(viewModel = budgetVm, modifier = contentModifier)
                     MainTab.MORE -> MoreScreen(
                         reviewCount = reviewCount,
