@@ -144,7 +144,7 @@ fun ComparisonBadge(
 
     Surface(
         color = containerColor,
-        shape = RoundedCornerShape(16.dp),
+        shape = MaterialTheme.shapes.medium,
         modifier = modifier
     ) {
         Row(
@@ -209,5 +209,43 @@ fun BaselineBanner(
                 color = MaterialTheme.colorScheme.onSecondaryContainer
             )
         }
+    }
+}
+
+/** Semantic tone of a [StatusChip]. Every tone has light and dark colours. */
+enum class StatusTone { Positive, Negative, Warning, Info, Neutral }
+
+/**
+ * Small pill-shaped status label ("Paid", "Overdue", "Archived", "Ignored" …).
+ * Colours come from [tone] so they work in dark mode:
+ * - Positive: finance surplusContainer / onSurplusContainer (paid, on track)
+ * - Negative: finance deficitContainer / onDeficitContainer (overdue, over budget)
+ * - Warning: finance warningContainer / onWarningContainer (different amount, needs review)
+ * - Info: secondaryContainer (upcoming, new)
+ * - Neutral: surfaceVariant (archived, ignored)
+ */
+@Composable
+fun StatusChip(
+    text: String,
+    tone: StatusTone,
+    modifier: Modifier = Modifier
+) {
+    val finance = SpendTrackerTheme.finance
+    val scheme = MaterialTheme.colorScheme
+    val (container: Color, content: Color) = when (tone) {
+        StatusTone.Positive -> finance.surplusContainer to finance.onSurplusContainer
+        StatusTone.Negative -> finance.deficitContainer to finance.onDeficitContainer
+        StatusTone.Warning -> finance.warningContainer to finance.onWarningContainer
+        StatusTone.Info -> scheme.secondaryContainer to scheme.onSecondaryContainer
+        StatusTone.Neutral -> scheme.surfaceVariant to scheme.onSurfaceVariant
+    }
+    Surface(shape = CircleShape, color = container, contentColor = content, modifier = modifier) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = content,
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+        )
     }
 }

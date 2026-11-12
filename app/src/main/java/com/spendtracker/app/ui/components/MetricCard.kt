@@ -17,15 +17,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * Reusable container card for headline metrics, finance summaries, and comparative overviews.
+ * Legacy container card kept for source compatibility. New code should use [AppCard]
+ * (container) or [StatTile] (label + value). Defaults now match [AppCard].
  */
 @Composable
 fun MetricCard(
     modifier: Modifier = Modifier,
-    containerColor: Color = MaterialTheme.colorScheme.surface,
-    cornerRadius: Dp = 16.dp,
-    elevation: Dp = 2.dp,
-    contentPadding: Dp = 18.dp,
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainerLow,
+    cornerRadius: Dp = 24.dp,
+    elevation: Dp = 0.dp,
+    contentPadding: Dp = 16.dp,
     spacing: Dp = 10.dp,
     content: @Composable ColumnScope.() -> Unit
 ) {
