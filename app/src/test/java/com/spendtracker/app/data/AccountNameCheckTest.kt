@@ -58,4 +58,13 @@ class AccountNameCheckTest {
         assertTrue(isProtectedAccount("credit card"))
         assertFalse(isProtectedAccount("Joint Pot"))
     }
+
+    @Test
+    fun `recognised bank names are detected for the rename warning`() {
+        assertTrue(isRecognisedBankName("Monzo"))
+        assertTrue(isRecognisedBankName("barclaycard"))
+        assertTrue(isRecognisedBankName("Credit Card"))
+        assertFalse(isRecognisedBankName("Joint Pot"))
+        assertFalse(isRecognisedBankName("Wise"))
+    }
 }

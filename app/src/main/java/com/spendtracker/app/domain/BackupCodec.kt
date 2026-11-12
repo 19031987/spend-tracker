@@ -254,6 +254,9 @@ object BackupCodec {
         unique("goalContributions", d.contributions) { it.id }
         unique("recurringItems", d.recurring) { it.id }
 
+        if (d.groups.isNotEmpty() && d.categories.isEmpty()) {
+            throw BackupFormatException("This backup has category groups but no categories, so it can't be restored.")
+        }
         val accountIds = d.accounts.map { it.id }.toSet()
         val groupIds = d.groups.map { it.id }.toSet()
         val goalIds = d.goals.map { it.id }.toSet()
@@ -415,23 +418,27 @@ object BackupMerger {
 
         // Transactions (dedupe only against rows already on the device)
         val existingAccountNames = existing.accounts.associate { it.id to it.name }
-        val existingTxKeys = HashMap<String, Long>()
+        // Each existing row can absorb only one incoming row, so N identical incoming rows
+        // against M existing ones insert max(0, N - M).
+        val existingTxKeys = HashMap<String, ArrayDeque<Long>>()
         existing.transactions.forEach { t ->
             val name = existingAccountNames[t.accountId] ?: t.source.orEmpty()
-            existingTxKeys.putIfAbsent(transactionKey(t, name), t.id)
+            existingTxKeys.getOrPut(transactionKey(t, name)) { ArrayDeque() }.addLast(t.id)
         }
+        val insertedIncomingIds = HashSet<Long>()
         val txIds = IdAllocator(existing.transactions.map { it.id })
         val txMap = HashMap<Long, Long>()
         val newTx = mutableListOf<TransactionEntity>()
         incoming.transactions.forEach { t ->
             val account = accountMap[t.accountId]
             val accountName = account?.name ?: normalizeBankName(t.source)
-            val dup = existingTxKeys[transactionKey(t, accountName)]
+            val dup = existingTxKeys[transactionKey(t, accountName)]?.removeFirstOrNull()
             if (dup != null) {
                 txMap[t.id] = dup
             } else {
                 val id = txIds.take(t.id)
                 txMap[t.id] = id
+                insertedIncomingIds += t.id
                 newTx += t.copy(
                     id = id,
                     accountId = account?.id ?: t.accountId,
@@ -440,7 +447,12 @@ object BackupMerger {
                 )
             }
         }
-        val pairedTx = newTx.map { t -> t.copy(pairedTransactionId = t.pairedTransactionId?.let { txMap[it] }) }
+        // Keep a transfer link only when both legs are new; a leg that matched an existing row
+        // already has its own partner, so linking to it would leave a one-sided pair.
+        val pairedTx = newTx.map { t ->
+            val partner = t.pairedTransactionId
+            t.copy(pairedTransactionId = if (partner != null && partner in insertedIncomingIds) txMap[partner] else null)
+        }
 
         // Budgets
         val budgetKeys = existing.budgets.map { it.categoryKey }.toHashSet()

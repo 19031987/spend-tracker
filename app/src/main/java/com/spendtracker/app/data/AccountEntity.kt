@@ -190,8 +190,21 @@ abstract class AccountDao {
 
     open suspend fun deleteDuplicates(): Int = consolidateDuplicates()
 
-    @Query("SELECT accountId, COUNT(*) AS count FROM transactions GROUP BY accountId")
+    /** Rows per account, counting a row once whether the account is its source or transfer destination. */
+    @Query(
+        "SELECT a AS accountId, COUNT(*) AS count FROM (" +
+            "SELECT id, accountId AS a FROM transactions " +
+            "UNION SELECT id, destinationAccountId AS a FROM transactions WHERE destinationAccountId IS NOT NULL" +
+            ") GROUP BY a"
+    )
     abstract fun observeTransactionCounts(): Flow<List<AccountTransactionCount>>
+
+    /** Transfer rows between [a] and [b] (either direction); moving one into the other would make self-transfers. */
+    @Query(
+        "SELECT COUNT(*) FROM transactions WHERE " +
+            "(accountId = :a AND destinationAccountId = :b) OR (accountId = :b AND destinationAccountId = :a)"
+    )
+    abstract suspend fun countTransfersBetween(a: Long, b: Long): Int
 
     @Query("SELECT COUNT(*) FROM transactions WHERE accountId = :id OR destinationAccountId = :id")
     abstract suspend fun countTransactionsFor(id: Long): Int
@@ -232,6 +245,16 @@ sealed class AccountNameCheck {
     data class Valid(val name: String, val adjusted: Boolean) : AccountNameCheck()
     data class Invalid(val reason: String) : AccountNameCheck()
 }
+
+/** Canonical names [normalizeBankName] gives recognised banks/wallets (keep in step with it). */
+val RECOGNISED_BANK_NAMES: Set<String> = setOf(
+    "Chase", "HSBC", "Monzo", "Starling", "Revolut", "Barclays", "Santander", "NatWest", "Lloyds",
+    "Halifax", "Nationwide", "PayPal", "Google Pay", "Apple Pay", "Samsung Pay", "Amex", "TSB", "RBS",
+    "First Direct", "Virgin Money", "Metro Bank", "Kroo", "Credit Card"
+)
+
+/** True when notifications from this bank are filed under [name] (renaming it splits new ones off). */
+fun isRecognisedBankName(name: String): Boolean = normalizeBankName(name) in RECOGNISED_BANK_NAMES
 
 /**
  * Validates a manually entered account name against bank-name normalisation, so a manual

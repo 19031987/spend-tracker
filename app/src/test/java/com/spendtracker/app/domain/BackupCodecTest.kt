@@ -227,4 +227,57 @@ class BackupCodecTest {
         )
         assertTrue(BackupMerger.transactionKey(t, "Chase") != BackupMerger.transactionKey(t.copy(merchant = "Aldi"), "Chase"))
     }
+
+    // ---- reviewer regressions ----
+
+    @Test
+    fun `identical incoming rows each consume one existing match`() {
+        val base = sample()
+        val coffee = TransactionEntity(id = 20, accountId = 1, amount = -300, timestamp = 1_700_001_000_000L,
+            merchant = "Costa", source = "Chase")
+        val existing = base.copy(transactions = listOf(coffee))
+        // Two identical coffees in the backup, one already on the device: one must be added.
+        val incoming = base.copy(
+            transactions = listOf(coffee.copy(id = 30), coffee.copy(id = 31)),
+            contributions = emptyList()
+        )
+        val plan = BackupMerger.plan(existing, incoming)
+        assertEquals(1, plan.added.transactions)
+        assertEquals(1, plan.skipped.transactions)
+        // Three in the backup against two on the device: one added.
+        val existing2 = base.copy(transactions = listOf(coffee, coffee.copy(id = 21)))
+        val incoming2 = incoming.copy(transactions = incoming.transactions + coffee.copy(id = 32))
+        assertEquals(1, BackupMerger.plan(existing2, incoming2).added.transactions)
+    }
+
+    @Test
+    fun `transfer leg is unpaired when its partner matched an existing row`() {
+        val data = sample()
+        val outLeg = data.transactions.single { it.id == 11L }
+        // Device has the outgoing leg (id 70, paired with its own 71) but not the incoming leg.
+        val existing = data.copy(
+            transactions = listOf(outLeg.copy(id = 70, pairedTransactionId = 71)),
+            contributions = emptyList(), goals = emptyList()
+        )
+        val plan = BackupMerger.plan(existing, data)
+        val inLeg = plan.toInsert.transactions.single { it.amount == 5000L }
+        assertNull(inLeg.pairedTransactionId)
+        assertTrue(plan.toInsert.transactions.none { it.amount == -5000L })
+    }
+
+    @Test
+    fun `transfer pair stays linked when both legs are new`() {
+        val data = sample()
+        val plan = BackupMerger.plan(data.copy(transactions = emptyList()), data)
+        val out = plan.toInsert.transactions.single { it.amount == -5000L }
+        val into = plan.toInsert.transactions.single { it.amount == 5000L }
+        assertEquals(into.id, out.pairedTransactionId)
+        assertEquals(out.id, into.pairedTransactionId)
+    }
+
+    @Test
+    fun `rejects backup with groups but no categories`() {
+        val data = sample().copy(categories = emptyList(), rules = emptyList(), budgets = emptyList())
+        assertRejected(BackupCodec.encode(data), "no categories")
+    }
 }

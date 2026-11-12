@@ -2,6 +2,7 @@ package com.spendtracker.app.ui.settings
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,6 +48,7 @@ import com.spendtracker.app.ui.theme.Spacing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.time.LocalDate
 
 private const val MAX_IMPORT_BYTES = 50L * 1024 * 1024
@@ -56,12 +58,29 @@ private suspend fun writeText(context: Context, uri: Uri, text: String) = withCo
     stream.use { it.write(text.toByteArray(Charsets.UTF_8)) }
 }
 
+private const val TOO_LARGE = "The file is too large to be a backup"
+
 private suspend fun readText(context: Context, uri: Uri): String = withContext(Dispatchers.IO) {
+    // Reject by the reported size first, then read through a bounded buffer in case it is unknown or wrong.
+    val reportedSize = runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null
+        }
+    }.getOrNull()
+    if (reportedSize != null && reportedSize > MAX_IMPORT_BYTES) error(TOO_LARGE)
     val stream = context.contentResolver.openInputStream(uri) ?: error("Couldn't open the file")
     stream.use { input ->
-        val bytes = input.readBytes()
-        if (bytes.size > MAX_IMPORT_BYTES) error("The file is too large to be a backup")
-        String(bytes, Charsets.UTF_8)
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(64 * 1024)
+        var total = 0L
+        while (true) {
+            val n = input.read(buffer)
+            if (n < 0) break
+            total += n
+            if (total > MAX_IMPORT_BYTES) error(TOO_LARGE)
+            out.write(buffer, 0, n)
+        }
+        String(out.toByteArray(), Charsets.UTF_8)
     }
 }
 

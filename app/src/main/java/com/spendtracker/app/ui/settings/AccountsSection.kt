@@ -16,6 +16,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -31,6 +32,7 @@ import com.spendtracker.app.data.AccountEntity
 import com.spendtracker.app.data.AccountNameCheck
 import com.spendtracker.app.data.checkAccountName
 import com.spendtracker.app.data.isProtectedAccount
+import com.spendtracker.app.data.isRecognisedBankName
 import com.spendtracker.app.ui.SettingsViewModel
 import com.spendtracker.app.ui.components.AppCard
 import com.spendtracker.app.ui.components.DestructiveButton
@@ -41,6 +43,7 @@ import com.spendtracker.app.ui.components.SheetActions
 import com.spendtracker.app.ui.components.SheetContainer
 import com.spendtracker.app.ui.components.SheetHeader
 import com.spendtracker.app.ui.theme.Spacing
+import com.spendtracker.app.ui.theme.SpendTrackerTheme
 
 private fun txLabel(count: Int): String = if (count == 1) "1 transaction" else "$count transactions"
 
@@ -124,7 +127,16 @@ fun AccountsSection(
                 viewModel.renameAccount(editing.id, name) { err -> if (err == null) editingId = null else onError(err) }
             },
             onDismiss = { editingId = null },
-            onDelete = { confirmDelete = true }
+            onDelete = { confirmDelete = true },
+            renameWarning = when {
+                isRecognisedBankName(editing.name) ->
+                    "New notifications from ${editing.name} will go to a new \"${editing.name}\" account. " +
+                        "Renaming updates the transactions already here."
+                (transactionCounts[editing.id] ?: 0) > 0 ->
+                    "If this account was created from bank notifications, new ones from that bank will create " +
+                        "a new \"${editing.name}\" account. Renaming updates the transactions already here."
+                else -> null
+            }
         )
         if (confirmDelete) {
             DeleteAccountDialog(
@@ -157,7 +169,8 @@ private fun AccountNameSheet(
     accounts: List<AccountEntity>,
     onSubmit: (name: String, onError: (String) -> Unit) -> Unit,
     onDismiss: () -> Unit,
-    onDelete: (() -> Unit)? = null
+    onDelete: (() -> Unit)? = null,
+    renameWarning: String? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var name by rememberSaveable(editingId) { mutableStateOf(initialName) }
@@ -186,11 +199,19 @@ private fun AccountNameSheet(
                 },
                 modifier = Modifier.fillMaxWidth()
             )
-            if (editingId != null) {
-                SettingsBodyText(
-                    "Renaming updates all of this account's transactions. Notifications from a bank are " +
-                        "still filed under that bank's name."
-                )
+            if (renameWarning != null) {
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = SpendTrackerTheme.finance.warningContainer,
+                    contentColor = SpendTrackerTheme.finance.onWarningContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        renameWarning,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(Spacing.md)
+                    )
+                }
             }
             SheetActions(
                 confirmLabel = confirmLabel,
@@ -249,7 +270,8 @@ private fun DeleteAccountDialog(
             DestructiveButton(
                 text = if (transactionCount == 0) "Delete" else "Move and delete",
                 enabled = transactionCount == 0 || moveToId != null,
-                onClick = { onConfirm(moveToId) { error = it } }
+                // Only pass a target when something will actually move.
+                onClick = { onConfirm(if (transactionCount == 0) null else moveToId) { error = it } }
             )
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }

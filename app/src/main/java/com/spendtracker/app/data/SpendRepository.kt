@@ -402,7 +402,8 @@ class SpendRepository(
         accountDao.observeTransactionCounts().map { rows -> rows.associate { it.accountId to it.count } }
 
     suspend fun validateAccountName(name: String, editingId: Long? = null): AccountNameCheck =
-        checkAccountName(name, accountDao.getAll(), editingId)
+        // Raw rows: the unique NOCASE index applies to them, and getAll() hides raw duplicates.
+        checkAccountName(name, accountDao.getAllRaw(), editingId)
 
     /** Throws [IllegalArgumentException] with a user-facing message when the name is not allowed. */
     suspend fun addAccount(name: String): Long {
@@ -438,6 +439,12 @@ class SpendRepository(
         }
         val target = raw.firstOrNull { it.id == moveToAccountId && it.id != id }
             ?: throw IllegalArgumentException("Choose an account to move its $count transactions to")
+        val transfers = accountDao.countTransfersBetween(id, target.id)
+        require(transfers == 0) {
+            "$transfers transfer ${if (transfers == 1) "row is" else "rows are"} between this account and " +
+                "${normalizeBankName(target.name)}, so moving would turn them into transfers to itself. " +
+                "Choose another account or delete those transfers first."
+        }
         accountDao.moveTransactionsAndDelete(id, target.id, normalizeBankName(target.name))
     }
 

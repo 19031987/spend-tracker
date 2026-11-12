@@ -1,5 +1,6 @@
 package com.spendtracker.app.ui
 
+import android.database.sqlite.SQLiteConstraintException
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.spendtracker.app.data.AccountEntity
@@ -101,6 +102,9 @@ class SettingsViewModel(
                 null
             } catch (e: IllegalArgumentException) {
                 e.message ?: "Something went wrong"
+            } catch (e: SQLiteConstraintException) {
+                // Unique NOCASE index on accounts.name (e.g. a raw duplicate the deduped list hides).
+                "An account with that name already exists"
             }
             onDone(error)
         }

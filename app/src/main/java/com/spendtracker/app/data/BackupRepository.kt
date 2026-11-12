@@ -59,7 +59,11 @@ class BackupRepository(private val db: AppDatabase) {
             }
         }
         val rows = plan.toInsert
-        rows.accounts.forEach { accountDao.insertRaw(it) }
+        rows.accounts.forEach {
+            // IGNORE would silently drop a clashing name and leave transactions pointing nowhere;
+            // throwing rolls the whole import back.
+            if (accountDao.insertRaw(it) <= 0) throw IllegalStateException("Couldn't restore account \"${it.name}\"")
+        }
         if (mode == ImportMode.REPLACE && rows.groups.isEmpty() && rows.categories.isEmpty()) {
             catalogDao.insertGroups(CatalogSeed.groups)
             catalogDao.insertCategories(CatalogSeed.categories)
