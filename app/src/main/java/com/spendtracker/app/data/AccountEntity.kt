@@ -189,5 +189,69 @@ abstract class AccountDao {
     }
 
     open suspend fun deleteDuplicates(): Int = consolidateDuplicates()
+
+    @Query("SELECT accountId, COUNT(*) AS count FROM transactions GROUP BY accountId")
+    abstract fun observeTransactionCounts(): Flow<List<AccountTransactionCount>>
+
+    @Query("SELECT COUNT(*) FROM transactions WHERE accountId = :id OR destinationAccountId = :id")
+    abstract suspend fun countTransactionsFor(id: Long): Int
+
+    @Query("DELETE FROM accounts")
+    abstract suspend fun clearAll()
+
+    /** Renames an account and keeps `transactions.source` in step (the UI reads it). */
+    @androidx.room.Transaction
+    open suspend fun rename(id: Long, newName: String) {
+        update(AccountEntity(id = id, name = newName))
+        updateTransactionSource(id, newName)
+    }
+
+    /** Moves every transaction (and transfer destination) from [fromId] to [toId], then deletes [fromId]. */
+    @androidx.room.Transaction
+    open suspend fun moveTransactionsAndDelete(fromId: Long, toId: Long, toName: String) {
+        remapTransactionAccountId(fromId, toId)
+        remapTransactionDestinationAccountId(fromId, toId)
+        updateTransactionSource(toId, toName)
+        deleteById(fromId)
+    }
+}
+
+data class AccountTransactionCount(val accountId: Long, val count: Int)
+
+/**
+ * Accounts that `cleanupAndConsolidateAccounts` (AppDatabase) recreates on every launch,
+ * so they can't be deleted or renamed away.
+ */
+val PROTECTED_ACCOUNT_NAMES: Set<String> = setOf("chase", "hsbc", "credit card")
+
+fun isProtectedAccount(name: String): Boolean =
+    normalizeBankName(name).lowercase(Locale.ROOT) in PROTECTED_ACCOUNT_NAMES
+
+sealed class AccountNameCheck {
+    /** [name] is what will be stored; [adjusted] when it differs from what was typed (beyond spacing). */
+    data class Valid(val name: String, val adjusted: Boolean) : AccountNameCheck()
+    data class Invalid(val reason: String) : AccountNameCheck()
+}
+
+/**
+ * Validates a manually entered account name against bank-name normalisation, so a manual
+ * account is never merged into another one by [AccountDao.consolidateDuplicates] or the
+ * launch-time clean-up (e.g. "Savings pot" normalises to "Chase").
+ */
+fun checkAccountName(input: String, existing: List<AccountEntity>, editingId: Long? = null): AccountNameCheck {
+    val typed = input.trim().replace(Regex("\\s+"), " ")
+    if (typed.isEmpty()) return AccountNameCheck.Invalid("Enter a name")
+    if (typed.length > 40) return AccountNameCheck.Invalid("Use 40 characters or fewer")
+    val normalized = normalizeBankName(typed)
+    if (normalized == "Others") return AccountNameCheck.Invalid("\"$typed\" is reserved; choose another name")
+    val clash = existing.firstOrNull {
+        it.id != editingId && normalizeBankName(it.name).equals(normalized, ignoreCase = true)
+    }
+    if (clash != null) {
+        val msg = if (normalized.equals(typed, ignoreCase = true)) "An account called \"$normalized\" already exists"
+            else "\"$typed\" is treated as \"$normalized\", which already exists"
+        return AccountNameCheck.Invalid(msg)
+    }
+    return AccountNameCheck.Valid(normalized, adjusted = !normalized.equals(typed, ignoreCase = true))
 }
 
