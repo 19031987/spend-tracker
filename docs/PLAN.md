@@ -21,13 +21,13 @@
 | Reviewer | read-only review of the branch; fixes routed back to owners |
 
 ## Steps
-- [ ] 1. Design system: spacing tokens + shared `AppCard`, `SectionHeader`, `EmptyState`, `SheetActions` (Cancel left / primary right, both full-width), `PrimaryButton`, `DestructiveButton`, `StatTile`, `AddNewButton` conventions; document in `ui/components/README.md`.
-- [ ] 2a. Recurring: "Add recurring payment" sheet (name, amount, frequency, next/anchor date, category, in/out); edit name/date too; merchantKey via `RecurringDetector.merchantKey`; refuse duplicate key (no silent REPLACE); "Ignored" section with Restore; unit tests.
-- [ ] 2b. Screens: adopt shared components/tokens on Dashboard, Transactions, Analytics, Comparison, Budget, CashFlow; remove duplicated composables.
-- [ ] 2c. Sheets + Goals: remove hard-coded colours/fontSize/shapes in Add/Edit/CategoryPicker; one button style; fix doubled "+"; Goals archived view + unarchive; Review/More aligned; no silent "Chase"/"HSBC" default account.
-- [ ] 2d. Settings + data: Settings restyled; manage accounts (add/rename/delete); edit categories (rename, emoji, colour, group, unhide); export to file via system Save dialog (JSON incl. budgets, goals, recurring, accounts, categories, rules) + import JSON; unit tests for export/import round trip.
-- [ ] 3. Reviewer pass; owners fix findings.
-- [ ] 4. Python mirror tests, bump to v2.2.0, commit, push.
+- [x] 1. Design system: spacing tokens + shared `AppCard`, `SectionHeader`, `EmptyState`, `SheetActions` (Cancel left / primary right, both full-width), `PrimaryButton`, `DestructiveButton`, `StatTile`, `AddNewButton` conventions; document in `ui/components/README.md`.
+- [x] 2a. Recurring: "Add recurring payment" sheet (name, amount, frequency, next/anchor date, category, in/out); edit name/date too; merchantKey via `RecurringDetector.merchantKey`; refuse duplicate key (no silent REPLACE); "Ignored" section with Restore; unit tests.
+- [x] 2b. Screens: adopt shared components/tokens on Dashboard, Transactions, Analytics, Comparison, Budget, CashFlow; remove duplicated composables.
+- [x] 2c. Sheets + Goals: remove hard-coded colours/fontSize/shapes in Add/Edit/CategoryPicker; one button style; fix doubled "+"; Goals archived view + unarchive; Review/More aligned; no silent "Chase"/"HSBC" default account.
+- [x] 2d. Settings + data: Settings restyled; manage accounts (add/rename/delete); edit categories (rename, emoji, colour, group, unhide); export to file via system Save dialog (JSON incl. budgets, goals, recurring, accounts, categories, rules) + import JSON; unit tests for export/import round trip.
+- [x] 3. Reviewer pass; owners fix findings.
+- [x] 4. Python mirror tests, bump to v2.2.0, commit, push.
 
 ## Testing
 - No Android SDK in cloud sessions: Kotlin compile + unit tests verified by CI, which only runs on PRs/pushes to `main` → needs a PR to get a build.
