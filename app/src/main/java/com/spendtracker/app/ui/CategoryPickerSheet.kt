@@ -2,7 +2,6 @@
 
 package com.spendtracker.app.ui
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,37 +11,33 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -53,22 +48,82 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.spendtracker.app.data.CategoryEntity
 import com.spendtracker.app.data.CategoryGroupEntity
 import com.spendtracker.app.data.TransactionType
-
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import com.spendtracker.app.ui.components.CategoryEmojiBox
+import com.spendtracker.app.ui.components.SectionHeader
+import com.spendtracker.app.ui.components.SheetActions
+import com.spendtracker.app.ui.components.SheetHeader
+import com.spendtracker.app.ui.components.TonalButton
+import com.spendtracker.app.ui.theme.ScreenPadding
+import com.spendtracker.app.ui.theme.Spacing
+import com.spendtracker.app.ui.theme.SpendTrackerTheme
 import com.spendtracker.app.ui.util.ColorUtils
 
 val DEFAULT_EMOJIS = listOf("🛒", "☕", "🍽️", "🛍️", "🎮", "🍿", "🏠", "⚡", "🚇", "⛽", "🚗", "💰", "🏋️", "📚", "💊", "✈️", "🏷️", "🔧")
 val DEFAULT_PASTEL_COLORS = listOf("#FED7AA", "#FBCFE8", "#DBEAFE", "#D1FAE5", "#DDD6FE", "#FDE68A", "#E2E8F0", "#CFFAFE", "#FCE7F3")
 
 fun parseColorHex(hex: String): Color = ColorUtils.parseColorHex(hex)
+
+/**
+ * "Category" field shared by the Add and Edit transaction sheets: category avatar + name
+ * (or an amber "Uncategorized" placeholder) with a "Change" action. Tapping anywhere opens
+ * the picker.
+ */
+@Composable
+internal fun CategoryField(
+    category: CategoryEntity?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val finance = SpendTrackerTheme.finance
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+        Text("Category", style = MaterialTheme.typography.labelLarge)
+        Surface(
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = Spacing.md, end = Spacing.xs, top = Spacing.sm, bottom = Spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+            ) {
+                if (category != null) {
+                    CategoryEmojiBox(emoji = category.emoji, colorHex = category.colorHex, size = 36.dp)
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(finance.warningContainer)
+                            .border(1.dp, finance.warning, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("❓", style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+                Text(
+                    text = category?.name ?: "Uncategorized",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (category != null) MaterialTheme.colorScheme.onSurface else finance.warning,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = onClick) { Text("Change") }
+            }
+        }
+    }
+}
 
 @Composable
 fun CategoryPickerDialog(
@@ -97,10 +152,8 @@ fun CategoryPickerDialog(
             modifier = Modifier
                 .fillMaxWidth(0.94f)
                 .fillMaxHeight(0.86f),
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-            shadowElevation = 12.dp
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh
         ) {
             CategoryPickerContent(
                 groups = groups,
@@ -111,7 +164,9 @@ fun CategoryPickerDialog(
                 onDismiss = onDismiss,
                 onCategorySelected = onCategorySelected,
                 onCreateCategory = onCreateCategory,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = Spacing.md)
             )
         }
     }
@@ -190,26 +245,14 @@ fun CategoryPickerContent(
     var selectedColorHex by rememberSaveable { mutableStateOf("#FED7AA") }
     var autoRuleChecked by rememberSaveable { mutableStateOf(true) }
 
+    val sidePadding = ScreenPadding.sheetHorizontalPadding
+
     Column(modifier = modifier) {
-            // Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (isCreateMode) "Create Custom Category" else "Choose Category",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                IconButton(onClick = {
-                    if (isCreateMode) isCreateMode = false else onDismiss()
-                }) {
-                    Icon(Icons.Default.Close, contentDescription = "Close")
-                }
-            }
+            SheetHeader(
+                title = if (isCreateMode) "New category" else "Choose category",
+                onClose = { if (isCreateMode) isCreateMode = false else onDismiss() },
+                modifier = Modifier.padding(start = sidePadding, end = Spacing.xs, bottom = Spacing.sm)
+            )
 
             if (!isCreateMode) {
                 // Search Bar
@@ -221,8 +264,7 @@ fun CategoryPickerContent(
                     singleLine = true,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(14.dp)
+                        .padding(horizontal = sidePadding)
                 )
 
                 // Hierarchical Category List
@@ -238,8 +280,8 @@ fun CategoryPickerContent(
                     modifier = Modifier
                         .weight(1f)
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 20.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                        .padding(horizontal = sidePadding, vertical = Spacing.md),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.lg)
                 ) {
                     val activeGroups = groups.filter { g ->
                         filteredCategories.any { it.groupId == g.id }
@@ -247,59 +289,35 @@ fun CategoryPickerContent(
 
                     activeGroups.forEach { group ->
                         val groupCats = filteredCategories.filter { it.groupId == group.id }
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(group.emoji, fontSize = 14.sp)
-                                Text(
-                                    group.name,
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                            SectionHeader(title = "${group.emoji}  ${group.name}", small = true)
 
                             groupCats.forEach { cat ->
                                 val isSelected = cat.key == selectedCategoryKey
                                 Surface(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .clickable {
-                                            onCategorySelected(cat)
-                                            onDismiss()
-                                        },
-                                    color = if (isSelected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
-                                    shape = RoundedCornerShape(12.dp)
+                                    onClick = {
+                                        onCategorySelected(cat)
+                                        onDismiss()
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                                    shape = MaterialTheme.shapes.small
                                 ) {
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                        horizontalArrangement = Arrangement.spacedBy(Spacing.md)
                                     ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(36.dp)
-                                                    .clip(RoundedCornerShape(10.dp))
-                                                    .background(parseColorHex(cat.colorHex)),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(cat.emoji, fontSize = 18.sp)
-                                            }
-                                            Text(
-                                                cat.name,
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                            )
-                                        }
+                                        CategoryEmojiBox(emoji = cat.emoji, colorHex = cat.colorHex, size = 36.dp)
+                                        Text(
+                                            cat.name,
+                                            style = if (isSelected) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyLarge,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
                                         if (isSelected) {
                                             Icon(
                                                 Icons.Default.Check,
@@ -315,55 +333,44 @@ fun CategoryPickerContent(
                     }
                 }
 
-                // Sticky Add New Category Footer
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    tonalElevation = 4.dp,
-                    shadowElevation = 8.dp
-                ) {
-                    Box(modifier = Modifier.padding(16.dp)) {
-                        Button(
-                            onClick = { isCreateMode = true },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("+ Add New Category", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
+                // Sticky "Add category" footer
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                TonalButton(
+                    text = "Add category",
+                    onClick = { isCreateMode = true },
+                    leadingIcon = Icons.Filled.Add,
+                    fullWidth = true,
+                    modifier = Modifier.padding(horizontal = sidePadding, vertical = Spacing.md)
+                )
             } else {
                 // CREATE CUSTOM CATEGORY FORM
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 20.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                        .padding(start = sidePadding, end = sidePadding, top = Spacing.sm, bottom = ScreenPadding.sheetBottomPadding),
+                    verticalArrangement = Arrangement.spacedBy(ScreenPadding.sheetItemSpacing)
                 ) {
                     OutlinedTextField(
                         value = newCatName,
                         onValueChange = { newCatName = it },
-                        label = { Text("Category Name") },
+                        label = { Text("Category name") },
                         placeholder = { Text("e.g. Garden & Hardware") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                        modifier = Modifier.fillMaxWidth()
                     )
 
                     // Parent Group Selector
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Parent Group", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                        Text("Parent group", style = MaterialTheme.typography.labelLarge)
                         var groupDropdownExpanded by rememberSaveable { mutableStateOf(false) }
-                        val activeGroupName = if (isInlineNewGroup) "+ New Group"
-                        else groups.firstOrNull { it.id == selectedGroupId }?.name ?: "Select Group"
+                        val activeGroupName = if (isInlineNewGroup) "New group"
+                        else groups.firstOrNull { it.id == selectedGroupId }?.name ?: "Select group"
 
                         Box {
                             OutlinedButton(
                                 onClick = { groupDropdownExpanded = true },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp)
+                                modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(activeGroupName, modifier = Modifier.weight(1f))
                             }
@@ -382,7 +389,8 @@ fun CategoryPickerContent(
                                     )
                                 }
                                 DropdownMenuItem(
-                                    text = { Text("➕ + Create New Group...", fontWeight = FontWeight.Bold) },
+                                    text = { Text("New group…") },
+                                    leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
                                     onClick = {
                                         isInlineNewGroup = true
                                         groupDropdownExpanded = false
@@ -395,49 +403,51 @@ fun CategoryPickerContent(
                             OutlinedTextField(
                                 value = newGroupNameText,
                                 onValueChange = { newGroupNameText = it },
-                                label = { Text("New Group Name") },
+                                label = { Text("New group name") },
                                 placeholder = { Text("e.g. Home Improvement") },
                                 singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp)
+                                modifier = Modifier.fillMaxWidth()
                             )
                         }
                     }
 
                     // Emoji Selector
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Category Icon Emoji", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                        Text("Icon", style = MaterialTheme.typography.labelLarge)
                         FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
                         ) {
                             DEFAULT_EMOJIS.forEach { emoji ->
                                 val isSelected = emoji == selectedEmoji
                                 Box(
                                     modifier = Modifier
                                         .size(40.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)
+                                        .clip(MaterialTheme.shapes.small)
+                                        .background(
+                                            if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                                            else MaterialTheme.colorScheme.surfaceContainerHighest
+                                        )
                                         .border(
                                             width = if (isSelected) 2.dp else 0.dp,
                                             color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                            shape = RoundedCornerShape(10.dp)
+                                            shape = MaterialTheme.shapes.small
                                         )
                                         .clickable { selectedEmoji = emoji },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(emoji, fontSize = 20.sp)
+                                    Text(emoji, style = MaterialTheme.typography.titleLarge)
                                 }
                             }
                         }
                     }
 
                     // Pastel Color Swatch Picker
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Badge Color Swatch", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                        Text("Colour", style = MaterialTheme.typography.labelLarge)
                         FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.md)
                         ) {
                             DEFAULT_PASTEL_COLORS.forEach { hex ->
                                 val color = parseColorHex(hex)
@@ -449,7 +459,8 @@ fun CategoryPickerContent(
                                         .background(color)
                                         .border(
                                             width = if (isSelected) 3.dp else 1.dp,
-                                            color = if (isSelected) Color.Black else Color.LightGray,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onSurface
+                                            else MaterialTheme.colorScheme.outlineVariant,
                                             shape = CircleShape
                                         )
                                         .clickable { selectedColorHex = hex }
@@ -461,16 +472,14 @@ fun CategoryPickerContent(
                     // Rule Checkbox
                     if (!currentMerchant.isNullOrBlank()) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
                         ) {
                             Checkbox(
                                 checked = autoRuleChecked,
                                 onCheckedChange = { autoRuleChecked = it }
                             )
-                            Spacer(Modifier.width(4.dp))
                             Text(
                                 "Always categorize future transactions from \"$currentMerchant\" as this category",
                                 style = MaterialTheme.typography.bodySmall
@@ -478,41 +487,24 @@ fun CategoryPickerContent(
                         }
                     }
 
-                    Spacer(Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = { isCreateMode = false },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Cancel")
-                        }
-                        Button(
-                            enabled = newCatName.isNotBlank() && (!isInlineNewGroup || newGroupNameText.isNotBlank()),
-                            onClick = {
-                                onCreateCategory(
-                                    newCatName.trim(),
-                                    if (isInlineNewGroup) null else selectedGroupId,
-                                    if (isInlineNewGroup) newGroupNameText.trim() else null,
-                                    selectedEmoji,
-                                    selectedColorHex,
-                                    transactionType,
-                                    if (autoRuleChecked) currentMerchant?.trim() else null
-                                )
-                                onDismiss()
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Save & Assign", fontWeight = FontWeight.Bold)
-                        }
-                    }
+                    SheetActions(
+                        confirmLabel = "Save",
+                        confirmEnabled = newCatName.isNotBlank() && (!isInlineNewGroup || newGroupNameText.isNotBlank()),
+                        onConfirm = {
+                            onCreateCategory(
+                                newCatName.trim(),
+                                if (isInlineNewGroup) null else selectedGroupId,
+                                if (isInlineNewGroup) newGroupNameText.trim() else null,
+                                selectedEmoji,
+                                selectedColorHex,
+                                transactionType,
+                                if (autoRuleChecked) currentMerchant?.trim() else null
+                            )
+                            onDismiss()
+                        },
+                        onDismiss = { isCreateMode = false }
+                    )
                 }
             }
         }
     }
-

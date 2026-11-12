@@ -139,6 +139,7 @@ fun SpendTrackerScreen(container: AppContainer) {
     val accounts by transactionsVm.accounts.collectAsStateWithLifecycle()
     val groups by transactionsVm.groups.collectAsStateWithLifecycle()
     val categories by transactionsVm.categories.collectAsStateWithLifecycle()
+    val defaultAccountId by addVm.defaultAccountId.collectAsStateWithLifecycle()
     val transactionsList by transactionsVm.transactions.collectAsStateWithLifecycle()
     val addState by addVm.state.collectAsStateWithLifecycle()
 
@@ -349,6 +350,7 @@ fun SpendTrackerScreen(container: AppContainer) {
     if (showSheet) {
         AddTransactionSheet(
             accounts = accounts,
+            defaultAccountId = defaultAccountId,
             groups = groups,
             categories = categories,
             isSaving = addState.isSaving,

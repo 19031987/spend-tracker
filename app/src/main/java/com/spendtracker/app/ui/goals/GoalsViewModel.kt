@@ -27,8 +27,27 @@ data class GoalsUiState(
     val totalSavedMinor: Long = 0L,
     val totalTargetMinor: Long = 0L,
     /** Raw (non-archived) entities, used by the edit sheet for starting amounts. */
-    val goalEntities: List<GoalEntity> = emptyList()
+    val goalEntities: List<GoalEntity> = emptyList(),
+    /** Archived goals, most recently created first (see [archivedGoalProgress]). */
+    val archivedGoals: List<GoalProgress> = emptyList()
 )
+
+/**
+ * Progress of the archived goals only (GoalCalculator.summary skips them), newest first,
+ * so they can be listed under "Archived" and restored.
+ */
+internal fun archivedGoalProgress(
+    goals: List<GoalEntity>,
+    contributions: List<GoalContributionEntity>,
+    today: LocalDate,
+    zone: ZoneId
+): List<GoalProgress> {
+    val byGoal: Map<Long, List<GoalContributionEntity>> = contributions.groupBy { it.goalId }
+    return goals
+        .filter { it.archived }
+        .sortedWith(compareByDescending<GoalEntity> { it.createdAt }.thenByDescending { it.id })
+        .map { goal -> GoalCalculator.progress(goal, byGoal[goal.id].orEmpty(), today, zone) }
+}
 
 class GoalsViewModel(private val planningRepository: PlanningRepository) : ViewModel() {
 
@@ -56,7 +75,8 @@ class GoalsViewModel(private val planningRepository: PlanningRepository) : ViewM
             },
             totalSavedMinor = progress.sumOf { it.savedMinor },
             totalTargetMinor = progress.sumOf { it.targetMinor },
-            goalEntities = goals.filter { !it.archived }
+            goalEntities = goals.filter { !it.archived },
+            archivedGoals = archivedGoalProgress(goals, contributions, LocalDate.now(zone), zone)
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GoalsUiState())
 
@@ -102,6 +122,15 @@ class GoalsViewModel(private val planningRepository: PlanningRepository) : ViewM
                 .firstOrNull { it.id == id } ?: return@launch
             planningRepository.updateGoal(existing.copy(archived = true))
             selectedId.update { current -> if (current == id) null else current }
+        }
+    }
+
+    /** Moves an archived goal back to the active list (sets archived = false). */
+    fun unarchiveGoal(id: Long) {
+        viewModelScope.launch {
+            val existing: GoalEntity = planningRepository.observeGoals().first()
+                .firstOrNull { it.id == id } ?: return@launch
+            planningRepository.updateGoal(existing.copy(archived = false))
         }
     }
 
