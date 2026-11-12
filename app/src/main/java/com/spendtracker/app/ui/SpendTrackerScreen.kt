@@ -56,8 +56,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CompareArrows
 import androidx.compose.material.icons.filled.Insights
@@ -68,23 +66,17 @@ import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -100,8 +92,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
@@ -113,9 +103,15 @@ import com.spendtracker.app.AppContainer
 import com.spendtracker.app.data.TransactionType
 import com.spendtracker.app.data.normalizeBankName
 import com.spendtracker.app.domain.TransactionItem
-import com.spendtracker.app.ui.components.StatusPill
+import com.spendtracker.app.ui.components.AppCard
+import com.spendtracker.app.ui.components.EmptyState
+import com.spendtracker.app.ui.components.PrimaryButton
+import com.spendtracker.app.ui.components.SectionHeader
 import com.spendtracker.app.ui.components.TransactionRowItem
 import com.spendtracker.app.ui.components.groupTransactionsByDay
+import com.spendtracker.app.ui.dashboard.MonthSummaryHeroCard
+import com.spendtracker.app.ui.theme.ScreenPadding
+import com.spendtracker.app.ui.theme.Spacing
 import com.spendtracker.app.ui.theme.SpendTrackerTheme
 import com.spendtracker.app.ui.util.ColorUtils
 import com.spendtracker.app.ui.util.CurrencyUtils
@@ -327,8 +323,9 @@ fun SpendTrackerScreen(container: AppContainer) {
                         onSearchChange = { searchQuery = it },
                         onTransactionClick = { editingTransaction = it },
                         onCategoryPillClick = { quickCategoryTx = it },
-                        // Leave room for the FAB so it never covers the last row.
-                        contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp),
+                        // No horizontal padding: TransactionRowItem insets itself by 16dp, so the
+                        // other items add ScreenPadding.horizontal themselves. Bottom leaves FAB room.
+                        contentPadding = PaddingValues(top = ScreenPadding.top, bottom = ScreenPadding.bottom),
                         modifier = contentModifier
                     )
                     MainTab.CASH_FLOW -> CashFlowRoute(
@@ -523,26 +520,37 @@ private fun TransactionsFeed(
     LazyColumn(
         modifier = modifier.fillMaxWidth(),
         contentPadding = contentPadding,
+        // spacedBy(0): rows of one day form a single grouped block; sections space themselves.
         verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
         item(key = "hero") {
-            MonthSummaryCard(
+            MonthSummaryHeroCard(
                 monthName = currentMonthName,
-                monthSpent = monthSpent,
-                monthIncome = monthIncome,
-                carriedOver = carriedOverSalary,
-                netRemaining = netRemaining,
-                modifier = Modifier.padding(horizontal = 16.dp)
+                spentMinor = monthSpent,
+                incomeMinor = monthIncome,
+                netMinor = netRemaining,
+                carriedOverMinor = carriedOverSalary,
+                modifier = Modifier.padding(horizontal = ScreenPadding.horizontal)
             )
         }
 
         if (deduplicatedAccounts.isNotEmpty()) {
-            item(key = "accounts_header") { SectionHeader("Accounts") }
+            item(key = "accounts_header") {
+                SectionHeader(
+                    title = "Accounts",
+                    modifier = Modifier.padding(
+                        start = ScreenPadding.horizontal,
+                        end = ScreenPadding.horizontal,
+                        top = Spacing.xl,
+                        bottom = Spacing.md
+                    )
+                )
+            }
             item(key = "accounts") {
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    contentPadding = PaddingValues(horizontal = ScreenPadding.horizontal),
+                    horizontalArrangement = Arrangement.spacedBy(ScreenPadding.listItemSpacing)
                 ) {
                     items(deduplicatedAccounts, key = { it.id }) { acc ->
                         val cleanName = normalizeBankName(acc.name)
@@ -574,7 +582,7 @@ private fun TransactionsFeed(
                 onValueChange = onSearchChange,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, top = 20.dp),
+                    .padding(start = ScreenPadding.horizontal, end = ScreenPadding.horizontal, top = Spacing.xl),
                 placeholder = { Text("Search merchant, category, note or amount") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
@@ -608,9 +616,9 @@ private fun TransactionsFeed(
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 20.dp, bottom = 4.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(top = Spacing.md, bottom = Spacing.xs),
+                contentPadding = PaddingValues(horizontal = ScreenPadding.horizontal),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
             ) {
                 items(baseFilters + bankFilters, key = { it.first }) { (key, label) ->
                     val selected = filterType == key
@@ -627,14 +635,31 @@ private fun TransactionsFeed(
         }
 
         if (dayGroups.isEmpty()) {
-            item(key = "empty") { EmptyTransactions() }
+            item(key = "empty") {
+                EmptyState(
+                    icon = Icons.Outlined.ReceiptLong,
+                    title = "No transactions yet",
+                    body = "Spend alerts from your bank will appear here, or tap Add to log one.",
+                    modifier = Modifier.padding(
+                        start = ScreenPadding.horizontal,
+                        end = ScreenPadding.horizontal,
+                        top = Spacing.md
+                    )
+                )
+            }
         } else {
             dayGroups.forEach { group ->
                 item(key = "day_header_${group.dayKey}") {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp),
+                            // 16dp list grid + 4dp text indent, matching SectionHeader.
+                            .padding(
+                                start = ScreenPadding.horizontal + Spacing.xs,
+                                end = ScreenPadding.horizontal + Spacing.xs,
+                                top = Spacing.xl,
+                                bottom = Spacing.sm
+                            ),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -682,33 +707,17 @@ private enum class MainTab(
 }
 
 @Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 12.dp)
-    )
-}
-
-@Composable
 private fun NotificationAccessBanner(onEnable: () -> Unit) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-        )
+    AppCard(
+        modifier = Modifier.padding(horizontal = ScreenPadding.horizontal, vertical = Spacing.sm),
+        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        contentPadding = Spacing.md
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
             Icon(Icons.Outlined.NotificationsActive, contentDescription = null)
             Column(modifier = Modifier.weight(1f)) {
@@ -718,152 +727,9 @@ private fun NotificationAccessBanner(onEnable: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            TextButton(onClick = onEnable) { Text("Enable") }
+            PrimaryButton(text = "Enable", onClick = onEnable)
         }
     }
-}
-
-/**
- * Hero card: this month's spend as the headline figure, with money in / out and
- * the running balance (prior months' carry-over + this month's net) beneath it.
- */
-@Composable
-private fun MonthSummaryCard(
-    monthName: String,
-    monthSpent: Long,
-    monthIncome: Long,
-    carriedOver: Long,
-    netRemaining: Long,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        )
-    ) {
-        Column(modifier = Modifier.padding(24.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Spent in $monthName",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                )
-                StatusPill(isPositive = netRemaining >= 0, amountMinor = kotlin.math.abs(netRemaining))
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // Full-width, single line, auto-shrinking so large amounts never truncate.
-            AutoSizeAmount(
-                text = CurrencyUtils.formatMinor(monthSpent),
-                style = MaterialTheme.typography.displaySmall
-            )
-
-            Spacer(Modifier.height(20.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                SummaryStat(
-                    icon = Icons.Default.ArrowDownward,
-                    label = "Money in",
-                    value = CurrencyUtils.formatMinor(monthIncome),
-                    modifier = Modifier.weight(1f)
-                )
-                SummaryStat(
-                    icon = Icons.Default.ArrowUpward,
-                    label = "Money out",
-                    value = CurrencyUtils.formatMinor(monthSpent),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            if (carriedOver != 0L) {
-                Spacer(Modifier.height(16.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.12f))
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "Carried over from earlier months",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    Text(
-                        CurrencyUtils.formatSignedMinor(carriedOver),
-                        style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
-                        softWrap = false
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SummaryStat(
-    icon: ImageVector,
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier,
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
-        contentColor = MaterialTheme.colorScheme.onSurface
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-            }
-            Column {
-                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(value, style = MaterialTheme.typography.titleSmall, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-            }
-        }
-    }
-}
-
-/** Single-line text that steps its font size down until it fits the available width. */
-@Composable
-private fun AutoSizeAmount(text: String, style: TextStyle) {
-    var scaledStyle by remember(text, style) { mutableStateOf(style) }
-    Text(
-        text = text,
-        style = scaledStyle,
-        maxLines = 1,
-        softWrap = false,
-        modifier = Modifier.fillMaxWidth(),
-        onTextLayout = { result ->
-            if (result.didOverflowWidth && scaledStyle.fontSize.value > 18f) {
-                scaledStyle = scaledStyle.copy(fontSize = scaledStyle.fontSize * 0.9f)
-            }
-        }
-    )
 }
 
 @Composable
@@ -875,90 +741,50 @@ private fun AccountCard(
 ) {
     val (_, brand) = ColorUtils.getBankBrandColors(name)
     val finance = SpendTrackerTheme.finance
-    OutlinedCard(
+    AppCard(
         modifier = Modifier.width(184.dp),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+        verticalSpacing = Spacing.xs
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(brand.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(brand.copy(alpha = 0.14f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Outlined.AccountBalance, contentDescription = null, tint = brand, modifier = Modifier.size(18.dp))
-                }
-                Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Icon(Icons.Outlined.AccountBalance, contentDescription = null, tint = brand, modifier = Modifier.size(18.dp))
             }
-            Spacer(Modifier.height(8.dp))
-            Text("Balance", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(
-                text = CurrencyUtils.formatSignedMinor(remaining),
-                style = MaterialTheme.typography.titleLarge,
-                color = if (remaining >= 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(4.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "+${CurrencyUtils.formatMinor(income)}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = finance.income,
-                    maxLines = 1,
-                    softWrap = false
-                )
-                Text(
-                    "−${CurrencyUtils.formatMinor(spent)}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    softWrap = false
-                )
-            }
+            Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-    }
-}
-
-@Composable
-private fun EmptyTransactions() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 32.dp, vertical = 48.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(64.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Outlined.ReceiptLong,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(28.dp)
-            )
-        }
-        Text("No transactions yet", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(Spacing.xs))
+        Text("Balance", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(
-            "Spend alerts from your bank will appear here, or tap Add to log one.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
+            text = CurrencyUtils.formatSignedMinor(remaining),
+            style = MaterialTheme.typography.titleLarge,
+            color = if (remaining >= 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
         )
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+            Text(
+                "+${CurrencyUtils.formatMinor(income)}",
+                style = MaterialTheme.typography.labelMedium,
+                color = finance.income,
+                maxLines = 1,
+                softWrap = false
+            )
+            Text(
+                "−${CurrencyUtils.formatMinor(spent)}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
     }
 }

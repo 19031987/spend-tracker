@@ -14,21 +14,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.text.font.FontWeight
+import com.spendtracker.app.ui.theme.ScreenPadding
+import com.spendtracker.app.ui.theme.Spacing
 import com.spendtracker.app.ui.theme.SpendTrackerTheme
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,12 +38,15 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spendtracker.app.domain.CategoryShare
 import com.spendtracker.app.domain.ChartBar
 import com.spendtracker.app.domain.Period
+import com.spendtracker.app.ui.components.AppCard
 import com.spendtracker.app.ui.components.BaselineBanner
+import com.spendtracker.app.ui.components.EmptyState
+import com.spendtracker.app.ui.components.SectionHeader
+import com.spendtracker.app.ui.components.StatTile
 import com.spendtracker.app.ui.util.CurrencyUtils
 import kotlin.math.abs
 import kotlin.math.max
@@ -75,12 +74,12 @@ fun AnalyticsContent(
     LazyColumn(
         modifier = modifier.fillMaxWidth(),
         contentPadding = PaddingValues(
-            start = 16.dp,
-            end = 16.dp,
-            top = contentPadding.calculateTopPadding() + 16.dp,
-            bottom = contentPadding.calculateBottomPadding() + 16.dp
+            start = ScreenPadding.horizontal,
+            end = ScreenPadding.horizontal,
+            top = contentPadding.calculateTopPadding() + ScreenPadding.top,
+            bottom = contentPadding.calculateBottomPadding() + ScreenPadding.bottom
         ),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(ScreenPadding.listItemSpacing)
     ) {
         item {
             val periods = Period.values()
@@ -99,42 +98,33 @@ fun AnalyticsContent(
         item { SummaryCard(state) }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        "This ${state.period.label.lowercase()} vs previous",
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    SpendBarChart(bars = state.bars, modifier = Modifier.fillMaxWidth())
-                    ChartLegend()
-                }
+            AppCard(verticalSpacing = Spacing.md) {
+                Text(
+                    "This ${state.period.label.lowercase()} vs previous",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                SpendBarChart(bars = state.bars, modifier = Modifier.fillMaxWidth())
+                ChartLegend()
             }
         }
 
         if (state.insights.isNotEmpty()) {
-            item {
-                Text(
-                    "Spending Insights",
-                    style = MaterialTheme.typography.titleMedium
-                )
-            }
+            item { SectionHeader("Spending insights") }
             items(state.insights) { insight ->
                 SpendingInsightCard(insight)
             }
         }
 
-        item { Text("Top categories", style = MaterialTheme.typography.titleMedium) }
+        item { SectionHeader("Top categories") }
 
         if (state.categories.isEmpty() && !state.isLoading) {
-            item {
-                Text(
-                    "No spending recorded in this period.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            item { EmptyState(body = "No spending recorded in this period.") }
+        } else if (state.categories.isNotEmpty()) {
+            item(key = "top_categories") {
+                AppCard(verticalSpacing = Spacing.md) {
+                    state.categories.forEach { CategoryRow(it) }
+                }
             }
-        } else {
-            items(state.categories, key = { it.categoryKey }) { CategoryRow(it) }
         }
 
         state.error?.let { msg ->
@@ -145,49 +135,42 @@ fun AnalyticsContent(
 
 @Composable
 private fun SummaryCard(state: AnalyticsUiState) {
-    Card(modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+    AppCard(verticalSpacing = Spacing.md) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Total spend", style = MaterialTheme.typography.labelLarge)
+            Column(Modifier.weight(1f)) {
+                Text("Total spend", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    formatMoney(state.currentTotalMinor),
+                    style = MaterialTheme.typography.headlineMedium,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (!state.isInitialPeriod) {
                     Text(
-                        formatMoney(state.currentTotalMinor),
-                        style = MaterialTheme.typography.headlineMedium,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis
+                        "Previous: ${formatMoney(state.previousTotalMinor)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (!state.isInitialPeriod) {
-                        Text(
-                            "Previous: ${formatMoney(state.previousTotalMinor)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        Text(
-                            "Building baseline: cycle in progress",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                } else {
+                    Text(
+                        "Building baseline: cycle in progress",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-                DeltaBadge(state.deltaPercent, state.currentTotalMinor, state.isInitialPeriod)
             }
+            DeltaBadge(state.deltaPercent, state.currentTotalMinor, state.isInitialPeriod)
+        }
 
-            MicroKpiStrip(state)
+        MicroKpiStrip(state)
 
-            if (state.isInitialPeriod) {
-                BaselineBanner(message = state.onboardingMessage)
-            }
+        if (state.isInitialPeriod) {
+            BaselineBanner(message = state.onboardingMessage)
         }
     }
 }
@@ -196,80 +179,48 @@ private fun SummaryCard(state: AnalyticsUiState) {
 private fun MicroKpiStrip(state: AnalyticsUiState) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
-        KpiPill(
+        StatTile(
             label = "Daily Avg",
             value = CurrencyUtils.formatMinor(state.dailyAverageMinor),
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f),
+            compact = true,
+            centered = true,
+            containerColor = MaterialTheme.colorScheme.surface
         )
-        KpiPill(
+        StatTile(
             label = "Projected",
             value = CurrencyUtils.formatMinor(state.projectedPeriodTotalMinor ?: state.currentTotalMinor),
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f),
+            compact = true,
+            centered = true,
+            containerColor = MaterialTheme.colorScheme.surface
         )
         val savingsColor = if (state.netSavingsMinor >= 0) {
             SpendTrackerTheme.finance.income
         } else {
             SpendTrackerTheme.finance.expense
         }
-        KpiPill(
+        StatTile(
             label = "Net Savings",
             value = CurrencyUtils.formatSignedMinor(state.netSavingsMinor),
             valueColor = savingsColor,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f),
+            compact = true,
+            centered = true,
+            containerColor = MaterialTheme.colorScheme.surface
         )
     }
 }
 
 @Composable
-private fun KpiPill(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-    valueColor: Color = MaterialTheme.colorScheme.onSurface
-) {
-    Surface(
-        modifier = modifier,
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surface
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = valueColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-@Composable
 private fun SpendingInsightCard(insight: SpendingTrendInsight, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-    ) {
+    AppCard(modifier = modifier) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
             Box(
                 modifier = Modifier
@@ -280,7 +231,7 @@ private fun SpendingInsightCard(insight: SpendingTrendInsight, modifier: Modifie
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Text(insight.emoji, fontSize = 20.sp)
+                Text(insight.emoji, style = MaterialTheme.typography.titleLarge)
             }
             Column(
                 modifier = Modifier.weight(1f),
@@ -288,7 +239,7 @@ private fun SpendingInsightCard(insight: SpendingTrendInsight, modifier: Modifie
             ) {
                 Text(
                     text = insight.title,
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
@@ -312,8 +263,8 @@ fun DeltaBadge(
     if (isInitialPeriod) {
         Box(
             modifier = modifier
-                .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(50))
-                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
+                .padding(horizontal = Spacing.md, vertical = 6.dp)
                 .semantics { contentDescription = "Building baseline" }
         ) {
             Text(
@@ -345,8 +296,8 @@ fun DeltaBadge(
     }
     Box(
         modifier = modifier
-            .background(container, RoundedCornerShape(50))
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .background(container, CircleShape)
+            .padding(horizontal = Spacing.md, vertical = 6.dp)
             .semantics { contentDescription = "Change versus previous period: $text" }
     ) {
         Text(text, color = content, style = MaterialTheme.typography.labelLarge, maxLines = 1)
@@ -355,7 +306,7 @@ fun DeltaBadge(
 
 @Composable
 private fun ChartLegend() {
-    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.lg), verticalAlignment = Alignment.CenterVertically) {
         LegendDot(MaterialTheme.colorScheme.primary, "Current")
         LegendDot(MaterialTheme.colorScheme.outlineVariant, "Previous")
     }
@@ -439,7 +390,7 @@ private fun CategoryRow(share: CategoryShare) {
             Text(
                 share.displayLabel,
                 style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.weight(1f).padding(end = 8.dp),
+                modifier = Modifier.weight(1f).padding(end = Spacing.sm),
                 maxLines = 1,
                 softWrap = false,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
