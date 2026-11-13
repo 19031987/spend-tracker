@@ -21,14 +21,14 @@ No Android SDK in cloud sessions: rely on the Python mirror tests there and let 
   - `ui/`: Compose screens + ViewModels, `theme/`, `components/`
 - `app/src/test/java/...`: JVM unit tests (mirror the main package layout)
 - Root `test_*.py`: Python mirrors of Kotlin logic; `simulator/` + `generate_simulator.py`: HTML simulator
-- `docs/planning-features-spec.md`, `docs/research/`, `docs/play-release-setup.md`, `PLAY_STORE_GUIDE.md`
+- `docs/planning-features-spec.md`, `docs/research/`, `docs/release-setup.md`
 
 ## Rules and gotchas
 
 - **Python mirrors must stay in sync.** `test_spend_parser.py` mirrors `SpendParser.kt` 1:1 (same regexes, same precedence); `test_categorization_engine.py` mirrors `CategorizationEngine.kt`; `test_bank_deduplication.py` mirrors bank normalisation/account consolidation. Change the Kotlin and its mirror together, and add a regression test for every parsing bug.
 - Add/update Kotlin unit tests in `app/src/test/` for domain and parser changes.
 - User-visible releases: bump `versionCode` and `versionName` in `app/build.gradle.kts` and mention the version in the commit subject (e.g. `… (v2.1.2)`).
-- Signing material (`*.jks`, `keystore.properties`) never goes in git; CI gets it from secrets (see `docs/play-release-setup.md`).
+- Signing material (`*.jks`, `keystore.properties`) never goes in git; CI gets it from secrets (see `docs/release-setup.md`).
 - Privacy: transaction data stays on device; don't add network calls or analytics without asking.
 - Merges to `main` trigger the release build; work on feature branches.
 

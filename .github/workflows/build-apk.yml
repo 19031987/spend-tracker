@@ -53,7 +53,7 @@ jobs:
           echo "RELEASE_STORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
           echo "Release signing key loaded from secrets."
         elif [ "$GITHUB_REF" = "refs/heads/main" ]; then
-          echo "::error::RELEASE_KEYSTORE_BASE64 secret is missing; refusing to publish an unsigned release. See docs/play-release-setup.md"
+          echo "::error::RELEASE_KEYSTORE_BASE64 secret is missing; refusing to publish an unsigned release. See docs/release-setup.md"
           exit 1
         else
           echo "::warning::No signing secrets available; building an unsigned release for verification only."
