@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -31,6 +30,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.spendtracker.app.ui.theme.Spacing
+import com.spendtracker.app.ui.theme.screenContentPadding
 
 /** Secondary destinations reachable from the "More" tab. */
 enum class MoreDestination(val title: String, val subtitle: String, val icon: ImageVector) {
@@ -50,7 +51,8 @@ fun MoreScreen(
 ) {
     LazyColumn(
         modifier = modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+        contentPadding = screenContentPadding(),
+        // Rows form one connected group, so they sit 2dp apart (not listItemSpacing).
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         val entries = MoreDestination.values().toList()
@@ -67,7 +69,7 @@ fun MoreScreen(
             )
         }
         item {
-            Box(Modifier.padding(top = 16.dp)) {
+            Box(Modifier.padding(top = Spacing.lg)) {
                 MoreRow(
                     icon = Icons.Outlined.Settings,
                     title = "Settings",
@@ -93,23 +95,24 @@ private fun MoreRow(
     isLast: Boolean,
     onClick: () -> Unit
 ) {
-    val big = 20.dp
-    val small = 4.dp
+    // Grouped list: theme `large` corners on the outer edges of the group, `extraSmall` inside.
+    val outer = MaterialTheme.shapes.large
+    val inner = MaterialTheme.shapes.extraSmall
     Surface(
         onClick = onClick,
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(
-            topStart = if (isFirst) big else small,
-            topEnd = if (isFirst) big else small,
-            bottomStart = if (isLast) big else small,
-            bottomEnd = if (isLast) big else small
+        shape = outer.copy(
+            topStart = if (isFirst) outer.topStart else inner.topStart,
+            topEnd = if (isFirst) outer.topEnd else inner.topEnd,
+            bottomEnd = if (isLast) outer.bottomEnd else inner.bottomEnd,
+            bottomStart = if (isLast) outer.bottomStart else inner.bottomStart
         ),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+            horizontalArrangement = Arrangement.spacedBy(Spacing.lg)
         ) {
             Box(
                 modifier = Modifier

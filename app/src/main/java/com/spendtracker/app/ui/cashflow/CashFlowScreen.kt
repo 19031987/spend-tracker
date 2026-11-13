@@ -18,15 +18,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChevronLeft
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SegmentedButton
@@ -48,7 +41,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.drawText
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,9 +51,17 @@ import com.spendtracker.app.domain.TransactionItem
 import com.spendtracker.app.domain.cashflow.BreakdownDimension
 import com.spendtracker.app.domain.cashflow.BreakdownRow
 import com.spendtracker.app.domain.cashflow.CashFlowMonth
+import com.spendtracker.app.ui.budget.MonthSelectorBar
+import com.spendtracker.app.ui.components.AppCard
 import com.spendtracker.app.ui.components.CategoryEmojiBox
+import com.spendtracker.app.ui.components.EmptyState
+import com.spendtracker.app.ui.components.SectionHeader
+import com.spendtracker.app.ui.components.StatTile
 import com.spendtracker.app.ui.components.TransactionRowItem
+import com.spendtracker.app.ui.theme.ScreenPadding
+import com.spendtracker.app.ui.theme.Spacing
 import com.spendtracker.app.ui.theme.SpendTrackerTheme
+import com.spendtracker.app.ui.theme.screenContentPadding
 import com.spendtracker.app.ui.util.CurrencyUtils
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -119,8 +119,8 @@ fun CashFlowScreen(
     val report = state.report
     LazyColumn(
         modifier = modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        contentPadding = screenContentPadding(),
+        verticalArrangement = Arrangement.spacedBy(ScreenPadding.listItemSpacing)
     ) {
         item {
             HeaderRow(
@@ -131,7 +131,13 @@ fun CashFlowScreen(
             )
         }
         if (report == null || !state.hasData) {
-            item { EmptyCard() }
+            item {
+                EmptyState(
+                    emoji = "📊",
+                    title = "No cash flow yet",
+                    body = "Add income and expenses to see how money moves in and out each month."
+                )
+            }
         } else {
             item { StatTiles(report.selected) }
             item {
@@ -163,9 +169,9 @@ fun CashFlowScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 32.dp, vertical = 8.dp),
+                    .padding(horizontal = ScreenPadding.sheetHorizontalPadding, vertical = Spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                horizontalArrangement = Arrangement.spacedBy(Spacing.md)
             ) {
                 CategoryEmojiBox(emoji = drill.emoji, colorHex = drill.colorHex)
                 Column(modifier = Modifier.weight(1f)) {
@@ -193,8 +199,8 @@ fun CashFlowScreen(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 8.dp),
-                contentPadding = PaddingValues(bottom = 32.dp)
+                    .padding(top = Spacing.sm),
+                contentPadding = PaddingValues(bottom = Spacing.xxl)
             ) {
                 itemsIndexed(drill.transactions, key = { _, tx -> tx.id }) { index, tx ->
                     TransactionRowItem(
@@ -217,32 +223,23 @@ private fun HeaderRow(
     onNextMonth: () -> Unit,
     onRangeSelected: (Int) -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        IconButton(onClick = onPreviousMonth) {
-            Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous month")
-        }
-        Text(
-            text = monthTitle(state.selectedMonth),
-            style = MaterialTheme.typography.titleLarge,
-            maxLines = 1
-        )
-        IconButton(onClick = onNextMonth, enabled = state.canGoNext) {
-            Icon(Icons.Filled.ChevronRight, contentDescription = "Next month")
-        }
-        Spacer(Modifier.weight(1f))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(6, 12).forEach { months ->
-                FilterChip(
-                    selected = state.rangeMonths == months,
-                    onClick = { onRangeSelected(months) },
-                    label = { Text("${months}M") }
-                )
+    MonthSelectorBar(
+        month = state.selectedMonth,
+        onPrevious = onPreviousMonth,
+        onNext = onNextMonth,
+        canGoNext = state.canGoNext,
+        trailing = {
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                listOf(6, 12).forEach { months ->
+                    FilterChip(
+                        selected = state.rangeMonths == months,
+                        onClick = { onRangeSelected(months) },
+                        label = { Text("${months}M") }
+                    )
+                }
             }
         }
-    }
+    )
 }
 
 @Composable
@@ -252,70 +249,33 @@ private fun StatTiles(selected: CashFlowMonth) {
     val rate = selected.savingsRate
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         StatTile(
-            title = "Income",
+            label = "Income",
             value = CurrencyUtils.formatMinor(selected.incomeMinor),
             valueColor = finance.income,
-            caption = null,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f),
+            compact = true,
+            reserveSupportingLine = true
         )
         StatTile(
-            title = "Expenses",
+            label = "Expenses",
             value = CurrencyUtils.formatMinor(selected.expenseMinor),
             valueColor = MaterialTheme.colorScheme.onSurface,
-            caption = null,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f),
+            compact = true,
+            reserveSupportingLine = true
         )
         StatTile(
-            title = "Saved",
+            label = "Saved",
             value = CurrencyUtils.formatSignedMinor(selected.savingsMinor),
             valueColor = savedColor,
-            caption = if (rate != null) "${(rate * 100).roundToInt()}% of income" else "No income",
-            modifier = Modifier.weight(1f)
+            supportingText = if (rate != null) "${(rate * 100).roundToInt()}% of income" else "No income",
+            modifier = Modifier.weight(1f),
+            compact = true,
+            reserveSupportingLine = true
         )
-    }
-}
-
-@Composable
-private fun StatTile(
-    title: String,
-    value: String,
-    valueColor: Color,
-    caption: String?,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier,
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleMedium,
-                color = valueColor,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = caption ?: " ",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
     }
 }
 
@@ -327,43 +287,33 @@ private fun ChartCard(
     averageExpenseMinor: Long,
     onSelectMonth: (YearMonth) -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+    AppCard(verticalSpacing = Spacing.md) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Income vs expenses",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f)
-                )
-                LegendDot(color = SpendTrackerTheme.finance.income, label = "Income")
-                Spacer(Modifier.width(12.dp))
-                LegendDot(color = MaterialTheme.colorScheme.primary, label = "Expenses")
-            }
-            CashFlowBarChart(
-                months = months,
-                selectedMonth = selectedMonth,
-                onSelectMonth = onSelectMonth,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(210.dp)
+            SectionHeader(
+                title = "Income vs expenses",
+                modifier = Modifier.weight(1f)
             )
-            Text(
-                text = "Monthly average: ${CurrencyUtils.formatMinor(averageIncomeMinor)} in · " +
-                    "${CurrencyUtils.formatMinor(averageExpenseMinor)} out",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            LegendDot(color = SpendTrackerTheme.finance.income, label = "Income")
+            Spacer(Modifier.width(Spacing.md))
+            LegendDot(color = MaterialTheme.colorScheme.primary, label = "Expenses")
         }
+        CashFlowBarChart(
+            months = months,
+            selectedMonth = selectedMonth,
+            onSelectMonth = onSelectMonth,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(210.dp)
+        )
+        Text(
+            text = "Monthly average: ${CurrencyUtils.formatMinor(averageIncomeMinor)} in · " +
+                "${CurrencyUtils.formatMinor(averageExpenseMinor)} out",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -376,7 +326,7 @@ private fun LegendDot(color: Color, label: String) {
                 .clip(CircleShape)
                 .background(color)
         )
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(Spacing.xs))
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
@@ -399,10 +349,7 @@ private fun CashFlowBarChart(
     val highlightColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
     val selectedLabelColor = MaterialTheme.colorScheme.primary
     val labelStyle = MaterialTheme.typography.labelSmall.copy(color = labelColor)
-    val selectedLabelStyle = MaterialTheme.typography.labelSmall.copy(
-        color = selectedLabelColor,
-        fontWeight = FontWeight.Bold
-    )
+    val selectedLabelStyle = MaterialTheme.typography.labelSmall.copy(color = selectedLabelColor)
     val textMeasurer = rememberTextMeasurer()
     val currencySymbol = remember(Locale.getDefault()) { currencySymbolOf() }
     val maxValue: Long = months.maxOfOrNull { max(it.incomeMinor, it.expenseMinor) } ?: 0L
@@ -563,24 +510,20 @@ private fun BreakdownCard(
     val dimensions = BreakdownDimension.values()
     val barColor = if (showIncome) SpendTrackerTheme.finance.income else MaterialTheme.colorScheme.primary
     val maxShare = rows.maxOfOrNull { it.share } ?: 0f
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-    ) {
+    // Vertical padding only: the rows are full-bleed (own 16dp padding + ripple).
+    AppCard(contentPadding = 0.dp) {
         Column(
-            modifier = Modifier.padding(vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.padding(vertical = ScreenPadding.cardPadding),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
-            Text(
-                text = "Breakdown",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 16.dp)
+            SectionHeader(
+                title = "Breakdown",
+                modifier = Modifier.padding(horizontal = ScreenPadding.cardPadding)
             )
             SingleChoiceSegmentedButtonRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
+                    .padding(horizontal = ScreenPadding.cardPadding)
             ) {
                 dimensions.forEachIndexed { index, d ->
                     SegmentedButton(
@@ -614,7 +557,7 @@ private fun BreakdownCard(
                     textAlign = TextAlign.Center,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 24.dp, horizontal = 16.dp)
+                        .padding(vertical = Spacing.xl, horizontal = Spacing.lg)
                 )
             } else {
                 Column {
@@ -643,9 +586,9 @@ private fun BreakdownRowItem(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
         CategoryEmojiBox(emoji = row.emoji, colorHex = row.colorHex, size = 40.dp)
         Column(
@@ -685,35 +628,6 @@ private fun BreakdownRowItem(
                 text = "${(row.share * 100).roundToInt()}%",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
-private fun EmptyCard() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(text = "📊", style = MaterialTheme.typography.displaySmall)
-            Text(
-                text = "No cash flow yet",
-                style = MaterialTheme.typography.titleMedium
-            )
-            Text(
-                text = "Add income and expenses to see how money moves in and out each month.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
             )
         }
     }

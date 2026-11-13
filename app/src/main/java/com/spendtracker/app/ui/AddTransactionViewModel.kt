@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -43,6 +45,19 @@ class AddTransactionViewModel(private val repository: SpendRepository) : ViewMod
 
     val history: StateFlow<List<HistoryEntry>> = repository.observeHistory()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Account of the transaction added in this session, if any. */
+    private val lastSubmittedAccountId = MutableStateFlow<Long?>(null)
+
+    /**
+     * Account the Add sheet preselects: the one last used in this session, otherwise the
+     * account of the most recent transaction, otherwise null (sheet falls back to the first).
+     */
+    val defaultAccountId: StateFlow<Long?> = combine(
+        lastSubmittedAccountId,
+        repository.observeTransactions().map { txs -> txs.firstOrNull()?.accountId }
+    ) { submitted, mostRecent -> submitted ?: mostRecent }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     private val _state = MutableStateFlow(AddTransactionUiState())
     val state: StateFlow<AddTransactionUiState> = _state.asStateFlow()
@@ -115,6 +130,7 @@ class AddTransactionViewModel(private val repository: SpendRepository) : ViewMod
         viewModelScope.launch {
             try {
                 repository.add(transaction)
+                (transaction as? NewTransaction.Entry)?.let { lastSubmittedAccountId.value = it.accountId }
                 _state.value = AddTransactionUiState()
                 onSuccess()
             } catch (e: IllegalArgumentException) {

@@ -353,6 +353,101 @@ class SpendRepository(
         }
     }
 
+    // ---- Category / group / rule editing ----
+
+    /** Updates name, emoji, colour and group. Key, type and built-in flag never change. */
+    suspend fun updateCategory(key: String, name: String, emoji: String, colorHex: String, groupId: Long) {
+        require(name.isNotBlank()) { "Name can't be empty" }
+        val existing = catalogDao.getCategories().firstOrNull { it.key == key } ?: return
+        catalogDao.updateCategory(
+            existing.copy(
+                name = name.trim(),
+                emoji = emoji.trim().ifEmpty { existing.emoji },
+                colorHex = colorHex,
+                groupId = groupId
+            )
+        )
+    }
+
+    suspend fun restoreCategory(key: String) {
+        val existing = catalogDao.getCategories().firstOrNull { it.key == key } ?: return
+        if (existing.isHidden) catalogDao.updateCategory(existing.copy(isHidden = false))
+    }
+
+    suspend fun updateGroup(id: Long, name: String, emoji: String) {
+        require(name.isNotBlank()) { "Name can't be empty" }
+        val existing = catalogDao.getGroups().firstOrNull { it.id == id } ?: return
+        catalogDao.updateGroup(existing.copy(name = name.trim(), emoji = emoji.trim().ifEmpty { existing.emoji }))
+    }
+
+    /** Deletes a user group, moving its categories (hidden ones too) to [moveToGroupId]. Built-in groups stay. */
+    suspend fun deleteGroup(id: Long, moveToGroupId: Long) {
+        val groups = catalogDao.getGroups()
+        val group = groups.firstOrNull { it.id == id } ?: return
+        require(!group.isBuiltIn) { "Built-in groups can't be deleted" }
+        require(id != moveToGroupId && groups.any { it.id == moveToGroupId }) { "Choose another group" }
+        catalogDao.removeGroup(id, moveToGroupId)
+    }
+
+    suspend fun updateRule(id: Long, matchType: String, pattern: String, categoryKey: String) {
+        require(pattern.isNotBlank()) { "Pattern can't be empty" }
+        val existing = catalogDao.getRules().firstOrNull { it.id == id } ?: return
+        catalogDao.updateRule(existing.copy(matchType = matchType, pattern = pattern.trim(), categoryKey = categoryKey))
+    }
+
+    // ---- Accounts ----
+
+    /** Transaction count per (raw) account id. */
+    fun observeAccountTransactionCounts(): Flow<Map<Long, Int>> =
+        accountDao.observeTransactionCounts().map { rows -> rows.associate { it.accountId to it.count } }
+
+    suspend fun validateAccountName(name: String, editingId: Long? = null): AccountNameCheck =
+        // Raw rows: the unique NOCASE index applies to them, and getAll() hides raw duplicates.
+        checkAccountName(name, accountDao.getAllRaw(), editingId)
+
+    /** Throws [IllegalArgumentException] with a user-facing message when the name is not allowed. */
+    suspend fun addAccount(name: String): Long {
+        val check = validateAccountName(name)
+        if (check is AccountNameCheck.Invalid) throw IllegalArgumentException(check.reason)
+        val id = accountDao.insertRaw(AccountEntity(name = (check as AccountNameCheck.Valid).name))
+        require(id > 0) { "An account with that name already exists" }
+        return id
+    }
+
+    suspend fun renameAccount(id: Long, newName: String) {
+        val current = accountDao.getAllRaw().firstOrNull { it.id == id } ?: return
+        require(!isProtectedAccount(current.name)) { "${normalizeBankName(current.name)} is a built-in account and can't be renamed" }
+        val check = validateAccountName(newName, id)
+        if (check is AccountNameCheck.Invalid) throw IllegalArgumentException(check.reason)
+        accountDao.rename(id, (check as AccountNameCheck.Valid).name)
+    }
+
+    suspend fun countAccountTransactions(id: Long): Int = accountDao.countTransactionsFor(id)
+
+    /**
+     * Deletes an account. Transactions are never orphaned (the launch clean-up would recreate the
+     * account from their source name): when it has any, [moveToAccountId] is required.
+     */
+    suspend fun deleteAccount(id: Long, moveToAccountId: Long?) {
+        val raw = accountDao.getAllRaw()
+        val current = raw.firstOrNull { it.id == id } ?: return
+        require(!isProtectedAccount(current.name)) { "${normalizeBankName(current.name)} is a built-in account and can't be deleted" }
+        val count = accountDao.countTransactionsFor(id)
+        if (count == 0) {
+            accountDao.deleteById(id)
+            return
+        }
+        val target = raw.firstOrNull { it.id == moveToAccountId && it.id != id }
+            ?: throw IllegalArgumentException("Choose an account to move its $count transactions to")
+        val transfers = accountDao.countTransfersBetween(id, target.id)
+        require(transfers == 0) {
+            "$transfers transfer ${if (transfers == 1) "row is" else "rows are"} between this account and " +
+                "${normalizeBankName(target.name)}, so moving would turn them into transfers to itself. " +
+                "Choose another account or delete those transfers first."
+        }
+        accountDao.moveTransactionsAndDelete(id, target.id, normalizeBankName(target.name))
+    }
+
     suspend fun resetDemoData() {
         catalogDao.resetCatalog()
         transactionDao.deleteAll()

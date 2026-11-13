@@ -1,13 +1,9 @@
 package com.spendtracker.app.ui.dashboard
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,34 +13,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.TrendingDown
 import androidx.compose.material.icons.filled.TrendingUp
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -59,10 +43,18 @@ import com.spendtracker.app.domain.goals.GoalProgress
 import com.spendtracker.app.domain.goals.GoalStatus
 import com.spendtracker.app.domain.recurring.OccurrenceStatus
 import com.spendtracker.app.domain.recurring.RecurringOccurrence
+import com.spendtracker.app.ui.components.AppCard
 import com.spendtracker.app.ui.components.CategoryEmojiBox
-import com.spendtracker.app.ui.components.StatusPill
+import com.spendtracker.app.ui.components.EmptyState
+import com.spendtracker.app.ui.components.PrimaryButton
+import com.spendtracker.app.ui.components.SectionHeader
+import com.spendtracker.app.ui.components.StatusChip
+import com.spendtracker.app.ui.components.StatusTone
 import com.spendtracker.app.ui.components.TransactionRowItem
+import com.spendtracker.app.ui.theme.ScreenPadding
+import com.spendtracker.app.ui.theme.Spacing
 import com.spendtracker.app.ui.theme.SpendTrackerTheme
+import com.spendtracker.app.ui.theme.screenContentPadding
 import com.spendtracker.app.ui.util.CurrencyUtils
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -112,8 +104,8 @@ fun DashboardScreen(
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        contentPadding = screenContentPadding(),
+        verticalArrangement = Arrangement.spacedBy(ScreenPadding.listItemSpacing)
     ) {
         item(key = "greeting") {
             GreetingHeader(today = uiState.today)
@@ -152,15 +144,21 @@ fun DashboardScreen(
             }
         }
         item(key = "recent_header") {
-            SectionHeaderRow(title = "Recent transactions", actionLabel = "See all", onAction = onOpenTransactions)
+            SectionHeader(
+                title = "Recent transactions",
+                actionLabel = "See all",
+                actionIcon = Icons.Default.ChevronRight,
+                onAction = onOpenTransactions
+            )
         }
         if (uiState.recent.isEmpty()) {
             item(key = "recent_empty") {
-                EmptyCard(text = "No transactions yet. Add your first one to see it here.")
+                EmptyState(body = "No transactions yet. Add your first one to see it here.")
             }
         } else {
             item(key = "recent_list") {
-                Column(modifier = Modifier.fullBleed(16)) {
+                // TransactionRowItem insets itself by 16dp; cancel the list padding so rows line up with cards.
+                Column(modifier = Modifier.fullBleed(ScreenPadding.horizontal.value.toInt())) {
                     uiState.recent.forEachIndexed { index, tx ->
                         TransactionRowItem(
                             tx = tx,
@@ -200,7 +198,7 @@ private fun GreetingHeader(today: LocalDate) {
     val dateText: String = remember(today) {
         today.format(DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.getDefault()))
     }
-    Column(modifier = Modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(modifier = Modifier.padding(horizontal = Spacing.xs), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
             text = greeting,
             style = MaterialTheme.typography.headlineSmall,
@@ -214,162 +212,23 @@ private fun GreetingHeader(today: LocalDate) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MonthSummaryHero(summary: MonthSummary, comparison: MonthComparison?, onClick: () -> Unit) {
     val monthName: String = summary.month.month.getDisplayName(DateTextStyle.FULL, Locale.getDefault())
-    val net: Long = summary.netRemainingMinor
-    Card(
+    val showTrend: Boolean = comparison != null && comparison.hasPrevious && comparison.spentDeltaMinor != 0L
+    MonthSummaryHeroCard(
+        monthName = monthName,
+        spentMinor = summary.spentMinor,
+        incomeMinor = summary.incomeMinor,
+        netMinor = summary.netRemainingMinor,
+        carriedOverMinor = summary.carriedOverMinor,
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        )
-    ) {
-        Column(modifier = Modifier.padding(24.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Spent in $monthName",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                Spacer(Modifier.width(8.dp))
-                StatusPill(isPositive = net >= 0, amountMinor = kotlin.math.abs(net))
-            }
-            Spacer(Modifier.height(8.dp))
-            AutoSizeAmount(
-                text = CurrencyUtils.formatMinor(summary.spentMinor),
-                style = MaterialTheme.typography.displaySmall
-            )
-            if (comparison != null && comparison.hasPrevious && comparison.spentDeltaMinor != 0L) {
-                Spacer(Modifier.height(8.dp))
-                SpendTrendLine(comparison)
-            }
-            Spacer(Modifier.height(20.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                SummaryStat(
-                    icon = Icons.Default.ArrowDownward,
-                    label = "Money in",
-                    value = CurrencyUtils.formatMinor(summary.incomeMinor),
-                    modifier = Modifier.weight(1f)
-                )
-                SummaryStat(
-                    icon = Icons.Default.ArrowUpward,
-                    label = "Money out",
-                    value = CurrencyUtils.formatMinor(summary.spentMinor),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            if (summary.carriedOverMinor != 0L) {
-                Spacer(Modifier.height(16.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.12f))
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Carried over from earlier months",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    Text(
-                        text = CurrencyUtils.formatSignedMinor(summary.carriedOverMinor),
-                        style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
-                        softWrap = false
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SummaryStat(
-    icon: ImageVector,
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier,
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
-        contentColor = MaterialTheme.colorScheme.onSurface
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-            }
-            Column {
-                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(value, style = MaterialTheme.typography.titleSmall, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-            }
-        }
-    }
-}
-
-/** Single-line text that steps its font size down until it fits the available width. */
-@Composable
-private fun AutoSizeAmount(text: String, style: TextStyle) {
-    var scaledStyle: TextStyle by remember(text, style) { mutableStateOf(style) }
-    Text(
-        text = text,
-        style = scaledStyle,
-        maxLines = 1,
-        softWrap = false,
-        modifier = Modifier.fillMaxWidth(),
-        onTextLayout = { result ->
-            if (result.didOverflowWidth && scaledStyle.fontSize.value > 18f) {
-                scaledStyle = scaledStyle.copy(fontSize = scaledStyle.fontSize * 0.9f)
-            }
+        trend = if (showTrend && comparison != null) {
+            { SpendTrendLine(comparison) }
+        } else {
+            null
         }
     )
-}
-
-@Composable
-private fun SectionHeaderRow(title: String, actionLabel: String, onAction: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier
-                .weight(1f)
-                .padding(start = 4.dp)
-        )
-        TextButton(onClick = onAction) {
-            Text(actionLabel)
-            Icon(Icons.Default.ChevronRight, contentDescription = null, modifier = Modifier.size(18.dp))
-        }
-    }
 }
 
 /** Standard dashboard card: header row (title + "See all" chevron) above [content]. */
@@ -381,51 +240,14 @@ private fun DashboardCard(
     actionLabel: String = "See all",
     content: @Composable () -> Unit
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-    ) {
-        Column(modifier = Modifier.padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 20.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f)
-                )
-                TextButton(onClick = onAction) {
-                    Text(actionLabel)
-                    Icon(Icons.Default.ChevronRight, contentDescription = null, modifier = Modifier.size(18.dp))
-                }
-            }
-            Column(modifier = Modifier.padding(end = 12.dp)) {
-                content()
-            }
-        }
-    }
-}
-
-@Composable
-private fun EmptyCard(text: String) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp)
+    AppCard(modifier = modifier) {
+        SectionHeader(
+            title = title,
+            actionLabel = actionLabel,
+            actionIcon = Icons.Default.ChevronRight,
+            onAction = onAction
         )
+        content()
     }
 }
 
@@ -455,13 +277,13 @@ private fun BudgetCard(budget: BudgetSummary, onOpen: () -> Unit) {
             maxLines = 1,
             softWrap = false
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(Spacing.md))
         ProgressWithMarker(
             progress = fraction,
-            marker = budget.monthProgress,
+            marker = budget.monthProgress.coerceIn(0.02f, 0.98f),
             color = barColor
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(Spacing.sm))
         Text(
             text = "${CurrencyUtils.formatMinor(budget.totalSpentBudgetedMinor)} of ${CurrencyUtils.formatMinor(available.coerceAtLeast(0L))} spent",
             style = MaterialTheme.typography.bodySmall,
@@ -470,49 +292,16 @@ private fun BudgetCard(budget: BudgetSummary, onOpen: () -> Unit) {
     }
 }
 
-/** Progress bar with a thin vertical marker (e.g. how far through the month we are). */
-@Composable
-private fun ProgressWithMarker(progress: Float, marker: Float, color: androidx.compose.ui.graphics.Color) {
-    val markerFraction: Float = marker.coerceIn(0.02f, 0.98f)
-    Box(modifier = Modifier.fillMaxWidth().height(12.dp)) {
-        LinearProgressIndicator(
-            progress = { progress.coerceIn(0f, 1f) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(12.dp)
-                .clip(CircleShape),
-            color = color,
-            trackColor = MaterialTheme.colorScheme.surfaceVariant
-        )
-        Row(modifier = Modifier.fillMaxSize()) {
-            Spacer(Modifier.weight(markerFraction))
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .width(2.dp)
-                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-            )
-            Spacer(Modifier.weight(1f - markerFraction))
-        }
-    }
-}
-
 @Composable
 private fun ReviewCard(count: Int, onOpen: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-        )
+    AppCard(
+        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 20.dp, end = 16.dp, top = 16.dp, bottom = 16.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -525,9 +314,7 @@ private fun ReviewCard(count: Int, onOpen: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
                 )
             }
-            Button(onClick = onOpen) {
-                Text("Review")
-            }
+            PrimaryButton(text = "Review", onClick = onOpen)
         }
     }
 }
@@ -535,7 +322,7 @@ private fun ReviewCard(count: Int, onOpen: () -> Unit) {
 @Composable
 private fun UpcomingCard(items: List<RecurringOccurrence>, today: LocalDate, onOpen: () -> Unit) {
     DashboardCard(title = "Upcoming", onAction = onOpen) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
             items.forEach { occurrence ->
                 UpcomingRow(occurrence = occurrence, today = today)
             }
@@ -552,7 +339,7 @@ private fun UpcomingRow(occurrence: RecurringOccurrence, today: LocalDate) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
+        horizontalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
         Surface(
             shape = MaterialTheme.shapes.medium,
@@ -601,12 +388,12 @@ private fun UpcomingRow(occurrence: RecurringOccurrence, today: LocalDate) {
 @Composable
 private fun TopCategoriesCard(categories: List<TopCategory>, onOpen: () -> Unit) {
     DashboardCard(title = "Top spending", onAction = onOpen) {
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
             categories.forEach { category ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.md)
                 ) {
                     CategoryEmojiBox(emoji = category.emoji, colorHex = category.colorHex, size = 40.dp)
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -623,7 +410,7 @@ private fun TopCategoriesCard(categories: List<TopCategory>, onOpen: () -> Unit)
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
                             )
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(Spacing.sm))
                             Text(
                                 text = CurrencyUtils.formatMinor(category.amountMinor),
                                 style = MaterialTheme.typography.titleSmall,
@@ -650,12 +437,12 @@ private fun TopCategoriesCard(categories: List<TopCategory>, onOpen: () -> Unit)
 @Composable
 private fun GoalsCard(goals: List<GoalProgress>, onOpen: () -> Unit) {
     DashboardCard(title = "Goals", onAction = onOpen) {
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
             goals.forEach { goal ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.md)
                 ) {
                     CategoryEmojiBox(emoji = goal.emoji, colorHex = goal.colorHex, size = 40.dp)
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -672,7 +459,7 @@ private fun GoalsCard(goals: List<GoalProgress>, onOpen: () -> Unit) {
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
                             )
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(Spacing.sm))
                             Text(
                                 text = if (goal.status == GoalStatus.COMPLETE) {
                                     "Complete"
@@ -727,7 +514,7 @@ private fun SpendTrendLine(comparison: MonthComparison) {
     val word: String = if (spentLess) "less" else "more"
     Surface(shape = CircleShape, color = container, contentColor = content) {
         Row(
-            modifier = Modifier.padding(start = 8.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+            modifier = Modifier.padding(start = Spacing.sm, end = Spacing.md, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
@@ -756,7 +543,7 @@ private fun ComparisonCard(comparison: MonthComparison, onOpen: () -> Unit) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(Spacing.md))
         if (!comparison.hasPrevious) {
             Text(
                 text = "Nothing recorded in ${monthName(comparison.previousMonth)} yet. " +
@@ -766,7 +553,7 @@ private fun ComparisonCard(comparison: MonthComparison, onOpen: () -> Unit) {
             )
             return@DashboardCard
         }
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
             ComparisonMetricRow(
                 label = "Spending",
                 currentMinor = comparison.spentMinor,
@@ -790,30 +577,20 @@ private fun ComparisonCard(comparison: MonthComparison, onOpen: () -> Unit) {
             )
         }
         if (comparison.increased.isNotEmpty()) {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(Spacing.lg))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Spacer(Modifier.height(12.dp))
-            ComparisonSectionTitle("Spending more on")
+            Spacer(Modifier.height(Spacing.md))
+            SectionHeader(title = "Spending more on", small = true)
             comparison.increased.forEach { CategoryChangeRow(it) }
         }
         if (comparison.decreased.isNotEmpty()) {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(Spacing.lg))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Spacer(Modifier.height(12.dp))
-            ComparisonSectionTitle("Spending less on")
+            Spacer(Modifier.height(Spacing.md))
+            SectionHeader(title = "Spending less on", small = true)
             comparison.decreased.forEach { CategoryChangeRow(it) }
         }
     }
-}
-
-@Composable
-private fun ComparisonSectionTitle(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(bottom = 4.dp)
-    )
 }
 
 @Composable
@@ -827,7 +604,7 @@ private fun ComparisonMetricRow(
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
@@ -850,7 +627,7 @@ private fun CategoryChangeRow(change: CategoryChange) {
             .fillMaxWidth()
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
         CategoryEmojiBox(emoji = change.emoji, colorHex = change.colorHex, size = 36.dp, emojiSize = 18.sp)
         Column(modifier = Modifier.weight(1f)) {
@@ -874,46 +651,24 @@ private fun CategoryChangeRow(change: CategoryChange) {
 }
 
 /**
- * Signed change with an arrow. Colour shows whether the move is good for the user:
- * for spending a decrease is good, for income and savings an increase is good.
+ * Signed change with an arrow, as a [StatusChip]. Tone shows whether the move is good for
+ * the user: for spending a decrease is good, for income and savings an increase is good.
  */
 @Composable
 private fun DeltaChip(deltaMinor: Long, changeFraction: Float?, higherIsGood: Boolean) {
-    val finance = SpendTrackerTheme.finance
     val isUp: Boolean = deltaMinor > 0L
     val neutral: Boolean = deltaMinor == 0L
     val good: Boolean = if (higherIsGood) isUp else !isUp
-    val container = when {
-        neutral -> MaterialTheme.colorScheme.surfaceContainerHighest
-        good -> finance.surplusContainer
-        else -> finance.deficitContainer
-    }
-    val content = when {
-        neutral -> MaterialTheme.colorScheme.onSurfaceVariant
-        good -> finance.onSurplusContainer
-        else -> finance.onDeficitContainer
+    val tone: StatusTone = when {
+        neutral -> StatusTone.Neutral
+        good -> StatusTone.Positive
+        else -> StatusTone.Negative
     }
     val amount: String = CurrencyUtils.formatMinor(kotlin.math.abs(deltaMinor))
     val percent: String = changeFraction?.let { " · ${kotlin.math.abs(kotlin.math.round(it * 100f)).toInt()}%" } ?: ""
-    Surface(shape = CircleShape, color = container, contentColor = content) {
-        Row(
-            modifier = Modifier.padding(start = 6.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            if (!neutral) {
-                Icon(
-                    imageVector = if (isUp) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
-                    contentDescription = if (isUp) "Up" else "Down",
-                    modifier = Modifier.size(14.dp)
-                )
-            }
-            Text(
-                text = if (neutral) "No change" else amount + percent,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-                softWrap = false
-            )
-        }
-    }
+    val arrow: String = if (isUp) "↑ " else "↓ "
+    StatusChip(
+        text = if (neutral) "No change" else arrow + amount + percent,
+        tone = tone
+    )
 }

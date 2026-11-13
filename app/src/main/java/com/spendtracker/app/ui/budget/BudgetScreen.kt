@@ -1,22 +1,17 @@
 package com.spendtracker.app.ui.budget
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -25,24 +20,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChevronLeft
-import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -55,26 +42,31 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spendtracker.app.data.BudgetEntity
 import com.spendtracker.app.data.CategoryEntity
 import com.spendtracker.app.domain.budget.BudgetGroupSection
 import com.spendtracker.app.domain.budget.BudgetLine
 import com.spendtracker.app.domain.budget.BudgetSummary
+import com.spendtracker.app.ui.components.AppCard
 import com.spendtracker.app.ui.components.CategoryEmojiBox
+import com.spendtracker.app.ui.components.DestructiveTextButton
+import com.spendtracker.app.ui.components.EmptyState
+import com.spendtracker.app.ui.components.SectionHeader
+import com.spendtracker.app.ui.components.SheetActions
+import com.spendtracker.app.ui.components.SheetContainer
+import com.spendtracker.app.ui.components.SheetHeader
+import com.spendtracker.app.ui.components.StatusChip
+import com.spendtracker.app.ui.components.StatusTone
+import com.spendtracker.app.ui.dashboard.ProgressWithMarker
+import com.spendtracker.app.ui.theme.ScreenPadding
+import com.spendtracker.app.ui.theme.Spacing
 import com.spendtracker.app.ui.theme.SpendTrackerTheme
+import com.spendtracker.app.ui.theme.screenContentPadding
 import com.spendtracker.app.ui.util.CurrencyUtils
-import java.time.YearMonth
-import java.time.format.DateTimeFormatter
 import java.util.Currency
 import java.util.Locale
 import kotlin.math.abs
@@ -118,11 +110,11 @@ fun BudgetScreen(
 
     LazyColumn(
         modifier = modifier,
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = screenContentPadding(),
+        verticalArrangement = Arrangement.spacedBy(ScreenPadding.listItemSpacing)
     ) {
         item(key = "month") {
-            MonthSelector(
+            MonthSelectorBar(
                 month = uiState.month,
                 onPrevious = onPreviousMonth,
                 onNext = onNextMonth
@@ -134,7 +126,7 @@ fun BudgetScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 48.dp),
+                        .padding(vertical = Spacing.xxl),
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator()
@@ -154,25 +146,20 @@ fun BudgetScreen(
 
             for (section: BudgetGroupSection in summary.sections) {
                 item(key = "group_header_${section.groupId}") {
-                    GroupHeader(
+                    BudgetGroupHeader(
                         name = section.groupName,
                         budgetedMinor = section.lines.sumOf { it.budgetedMinor + it.rolloverInMinor },
                         spentMinor = section.lines.sumOf { it.spentMinor }
                     )
                 }
                 item(key = "group_${section.groupId}") {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.large,
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                        )
-                    ) {
+                    // Rows are full-bleed (own 16dp padding + ripple), so no card padding.
+                    AppCard(contentPadding = 0.dp) {
                         Column {
                             section.lines.forEachIndexed { index: Int, line: BudgetLine ->
                                 if (index > 0) {
                                     HorizontalDivider(
-                                        modifier = Modifier.padding(start = 68.dp, end = 16.dp),
+                                        modifier = Modifier.padding(start = 68.dp, end = Spacing.lg),
                                         color = MaterialTheme.colorScheme.outlineVariant
                                     )
                                 }
@@ -192,25 +179,20 @@ fun BudgetScreen(
 
             if (summary.unbudgeted.isNotEmpty()) {
                 item(key = "unbudgeted_header") {
-                    GroupHeader(
+                    BudgetGroupHeader(
                         name = "Unbudgeted spending",
                         budgetedMinor = null,
                         spentMinor = summary.unbudgetedSpentMinor
                     )
                 }
                 item(key = "unbudgeted") {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.large,
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                        )
-                    ) {
+                    // Rows are full-bleed (own 16dp padding + ripple), so no card padding.
+                    AppCard(contentPadding = 0.dp) {
                         Column {
                             summary.unbudgeted.forEachIndexed { index: Int, line: BudgetLine ->
                                 if (index > 0) {
                                     HorizontalDivider(
-                                        modifier = Modifier.padding(start = 68.dp, end = 16.dp),
+                                        modifier = Modifier.padding(start = 68.dp, end = Spacing.lg),
                                         color = MaterialTheme.colorScheme.outlineVariant
                                     )
                                 }
@@ -283,27 +265,6 @@ fun BudgetScreen(
 // region Month selector and hero
 
 @Composable
-private fun MonthSelector(month: YearMonth, onPrevious: () -> Unit, onNext: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        IconButton(onClick = onPrevious) {
-            Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous month")
-        }
-        Text(
-            text = month.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())),
-            style = MaterialTheme.typography.titleLarge,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.weight(1f)
-        )
-        IconButton(onClick = onNext) {
-            Icon(Icons.Filled.ChevronRight, contentDescription = "Next month")
-        }
-    }
-}
-
-@Composable
 private fun LeftToSpendCard(summary: BudgetSummary, modifier: Modifier = Modifier) {
     val left: Long = summary.leftToSpendMinor
     val isOver: Boolean = left < 0
@@ -317,110 +278,62 @@ private fun LeftToSpendCard(summary: BudgetSummary, modifier: Modifier = Modifie
     val monthProgress: Float = summary.monthProgress
     val inMonth: Boolean = monthProgress > 0f && monthProgress < 1f
 
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-    ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Text(
-                text = if (isOver) "Over budget" else "Left to spend",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = CurrencyUtils.formatMinor(abs(left)),
-                style = MaterialTheme.typography.displaySmall,
-                color = if (isOver) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                maxLines = 1
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "${CurrencyUtils.formatMinor(summary.totalSpentBudgetedMinor)} spent of " +
-                    "${CurrencyUtils.formatMinor(available)} budgeted",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(16.dp))
-            ProgressWithTodayMarker(
-                progress = progress,
-                todayFraction = if (inMonth) monthProgress else null,
-                isOver = progress >= 1f
-            )
-            Spacer(Modifier.height(12.dp))
-            val hint: String? = when {
-                !inMonth -> null
-                progress >= 1f -> "Budget used up"
-                progress > monthProgress + 0.05f -> "Ahead of pace"
-                else -> "On pace"
-            }
-            if (hint != null) {
-                Text(
-                    text = hint,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (hint == "On pace") {
-                        SpendTrackerTheme.finance.income
-                    } else {
-                        MaterialTheme.colorScheme.error
-                    }
-                )
-            }
-            if (rollover != 0L) {
-                Text(
-                    text = "Includes ${CurrencyUtils.formatSignedMinor(rollover)} rolled over",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            if (summary.unbudgetedSpentMinor > 0) {
-                Text(
-                    text = "${CurrencyUtils.formatMinor(summary.unbudgetedSpentMinor)} unbudgeted spending",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-}
-
-/** Progress bar with a vertical "today" line drawn at [todayFraction] of the month. */
-@Composable
-private fun ProgressWithTodayMarker(
-    progress: Float,
-    todayFraction: Float?,
-    isOver: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val markerColor: Color = MaterialTheme.colorScheme.onSurface
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(20.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        LinearProgressIndicator(
-            progress = { progress.coerceIn(0f, 1f) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(10.dp)
-                .clip(CircleShape),
-            color = if (isOver) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+    AppCard(modifier = modifier) {
+        Text(
+            text = if (isOver) "Over budget" else "Left to spend",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        if (todayFraction != null) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .drawBehind {
-                        val x: Float = size.width * todayFraction.coerceIn(0f, 1f)
-                        drawLine(
-                            color = markerColor,
-                            start = Offset(x, 0f),
-                            end = Offset(x, size.height),
-                            strokeWidth = 2.dp.toPx()
-                        )
-                    }
+        Spacer(Modifier.height(Spacing.xs))
+        Text(
+            text = CurrencyUtils.formatMinor(abs(left)),
+            style = MaterialTheme.typography.displaySmall,
+            color = if (isOver) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1
+        )
+        Spacer(Modifier.height(Spacing.xs))
+        Text(
+            text = "${CurrencyUtils.formatMinor(summary.totalSpentBudgetedMinor)} spent of " +
+                "${CurrencyUtils.formatMinor(available)} budgeted",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(Spacing.lg))
+        ProgressWithMarker(
+            progress = progress,
+            marker = if (inMonth) monthProgress else null,
+            color = if (progress >= 1f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.height(Spacing.md))
+        val hint: String? = when {
+            !inMonth -> null
+            progress >= 1f -> "Budget used up"
+            progress > monthProgress + 0.05f -> "Ahead of pace"
+            else -> "On pace"
+        }
+        if (hint != null) {
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (hint == "On pace") {
+                    SpendTrackerTheme.finance.income
+                } else {
+                    MaterialTheme.colorScheme.error
+                }
+            )
+        }
+        if (rollover != 0L) {
+            Text(
+                text = "Includes ${CurrencyUtils.formatSignedMinor(rollover)} rolled over",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (summary.unbudgetedSpentMinor > 0) {
+            Text(
+                text = "${CurrencyUtils.formatMinor(summary.unbudgetedSpentMinor)} unbudgeted spending",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -431,21 +344,14 @@ private fun ProgressWithTodayMarker(
 // region Sections and rows
 
 @Composable
-private fun GroupHeader(name: String, budgetedMinor: Long?, spentMinor: Long) {
+private fun BudgetGroupHeader(name: String, budgetedMinor: Long?, spentMinor: Long) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 8.dp, start = 4.dp, end = 4.dp),
+            .padding(top = Spacing.sm, end = Spacing.xs),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = name,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        SectionHeader(title = name, small = true, modifier = Modifier.weight(1f))
         Text(
             text = if (budgetedMinor != null) {
                 "${CurrencyUtils.formatMinor(spentMinor)} of ${CurrencyUtils.formatMinor(budgetedMinor)}"
@@ -468,11 +374,11 @@ private fun BudgetLineRow(line: BudgetLine, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = Spacing.lg, vertical = Spacing.md),
         verticalAlignment = Alignment.CenterVertically
     ) {
         CategoryEmojiBox(emoji = line.emoji, colorHex = line.colorHex, size = 40.dp)
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(Spacing.md))
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -482,7 +388,7 @@ private fun BudgetLineRow(line: BudgetLine, onClick: () -> Unit) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(Spacing.sm))
                 Text(
                     text = if (isOver) {
                         "${CurrencyUtils.formatMinor(abs(available))} over"
@@ -493,7 +399,7 @@ private fun BudgetLineRow(line: BudgetLine, onClick: () -> Unit) {
                     color = if (isOver) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
                 )
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(Spacing.sm))
             LinearProgressIndicator(
                 progress = { line.progress.coerceIn(0f, 1f) },
                 modifier = Modifier
@@ -516,25 +422,13 @@ private fun BudgetLineRow(line: BudgetLine, onClick: () -> Unit) {
                     modifier = Modifier.weight(1f)
                 )
                 if (line.rolloverInMinor != 0L) {
-                    RolloverChip(line.rolloverInMinor)
+                    StatusChip(
+                        text = "Rollover ${CurrencyUtils.formatSignedMinor(line.rolloverInMinor)}",
+                        tone = StatusTone.Info
+                    )
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun RolloverChip(rolloverMinor: Long) {
-    Surface(
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-    ) {
-        Text(
-            text = "Rollover ${CurrencyUtils.formatSignedMinor(rolloverMinor)}",
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-        )
     }
 }
 
@@ -543,11 +437,11 @@ private fun UnbudgetedRow(line: BudgetLine, onSetBudget: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            .padding(start = Spacing.lg, end = Spacing.sm, top = Spacing.sm, bottom = Spacing.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
         CategoryEmojiBox(emoji = line.emoji, colorHex = line.colorHex, size = 40.dp)
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(Spacing.md))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = line.name,
@@ -570,15 +464,14 @@ private fun UnbudgetedRow(line: BudgetLine, onSetBudget: () -> Unit) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun UnusedCategories(categories: List<CategoryEntity>, onPick: (CategoryEntity) -> Unit) {
-    Column(modifier = Modifier.padding(top = 8.dp)) {
-        Text(
-            text = "Add a budget",
-            style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
-        )
+    Column(
+        modifier = Modifier.padding(top = Spacing.sm),
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+    ) {
+        SectionHeader(title = "Add a budget", small = true)
         FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+            verticalArrangement = Arrangement.spacedBy(Spacing.xs)
         ) {
             for (category: CategoryEntity in categories) {
                 AssistChip(
@@ -600,53 +493,21 @@ private fun EmptyBudgetCard(
     onUseSuggestions: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(text = "🎯", fontSize = 26.sp)
-            }
-            Spacer(Modifier.height(16.dp))
-            Text(
-                text = "Set budgets for your categories",
-                style = MaterialTheme.typography.titleMedium,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = if (suggestionCount > 0) {
-                    "Start from what you usually spend: we can suggest a monthly amount for " +
-                        "$suggestionCount ${if (suggestionCount == 1) "category" else "categories"} " +
-                        "based on the last three months."
-                } else {
-                    "Pick a category below to give it a monthly limit and track what is left to spend."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
-            if (suggestionCount > 0) {
-                Spacer(Modifier.height(20.dp))
-                Button(onClick = onUseSuggestions) {
-                    Text("Use suggested budgets")
-                }
-            }
-        }
-    }
+    EmptyState(
+        modifier = modifier,
+        emoji = "🎯",
+        title = "Set budgets for your categories",
+        body = if (suggestionCount > 0) {
+            "Start from what you usually spend: we can suggest a monthly amount for " +
+                "$suggestionCount ${if (suggestionCount == 1) "category" else "categories"} " +
+                "based on the last three months."
+        } else {
+            "Pick a category below to give it a monthly limit and track what is left to spend."
+        },
+        actionLabel = if (suggestionCount > 0) "Use suggested budgets" else null,
+        actionIcon = null,
+        onAction = if (suggestionCount > 0) onUseSuggestions else null
+    )
 }
 
 @Composable
@@ -666,17 +527,17 @@ private fun SuggestionsDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(Spacing.md))
                 Column(
                     modifier = Modifier
                         .heightIn(max = 320.dp)
                         .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(Spacing.sm)
                 ) {
                     for (suggestion: SuggestedBudget in suggestions) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = suggestion.emoji, fontSize = 18.sp)
-                            Spacer(Modifier.width(10.dp))
+                            Text(text = suggestion.emoji, style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.width(Spacing.sm))
                             Text(
                                 text = suggestion.name,
                                 style = MaterialTheme.typography.bodyMedium,
@@ -691,7 +552,7 @@ private fun SuggestionsDialog(
                         }
                     }
                 }
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.md))
                 Row {
                     Text(
                         text = "Total per month",
@@ -700,8 +561,7 @@ private fun SuggestionsDialog(
                     )
                     Text(
                         text = CurrencyUtils.formatMinor(suggestions.sumOf { it.amountMinor }),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold
+                        style = MaterialTheme.typography.titleSmall
                     )
                 }
             }
@@ -755,27 +615,16 @@ fun EditBudgetSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .imePadding()
-                .navigationBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 8.dp)
-        ) {
+        SheetContainer {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CategoryEmojiBox(emoji = emoji, colorHex = colorHex, size = 44.dp)
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text(text = categoryName, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        text = "Monthly budget",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Spacer(Modifier.width(Spacing.md))
+                SheetHeader(
+                    title = categoryName,
+                    subtitle = "Monthly budget",
+                    modifier = Modifier.weight(1f)
+                )
             }
-            Spacer(Modifier.height(20.dp))
             OutlinedTextField(
                 value = amountText,
                 onValueChange = { amountText = it },
@@ -791,7 +640,6 @@ fun EditBudgetSheet(
                 },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
             )
-            Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(text = "Roll over", style = MaterialTheme.typography.bodyLarge)
@@ -801,30 +649,26 @@ fun EditBudgetSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(Spacing.md))
                 Switch(checked = rollover, onCheckedChange = { rollover = it })
             }
-            Spacer(Modifier.height(24.dp))
-            Button(
-                onClick = {
+            SheetActions(
+                confirmLabel = "Save",
+                onConfirm = {
                     val amount: Long? = parsed
                     if (amount != null) onSave(amount, rollover)
                 },
-                enabled = parsed != null,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Save")
-            }
+                onDismiss = onDismiss,
+                confirmEnabled = parsed != null
+            )
             if (onRemove != null) {
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
+                DestructiveTextButton(
+                    text = "Remove budget",
                     onClick = onRemove,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Remove budget", color = MaterialTheme.colorScheme.error)
-                }
+                    leadingIcon = Icons.Outlined.Delete,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
             }
-            Spacer(Modifier.height(16.dp))
         }
     }
 }
