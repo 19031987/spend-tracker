@@ -47,24 +47,47 @@ jobs:
     - name: Prepare Release Signing Key
       env:
         RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        SECRET_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+        SECRET_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+        SECRET_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        # Commit that still contains the original (already public) keystore and its passwords.
+        LEGACY_KEY_COMMIT: f6ecb6058e327312deeed8c42f9fa01b2b7ff68d
       run: |
+        KEYSTORE="$RUNNER_TEMP/release.jks"
         if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
-          echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
-          echo "RELEASE_STORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          STORE_PASSWORD="$SECRET_STORE_PASSWORD"
+          KEY_ALIAS="$SECRET_KEY_ALIAS"
+          KEY_PASSWORD="$SECRET_KEY_PASSWORD"
           echo "Release signing key loaded from secrets."
-        elif [ "$GITHUB_REF" = "refs/heads/main" ]; then
-          echo "::error::RELEASE_KEYSTORE_BASE64 secret is missing; refusing to publish an unsigned release. See docs/release-setup.md"
-          exit 1
         else
-          echo "::warning::No signing secrets available; building an unsigned release for verification only."
+          # No signing secrets: fall back to the original key, which is public in this repo's history,
+          # so releases keep installing over existing copies. Replace it with a private key via the
+          # RELEASE_* secrets (docs/release-setup.md).
+          git fetch --quiet --depth=1 origin "$LEGACY_KEY_COMMIT"
+          git show "$LEGACY_KEY_COMMIT:release-keystore.jks" > "$KEYSTORE"
+          OLD_GRADLE=$(git show "$LEGACY_KEY_COMMIT:app/build.gradle.kts")
+          STORE_PASSWORD=$(printf '%s\n' "$OLD_GRADLE" | sed -n 's/.*storePassword = "\(.*\)".*/\1/p' | head -n1)
+          KEY_ALIAS=$(printf '%s\n' "$OLD_GRADLE" | sed -n 's/.*keyAlias = "\(.*\)".*/\1/p' | head -n1)
+          KEY_PASSWORD=$(printf '%s\n' "$OLD_GRADLE" | sed -n 's/.*keyPassword = "\(.*\)".*/\1/p' | head -n1)
+          echo "::warning::RELEASE_* secrets not set; signing with the original key from git history (it is public). See docs/release-setup.md"
         fi
+        if [ ! -s "$KEYSTORE" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+          echo "::error::Signing key or passwords are empty; refusing to publish an unsigned release. See docs/release-setup.md"
+          exit 1
+        fi
+        echo "::add-mask::$STORE_PASSWORD"
+        echo "::add-mask::$KEY_PASSWORD"
+        {
+          echo "RELEASE_STORE_FILE=$KEYSTORE"
+          echo "RELEASE_STORE_PASSWORD=$STORE_PASSWORD"
+          echo "RELEASE_KEY_ALIAS=$KEY_ALIAS"
+          echo "RELEASE_KEY_PASSWORD=$KEY_PASSWORD"
+        } >> "$GITHUB_ENV"
 
     - name: Build Signed APK
       env:
         ANDROID_HOME: /usr/local/lib/android/sdk
-        RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
-        RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-        RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
       run: |
         if ! ./gradlew :app:assembleRelease --no-daemon --stacktrace > build.log 2>&1; then
           echo "=== GRADLE BUILD FAILED ==="
