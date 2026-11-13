@@ -4,6 +4,10 @@ Release builds are signed from GitHub secrets. Every push to `main` runs the uni
 signed APK and publishes it as a GitHub release tagged `v<versionName>`. Nothing is uploaded to Google
 Play.
 
+If the `RELEASE_*` secrets are not set, CI signs with the original key from git history (commit
+`f6ecb60`). That key is public, so releases still install over existing copies but anyone could sign
+an app as SpendTracker: set the secrets below to switch to a private key.
+
 ## 1. Signing key → GitHub secrets
 
 The repository is public and used to contain `release-keystore.jks` with its password, so that key
