@@ -9,7 +9,7 @@ python -m pytest -q test_spend_parser.py test_bank_deduplication.py test_categor
 ./gradlew :app:testDebugUnitTest      # Kotlin unit tests (needs JDK 17 + Android SDK, API 36)
 ./gradlew :app:assembleDebug          # debug APK
 ```
-No Android SDK in cloud sessions: rely on the Python mirror tests there and let CI (`.github/workflows/build-apk.yml`, runs `:app:testReleaseUnitTest` then builds APK/AAB) verify the Kotlin build.
+No Android SDK in cloud sessions: rely on the Python mirror tests there and let CI (`.github/workflows/build-apk.yml`, runs `:app:testReleaseUnitTest` then builds the signed APK) verify the Kotlin build.
 
 ## Layout
 
@@ -28,7 +28,7 @@ No Android SDK in cloud sessions: rely on the Python mirror tests there and let 
 - **Python mirrors must stay in sync.** `test_spend_parser.py` mirrors `SpendParser.kt` 1:1 (same regexes, same precedence); `test_categorization_engine.py` mirrors `CategorizationEngine.kt`; `test_bank_deduplication.py` mirrors bank normalisation/account consolidation. Change the Kotlin and its mirror together, and add a regression test for every parsing bug.
 - Add/update Kotlin unit tests in `app/src/test/` for domain and parser changes.
 - User-visible releases: bump `versionCode` and `versionName` in `app/build.gradle.kts` and mention the version in the commit subject (e.g. `… (v2.1.2)`).
-- Signing material (`*.jks`, `keystore.properties`, Play service-account JSON) never goes in git; CI gets it from secrets (see `docs/play-release-setup.md`).
+- Signing material (`*.jks`, `keystore.properties`) never goes in git; CI gets it from secrets (see `docs/play-release-setup.md`).
 - Privacy: transaction data stays on device; don't add network calls or analytics without asking.
 - Merges to `main` trigger the release build; work on feature branches.
 
