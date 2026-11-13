@@ -44,9 +44,8 @@ This repository includes a `.github/workflows/build-apk.yml` workflow configured
    git commit -m "feat: implement Monarch budgeting app UI with Money In/Out calculation"
    git push origin main
    ```
-2. GitHub Actions will run automatically and create a new GitHub Release with:
+2. GitHub Actions will run automatically and create a new GitHub Release with the installable APK:
    - **`app-release.apk`**: Direct installable APK for your Android phone.
-   - **`app-release.aab`**: Google Play Store App Bundle.
 
 ### Method 2: Local Build in Android Studio
 1. Open Android Studio.
