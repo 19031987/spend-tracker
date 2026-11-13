@@ -35,7 +35,7 @@ Pick one:
   `keytool -export -rfc -keystore upload.jks -alias upload -file upload_certificate.pem`.
   Note: an APK signed with the new key cannot be installed over a sideloaded APK signed with the old
   key: Android requires uninstalling first, which deletes the app's local data. The app can export
-  JSON/CSV (Settings → Export) but cannot import it back yet, so plan the switch (or choose B) if your
+  a full backup (Settings → Data → Export backup, v2.2.0+) and import it after reinstalling, so export first (or choose B) if your
   on-phone history matters.
 - **B. Keep the old key for now.** Recover it from git history
   (`git show f6ecb60:release-keystore.jks > release-keystore.jks`) and put it in the secrets below.

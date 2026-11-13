@@ -90,13 +90,29 @@ jobs:
         path: dist/
         if-no-files-found: error
 
+    - name: Read app version
+      id: version
+      run: |
+        VERSION=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts | head -n1)
+        if [ -z "$VERSION" ]; then echo "::error::versionName not found in app/build.gradle.kts"; exit 1; fi
+        echo "name=$VERSION" >> "$GITHUB_OUTPUT"
+
     - name: Publish GitHub Release with APK & AAB
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v2.1.1
-        name: "SpendTracker Release v2.1.1 (Month-over-month comparison)"
+        tag_name: v${{ steps.version.outputs.name }}
+        name: "SpendTracker Release v${{ steps.version.outputs.name }}"
         body: |
+          ### SpendTracker v2.2.0 - Recurring payments you add yourself, account & category management, backups
+          - 🔁 **Add recurring payments by hand** (More → Recurring → Add recurring): name, amount, how often, date, category, money in or out. Tap any tracked payment to edit it; ignored payments can be restored.
+          - 🎯 **Archived goals** are now visible and can be unarchived.
+          - 🏦 **Accounts** tab in Settings: add, rename and delete accounts. "Add transaction" remembers the account you last used.
+          - 🏷️ **Categories**: edit name, emoji, colour and group, restore hidden categories, rename or delete groups; merchant rules can be edited (Contains / Starts with / Equals).
+          - 💾 **Backup & restore**: save a full backup file (and CSV), then import it with Merge or Replace.
+          - 🎨 **Consistent look**: one style for cards, headers, empty states and buttons on every screen and sheet; dark mode fixes.
+          - 🐛 Amounts like "1,000" are now read as one thousand.
+
           ### SpendTracker v2.1.1 - Month-over-month comparison
           - 📈 **Compared with last month** card on Home: spending, income and savings this month-to-date against the same days of last month, plus the categories you're spending more and less on (green = better, red = worse).
           - 🏠 The month summary now says how much more or less you've spent than this time last month.
