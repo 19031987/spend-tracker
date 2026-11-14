@@ -180,8 +180,18 @@ fun RecurringScreen(
             }
 
             when (uiState.view) {
-                RecurringView.UPCOMING -> upcomingSection(uiState, onAdd = { showAdd = true })
-                RecurringView.CALENDAR -> calendarSection(uiState, onPreviousMonth, onNextMonth, onSelectDay)
+                RecurringView.UPCOMING -> upcomingSection(
+                    uiState,
+                    onAdd = { showAdd = true },
+                    onEditItem = { id: Long -> editingId = id }
+                )
+                RecurringView.CALENDAR -> calendarSection(
+                    uiState,
+                    onPreviousMonth,
+                    onNextMonth,
+                    onSelectDay,
+                    onEditItem = { id: Long -> editingId = id }
+                )
                 RecurringView.ALL -> allSection(
                     state = uiState,
                     ignoredExpanded = ignoredExpanded,
@@ -379,7 +389,11 @@ private fun SuggestionCard(
     }
 }
 
-private fun LazyListScope.upcomingSection(state: RecurringUiState, onAdd: () -> Unit) {
+private fun LazyListScope.upcomingSection(
+    state: RecurringUiState,
+    onAdd: () -> Unit,
+    onEditItem: (Long) -> Unit
+) {
     if (state.upcoming.isEmpty()) {
         item(key = "upcoming-empty") {
             if (state.items.isEmpty()) {
@@ -423,7 +437,7 @@ private fun LazyListScope.upcomingSection(state: RecurringUiState, onAdd: () -> 
         item(key = "upcoming-${group.first}") {
             Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                 SectionHeader(title = group.first, small = true)
-                OccurrenceListCard(group.second, state.categories)
+                OccurrenceListCard(group.second, state.categories, onEditItem)
             }
         }
     }
@@ -433,7 +447,8 @@ private fun LazyListScope.calendarSection(
     state: RecurringUiState,
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
-    onSelectDay: (LocalDate?) -> Unit
+    onSelectDay: (LocalDate?) -> Unit,
+    onEditItem: (Long) -> Unit
 ) {
     item(key = "calendar") {
         CalendarCard(state, onPreviousMonth, onNextMonth, onSelectDay)
@@ -458,7 +473,7 @@ private fun LazyListScope.calendarSection(
                     icon = Icons.Filled.Repeat
                 )
             } else {
-                OccurrenceListCard(shown, state.categories)
+                OccurrenceListCard(shown, state.categories, onEditItem)
             }
         }
     }
@@ -569,7 +584,11 @@ private fun DatePill(date: LocalDate) {
 }
 
 @Composable
-private fun OccurrenceListCard(occurrences: List<RecurringOccurrence>, categories: Map<String, CategoryEntity>) {
+private fun OccurrenceListCard(
+    occurrences: List<RecurringOccurrence>,
+    categories: Map<String, CategoryEntity>,
+    onEditItem: (Long) -> Unit
+) {
     AppCard(contentPadding = 0.dp) {
         occurrences.forEachIndexed { index: Int, occurrence: RecurringOccurrence ->
             if (index > 0) {
@@ -578,13 +597,17 @@ private fun OccurrenceListCard(occurrences: List<RecurringOccurrence>, categorie
                     color = MaterialTheme.colorScheme.outlineVariant
                 )
             }
-            OccurrenceRow(occurrence, categories[occurrence.categoryKey])
+            OccurrenceRow(
+                occurrence = occurrence,
+                category = categories[occurrence.categoryKey],
+                onClick = { onEditItem(occurrence.itemId) }
+            )
         }
     }
 }
 
 @Composable
-private fun OccurrenceRow(occurrence: RecurringOccurrence, category: CategoryEntity?) {
+private fun OccurrenceRow(occurrence: RecurringOccurrence, category: CategoryEntity?, onClick: () -> Unit) {
     val amount: Long = occurrence.actualAmountMinor ?: occurrence.expectedAmountMinor
     val subtitle: String = if (occurrence.status == OccurrenceStatus.PAID_DIFFERENT_AMOUNT) {
         "Expected ${CurrencyUtils.formatMinor(occurrence.expectedAmountMinor)}"
@@ -594,6 +617,7 @@ private fun OccurrenceRow(occurrence: RecurringOccurrence, category: CategoryEnt
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClickLabel = "Edit ${occurrence.displayName}", onClick = onClick)
             .padding(horizontal = Spacing.lg, vertical = Spacing.md),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Spacing.md)

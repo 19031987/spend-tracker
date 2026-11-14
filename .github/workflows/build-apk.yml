@@ -124,6 +124,9 @@ jobs:
         tag_name: v${{ steps.version.outputs.name }}
         name: "SpendTracker Release v${{ steps.version.outputs.name }}"
         body: |
+          ### SpendTracker v2.2.1 - Edit recurring payments from any tab
+          - ✏️ Tap any payment in the **Upcoming** or **Calendar** tab of More → Recurring to edit or delete it (before, only the All tab opened the editor).
+
           ### SpendTracker v2.2.0 - Recurring payments you add yourself, account & category management, backups
           - 🔁 **Add recurring payments by hand** (More → Recurring → Add recurring): name, amount, how often, date, category, money in or out. Tap any tracked payment to edit it; ignored payments can be restored.
           - 🎯 **Archived goals** are now visible and can be unarchived.
