@@ -349,6 +349,34 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
     }
 
     try {
+        // 1b. Fill in vendors that older parser versions missed in non-pipe alerts,
+        // e.g. "your-saving.com £45.50 with HSBC Premier Credit Card". Only the merchant changes,
+        // and only when the re-parsed amount matches the stored one.
+        val cursor = db.query(
+            "SELECT id, amount, note, merchant FROM transactions " +
+                "WHERE note LIKE 'Captured from %' AND note NOT LIKE '%|%' AND note NOT LIKE '%¦%'"
+        )
+        while (cursor.moveToNext()) {
+            val txId = cursor.getLong(0)
+            val currentAmount = cursor.getLong(1)
+            val note = cursor.getString(2) ?: ""
+            val existingMerchant = if (cursor.isNull(3)) null else cursor.getString(3)
+            if (!isUnknownOrGenericMerchant(existingMerchant)) continue
+
+            val cleanNote = note
+                .replace(Regex("(?i)^Captured from [^:]+:\\s*"), "")
+                .trim()
+            val parsed = com.spendtracker.app.parser.SpendParser.parse("", "", cleanNote) ?: continue
+            if (parsed.merchant.isBlank() || parsed.merchantIsFallback) continue
+            if (kotlin.math.round(parsed.amount * 100).toLong() != kotlin.math.abs(currentAmount)) continue
+            db.execSQL("UPDATE transactions SET merchant = ? WHERE id = ?", arrayOf(parsed.merchant, txId))
+        }
+        cursor.close()
+    } catch (e: Exception) {
+        android.util.Log.w("AppDatabase", "Repair unknown vendors notice: ${e.message}")
+    }
+
+    try {
         // 2. Repair from legacy spend_tracker.db if present
         val legacyDbFile = context.getDatabasePath("spend_tracker.db")
         if (legacyDbFile != null && legacyDbFile.exists()) {

@@ -105,6 +105,9 @@ OUT_DD = re.compile(r"\b(?:direct debit|standing order|payment|transfer)\s+to\s+
 OUT_PAID_VENDOR = re.compile(r"\bpaid\s+" + NAME + r"(?=\s+(?:(?:" + CUR_ALT + r")?\s*" + NUM + r"))", I)
 OUT_VENDOR_AMOUNT = re.compile(r"^(?:(?:Chase|HSBC|Monzo|Revolut|Barclays|Amex)\s+)?" + NAME + r"(?=\s+(?:(?:" + CUR_ALT + r")\s*" + NUM + r"))", I)
 OUT_AT_TO = re.compile(r"\b(?:at|to)\s+" + NAME + TERM, I)
+DOMAIN = r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}"
+DOMAIN_FULL = re.compile(r"^" + DOMAIN + r"$", I)
+OUT_DOMAIN_AMOUNT = re.compile(r"^(?:(?:Chase|HSBC|Premier|Monzo|Revolut|Barclays|Amex)\s+)?(" + DOMAIN + r")(?=\s+(?:" + CUR_ALT + r")\s*" + NUM + r")", I)
 
 GENERIC_TITLE = re.compile(
     r"\b(?:alert|alerts|notification|payment|payments|purchase|transaction|activity|account|card|"
@@ -202,6 +205,8 @@ def is_usable_name(c) -> bool:
         return False
     if low in ACTION_WORDS or low in ("money in", "money out") or PREM_ADV_LOWER.match(low):
         return False
+    if DOMAIN_FULL.match(low):
+        return True
     words = set(re.findall(r"[a-z0-9]+", low))
     if words.intersection(ACTION_WORDS):
         return False
@@ -217,10 +222,12 @@ def clean_merchant(raw: str, source: str = "") -> str:
     for s in KNOWN_SOURCES:
         clean = re.sub(r"(?i)^%s\s*[:\-]?\s*" % s, "", clean, count=1).strip()
     clean = re.sub(r"(?i)^(?:at|to|from|with\s+your\s+card\s+at|spent\s+at|payment\s+to|payment\s+from)\s+", "", clean).strip()
+    is_domain = bool(DOMAIN_FULL.match(clean))
     clean = re.sub(r"(?i)\s+on\s+\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?.*$", "", clean)
     clean = re.sub(r"(?i)\s+at\s+\d{1,2}:\d{2}.*$", "", clean)
     clean = re.sub(r"(?i)\s+(?:via contactless|using card.*|card ending \d+.*|was approved.*|ref:?.*)$", "", clean)
-    clean = re.sub(r"(?i)\b(?:ltd|limited|uk)\b\.?", "", clean)
+    if not is_domain:
+        clean = re.sub(r"(?i)\b(?:ltd|limited|uk)\b\.?", "", clean)
     clean = re.sub(r"[^a-zA-Z0-9 &'. -]", " ", clean)
     clean = re.sub(r"\s+", " ", clean).strip()
     low = clean.lower()
@@ -235,6 +242,8 @@ def clean_merchant(raw: str, source: str = "") -> str:
                       ("harrods", "Harrods"), ("british gas", "British Gas")]:
         if key in low:
             return name
+    if is_domain:
+        return low
     words = [w for w in clean.split(" ") if w]
     if not words:
         return ""
@@ -287,6 +296,9 @@ def extract_merchant(tx_type, text, amount_end, title, source):
         if m and is_real_merchant(m.group(1)):
             return m.group(1).strip(), False
         m = OUT_VENDOR_AMOUNT.search(text)
+        if m and is_real_merchant(m.group(1)):
+            return m.group(1).strip(), False
+        m = OUT_DOMAIN_AMOUNT.search(text)
         if m and is_real_merchant(m.group(1)):
             return m.group(1).strip(), False
     t = (title or "").strip()
@@ -461,6 +473,18 @@ class TestSpendParser(unittest.TestCase):
             self.assertEqual(res["source"], source, res)
 
     # --- Money Out ---
+    def test_domain_merchant_before_amount_hsbc_credit_card(self):
+        # Regression: "your-saving.com £45.50 with HSBC Premier Credit Card" showed Unknown Vendor.
+        text = "your-saving.com £45.50 with HSBC Premier Credit Card \u2022\u20221737"
+        for title in (None, "HSBC"):
+            res = parse_spend(HSBC, title, text)
+            self.check(res, TYPE_OUT, 45.50, merchant="your-saving.com", source="HSBC")
+            self.assertFalse(res["merchantIsFallback"], res)
+        self.check(parse_spend(HSBC, None, "shop.example.co.uk £12.00 with HSBC Premier Credit Card \u2022\u20221737"),
+                   TYPE_OUT, 12.00, merchant="shop.example.co.uk")
+        self.check(parse_spend(HSBC, None, "netflix.com £8.99 with HSBC Premier Credit Card \u2022\u20221737"),
+                   TYPE_OUT, 8.99, merchant="Netflix")
+
     def test_pipe_format_hsbc_money_in_notification_sample(self):
         # Exact notification from user: "Money In" header, "£50.00 transaction | TRIPURA JHANSI RANCHASE | HSBC ADVANCE"
         self.check(parse_spend(HSBC, "Money In", "£50.00 transaction | TRIPURA JHANSI RANCHASE | HSBC ADVANCE"),

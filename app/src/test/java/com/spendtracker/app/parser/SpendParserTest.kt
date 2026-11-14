@@ -322,4 +322,27 @@ class SpendParserTest {
         assertEquals("Costa Coffee", parsedExpenseNoTitle.merchant)
         assertEquals("HSBC", parsedExpenseNoTitle.source)
     }
+
+    @Test
+    fun `domain merchant before amount is used as vendor`() {
+        // Regression: "your-saving.com £45.50 with HSBC Premier Credit Card" showed Unknown Vendor.
+        val text = "your-saving.com £45.50 with HSBC Premier Credit Card \u2022\u20221737"
+        for (title in listOf(null, "HSBC")) {
+            val parsed = SpendParser.parse(hsbcPkg, title, text)
+            assertNotNull(parsed)
+            assertEquals(SpendParser.TYPE_OUT, parsed!!.type)
+            assertEquals(45.50, parsed.amount, 0.001)
+            assertEquals("your-saving.com", parsed.merchant)
+            assertEquals("HSBC", parsed.source)
+            assertFalse(parsed.merchantIsFallback)
+        }
+        assertEquals(
+            "shop.example.co.uk",
+            SpendParser.parse(hsbcPkg, null, "shop.example.co.uk £12.00 with HSBC Premier Credit Card \u2022\u20221737")!!.merchant
+        )
+        assertEquals(
+            "Netflix",
+            SpendParser.parse(hsbcPkg, null, "netflix.com £8.99 with HSBC Premier Credit Card \u2022\u20221737")!!.merchant
+        )
+    }
 }
