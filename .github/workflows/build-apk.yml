@@ -124,6 +124,10 @@ jobs:
         tag_name: v${{ steps.version.outputs.name }}
         name: "SpendTracker Release v${{ steps.version.outputs.name }}"
         body: |
+          ### SpendTracker v2.2.2 - Web-shop vendors
+          - 🏷️ Alerts like "your-saving.com £45.50 with HSBC Premier Credit Card" now record **your-saving.com** as the vendor instead of Unknown Vendor.
+          - 🔧 Existing transactions saved as Unknown Vendor from such alerts are fixed automatically when the app opens.
+
           ### SpendTracker v2.2.1 - Edit recurring payments from any tab
           - ✏️ Tap any payment in the **Upcoming** or **Calendar** tab of More → Recurring to edit or delete it (before, only the All tab opened the editor).
 

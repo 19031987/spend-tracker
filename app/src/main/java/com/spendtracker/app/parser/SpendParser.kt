@@ -181,6 +181,12 @@ object SpendParser {
     private val OUT_DD = Regex("\\b(?:direct debit|standing order|payment|transfer)\\s+to\\s+$NAME(?=\\s+(?:of|for)\\b)", IC)
     private val OUT_PAID_VENDOR = Regex("\\bpaid\\s+$NAME(?=\\s+(?:$CUR_ALT)?\\s*$NUM)", IC)
     private val OUT_VENDOR_AMOUNT = Regex("^(?:(?:Chase|HSBC|Premier|Monzo|Revolut|Barclays|Amex)\\s+)?$NAME(?=\\s+(?:$CUR_ALT)\\s*$NUM)", IC)
+
+    // Web-shop merchants written as a domain before the amount: "your-saving.com £45.50 with HSBC ...".
+    // NAME stops at '.', so domains need their own pattern.
+    private const val DOMAIN = "(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,24}"
+    private val DOMAIN_FULL = Regex("^$DOMAIN$", IC)
+    private val OUT_DOMAIN_AMOUNT = Regex("^(?:(?:Chase|HSBC|Premier|Monzo|Revolut|Barclays|Amex)\\s+)?($DOMAIN)(?=\\s+(?:$CUR_ALT)\\s*$NUM)", IC)
     private val OUT_AT_TO = Regex("\\b(?:at|to)\\s+$NAME$TERM", IC)
 
     private val GENERIC_TITLE = Regex(
@@ -367,12 +373,14 @@ object SpendParser {
 
         // Strip leading indicators
         clean = clean.replace(Regex("(?i)^(?:at|to|from|with\\s+your\\s+card\\s+at|spent\\s+at|payment\\s+to|payment\\s+from)\\s+"), "").trim()
+        // A web domain ("your-saving.com") is kept as written, in lower case.
+        val isDomain = DOMAIN_FULL.matches(clean)
 
         // Strip trailing indicators & noise
         clean = clean.replace(Regex("(?i)\\s+on\\s+\\d{1,2}[/-]\\d{1,2}(?:[/-]\\d{2,4})?.*$"), "")
         clean = clean.replace(Regex("(?i)\\s+at\\s+\\d{1,2}:\\d{2}.*$"), "")
         clean = clean.replace(Regex("(?i)\\s+(?:via contactless|using card.*|card ending \\d+.*|was approved.*|ref:?.*)$"), "")
-        clean = clean.replace(Regex("(?i)\\b(?:ltd|limited|uk)\\b\\.?"), "")
+        if (!isDomain) clean = clean.replace(Regex("(?i)\\b(?:ltd|limited|uk)\\b\\.?"), "")
         clean = clean.replace(Regex("[^a-zA-Z0-9 &'. -]"), " ")
         clean = clean.replace(Regex("\\s+"), " ").trim()
 
@@ -394,6 +402,7 @@ object SpendParser {
             lower.contains("harrods") -> return "Harrods"
             lower.contains("british gas") -> return "British Gas"
         }
+        if (isDomain) return lower
 
         val words = clean.split(" ").filter { it.isNotEmpty() }
         if (words.isEmpty()) return ""
@@ -498,6 +507,8 @@ object SpendParser {
         }
         if (lower.length < 2) return false
         if (lower in ACTION_WORDS || lower == "money in" || lower == "money out" || PREM_ADV_LOWER.matches(lower)) return false
+        // A domain such as "your-saving.com" is a merchant even though it contains "your".
+        if (DOMAIN_FULL.matches(lower)) return true
         val words = Regex("[a-z0-9]+").findAll(lower).map { it.value }.toSet()
         if (words.intersect(ACTION_WORDS).isNotEmpty()) return false
         if (lower.startsWith("your ") || lower.startsWith("you ") || lower.startsWith("card ending") || lower.startsWith("make ")) return false
@@ -527,6 +538,7 @@ object SpendParser {
             OUT_AT_TO.findAll(text).map { it.groupValues[1] }.firstOrNull { isRealMerchant(it) }?.let { return it.trim() to false }
             OUT_PAID_VENDOR.find(text)?.groupValues?.get(1)?.takeIf { isRealMerchant(it) }?.let { return it.trim() to false }
             OUT_VENDOR_AMOUNT.find(text)?.groupValues?.get(1)?.takeIf { isRealMerchant(it) }?.let { return it.trim() to false }
+            OUT_DOMAIN_AMOUNT.find(text)?.groupValues?.get(1)?.takeIf { isRealMerchant(it) }?.let { return it.trim() to false }
         }
 
         // Wallet apps (Google Wallet etc.) put the merchant in the title: "Tesco" / "£4.00 with Visa ••1234".
