@@ -124,6 +124,14 @@ jobs:
         tag_name: v${{ steps.version.outputs.name }}
         name: "SpendTracker Release v${{ steps.version.outputs.name }}"
         body: |
+          ### SpendTracker v2.3.0 - Accuracy and usability fixes
+          - 💷 **No more double counting** when PayPal or Google Wallet and your bank both report the same payment; an expense can no longer be merged into an unrelated incoming payment.
+          - ↔️ PayPal "You sent £x to …" is money out; Chase round-ups and moves to your own savers are no longer counted as spending.
+          - 🏷️ Better vendor names: card merchants like PAYPAL *NETFLIX, AMZN Mktp UK*…, UBER *TRIP, SumUp *Cafe Nero; HSBC salary credits; TfL; "Plc"/"Ltd" removed.
+          - 📊 Comparisons are like-for-like (this month so far vs the same days last month); no more sample figures when there is no data; one week start everywhere.
+          - 🔁 Refunds reduce spending instead of counting as income (tax refunds stay income); budget rollover, goal pace, cash-flow averages and "overdue" timing fixed.
+          - 👆 Tapping a category no longer silently creates a rule (you're asked); transfers are visible and editable; you can change a transaction's date; save/delete messages with Undo; Home rows and account cards are tappable; deletes ask for confirmation; open sheets survive rotation.
+
           ### SpendTracker v2.2.3 - PayPal vendors
           - 🏷️ PayPal alerts like "Your purchase from UBER PAYMENTS UK LIMITED" now record **Uber** as the vendor instead of Unknown Vendor; existing ones are fixed when the app opens.
 

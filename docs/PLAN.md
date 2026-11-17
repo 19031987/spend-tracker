@@ -13,9 +13,9 @@ Fix the issues found by the three-part evaluation (parser corpus, UI flows, mone
 | Reviewer | read-only | compile + logic review of the branch; fixes routed to owners |
 
 ## Steps
-- [ ] 1. Four agents in parallel, each with regression tests.
-- [ ] 2. Reviewer pass; owners fix findings.
-- [ ] 3. Python mirror tests; bump to v2.3.0 with notes; one commit per batch; PR; CI green; merge (user asked for a release).
+- [x] 1. Four agents in parallel, each with regression tests.
+- [x] 2. Reviewer pass; owners fix findings.
+- [x] 3. Python mirror tests; bump to v2.3.0 with notes; one commit per batch; PR; CI green; merge (user asked for a release).
 
 ## Constraints
 No Room schema change, no new dependencies, no network calls. Python mirrors stay 1:1. No Android SDK here: CI verifies Kotlin.
