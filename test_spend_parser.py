@@ -103,6 +103,7 @@ IN_PAID_YOU = re.compile(NAME + r"\s+(?:has\s+)?paid you\b", I)
 IN_FROM = re.compile(r"\bfrom\s+" + NAME + TERM, I)
 OUT_DD = re.compile(r"\b(?:direct debit|standing order|payment|transfer)\s+to\s+" + NAME + r"(?=\s+(?:of|for)\b)", I)
 OUT_PAID_VENDOR = re.compile(r"\bpaid\s+" + NAME + r"(?=\s+(?:(?:" + CUR_ALT + r")?\s*" + NUM + r"))", I)
+OUT_PURCHASE_FROM = re.compile(r"\b(?:purchase|order)\s+(?:from|with)\s+" + NAME + r"(?:(?=\s+(?:you|your)\b)|" + TERM + r")", I)
 OUT_VENDOR_AMOUNT = re.compile(r"^(?:(?:Chase|HSBC|Monzo|Revolut|Barclays|Amex)\s+)?" + NAME + r"(?=\s+(?:(?:" + CUR_ALT + r")\s*" + NUM + r"))", I)
 OUT_AT_TO = re.compile(r"\b(?:at|to)\s+" + NAME + TERM, I)
 DOMAIN = r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}"
@@ -292,6 +293,9 @@ def extract_merchant(tx_type, text, amount_end, title, source):
         for m in OUT_AT_TO.finditer(text):
             if is_real_merchant(m.group(1)):
                 return m.group(1).strip(), False
+        m = OUT_PURCHASE_FROM.search(text)
+        if m and (is_real_merchant(m.group(1)) or is_real_merchant(clean_merchant(m.group(1), source))):
+            return m.group(1).strip(), False
         m = OUT_PAID_VENDOR.search(text)
         if m and is_real_merchant(m.group(1)):
             return m.group(1).strip(), False
@@ -473,6 +477,16 @@ class TestSpendParser(unittest.TestCase):
             self.assertEqual(res["source"], source, res)
 
     # --- Money Out ---
+    def test_paypal_purchase_from_company_name(self):
+        # Regression: PayPal "Your purchase from UBER PAYMENTS UK LIMITED ..." showed Unknown Vendor.
+        text = "Your purchase from UBER PAYMENTS UK LIMITED You authorised a payment of \u00a34.99. Tap for more details."
+        for title in (None, "PayPal"):
+            res = parse_spend(PAYPAL, title, text)
+            self.check(res, TYPE_OUT, 4.99, merchant="Uber", category="Transport & Fuel", source="PayPal")
+            self.assertFalse(res["merchantIsFallback"], res)
+        self.check(parse_spend("", "", text), TYPE_OUT, 4.99, merchant="Uber")
+        self.check(parse_spend(PAYPAL, None, "Your order from Etsy Ltd. You paid \u00a312.00."), TYPE_OUT, 12.00, merchant="Etsy")
+
     def test_domain_merchant_before_amount_hsbc_credit_card(self):
         # Regression: "your-saving.com £45.50 with HSBC Premier Credit Card" showed Unknown Vendor.
         text = "your-saving.com £45.50 with HSBC Premier Credit Card \u2022\u20221737"

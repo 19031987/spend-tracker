@@ -180,6 +180,8 @@ object SpendParser {
     private val IN_FROM = Regex("\\bfrom\\s+$NAME$TERM", IC)
     private val OUT_DD = Regex("\\b(?:direct debit|standing order|payment|transfer)\\s+to\\s+$NAME(?=\\s+(?:of|for)\\b)", IC)
     private val OUT_PAID_VENDOR = Regex("\\bpaid\\s+$NAME(?=\\s+(?:$CUR_ALT)?\\s*$NUM)", IC)
+    // PayPal: "Your purchase from UBER PAYMENTS UK LIMITED You authorised a payment of £4.99."
+    private val OUT_PURCHASE_FROM = Regex("\\b(?:purchase|order)\\s+(?:from|with)\\s+$NAME(?:(?=\\s+(?:you|your)\\b)|$TERM)", IC)
     private val OUT_VENDOR_AMOUNT = Regex("^(?:(?:Chase|HSBC|Premier|Monzo|Revolut|Barclays|Amex)\\s+)?$NAME(?=\\s+(?:$CUR_ALT)\\s*$NUM)", IC)
 
     // Web-shop merchants written as a domain before the amount: "your-saving.com £45.50 with HSBC ...".
@@ -536,6 +538,11 @@ object SpendParser {
             OUT_DD.find(text)?.groupValues?.get(1)?.takeIf { isRealMerchant(it) }?.let { return it.trim() to false }
             // ...then anywhere ("Payment to Netflix: £8.99").
             OUT_AT_TO.findAll(text).map { it.groupValues[1] }.firstOrNull { isRealMerchant(it) }?.let { return it.trim() to false }
+            // Company names like "Uber Payments UK Limited" contain "payments", so also accept them
+            // when the cleaned name ("Uber") is a real merchant.
+            OUT_PURCHASE_FROM.find(text)?.groupValues?.get(1)
+                ?.takeIf { isRealMerchant(it) || isRealMerchant(cleanMerchantName(it, source)) }
+                ?.let { return it.trim() to false }
             OUT_PAID_VENDOR.find(text)?.groupValues?.get(1)?.takeIf { isRealMerchant(it) }?.let { return it.trim() to false }
             OUT_VENDOR_AMOUNT.find(text)?.groupValues?.get(1)?.takeIf { isRealMerchant(it) }?.let { return it.trim() to false }
             OUT_DOMAIN_AMOUNT.find(text)?.groupValues?.get(1)?.takeIf { isRealMerchant(it) }?.let { return it.trim() to false }
