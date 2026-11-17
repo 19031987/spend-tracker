@@ -363,4 +363,72 @@ class SpendParserTest {
         assertEquals("Uber", SpendParser.parse("", "", text)!!.merchant)
         assertEquals("Etsy", SpendParser.parse(paypalPkg, null, "Your order from Etsy Ltd. You paid £12.00.")!!.merchant)
     }
+
+    // --- Evaluation fixes (v2.3.0); mirrored in test_spend_parser.py ---
+
+    private val paypalPkg = "com.paypal.android.p2pmobile"
+    private val walletPkg = "com.google.android.apps.walletnfcrel"
+    private val revolutPkg = "com.revolut.revolut"
+
+    private fun assertTx(parsed: ParsedExpense?, type: String, amount: Double, merchant: String? = null, category: String? = null) {
+        assertNotNull(parsed)
+        assertEquals(type, parsed!!.type)
+        assertEquals(amount, parsed.amount, 0.001)
+        if (merchant != null) assertEquals(merchant, parsed.merchant)
+        if (category != null) assertEquals(category, parsed.category)
+    }
+
+    @Test
+    fun `star card merchants use the name after the processor prefix`() {
+        val card = " with HSBC Premier Credit Card \u2022\u20221737"
+        assertTx(SpendParser.parse(hsbcPkg, "HSBC UK", "PAYPAL *NETFLIX £10.99$card"), SpendParser.TYPE_OUT, 10.99, "Netflix", "Bills & Subscriptions")
+        assertTx(SpendParser.parse(hsbcPkg, "HSBC UK", "AMZN Mktp UK*AB12CD3E4 £24.99$card"), SpendParser.TYPE_OUT, 24.99, "Amazon", "Shopping")
+        assertTx(SpendParser.parse(hsbcPkg, null, "UBER *TRIP £9.87$card"), SpendParser.TYPE_OUT, 9.87, "Uber", "Transport & Fuel")
+        assertTx(SpendParser.parse(walletPkg, "SumUp *Cafe Nero", "£4.10 with Visa \u2022\u20221234"), SpendParser.TYPE_OUT, 4.10, "Cafe Nero", "Dining & Drinks")
+        assertTx(SpendParser.parse(walletPkg, "SQ *THE COFFEE HOUSE", "£3.75 with Visa \u2022\u20221234"), SpendParser.TYPE_OUT, 3.75, "The Coffee House", "Dining & Drinks")
+        assertEquals("Cafe Nero", SpendParser.cleanMerchantName("SumUp *Cafe Nero"))
+        assertEquals("The Coffee House", SpendParser.cleanMerchantName("SQ *The Coffee House"))
+        assertTx(SpendParser.parse(hsbcPkg, null, "your-saving.com £45.50$card"), SpendParser.TYPE_OUT, 45.50, "your-saving.com")
+    }
+
+    @Test
+    fun `title and body are matched separately`() {
+        assertTx(SpendParser.parse(paypalPkg, "Payment sent", "You sent £30.00 GBP to Tom Jones."), SpendParser.TYPE_OUT, 30.00, "Tom Jones")
+        assertTx(SpendParser.parse(paypalPkg, "You've got money", "Jane Doe sent you £25.00 GBP."), SpendParser.TYPE_IN, 25.00, "Jane Doe")
+        assertTx(SpendParser.parse(revolutPkg, "Payment from Sarah", "You received £15 from Sarah"), SpendParser.TYPE_IN, 15.0, "Sarah")
+        assertTx(SpendParser.parse(revolutPkg, "Paid €8.90 at Lidl", "Spent abroad on your card"), SpendParser.TYPE_OUT, 8.90, "Lidl", "Groceries")
+        assertTx(SpendParser.parse(chasePkg, "Interest paid", "We've paid you £4.12 in interest"), SpendParser.TYPE_IN, 4.12, "")
+        assertTx(SpendParser.parse(monzoPkg, "Salary", "ACME LTD paid you £2,000.00"), SpendParser.TYPE_IN, 2000.00, "Acme", "Income & Salary")
+    }
+
+    @Test
+    fun `moves between own accounts are ignored`() {
+        assertNull(SpendParser.parse(chasePkg, "Round-up", "We've moved £0.55 to your Round-up account"))
+        assertNull(SpendParser.parse(chasePkg, "Money moved", "£200.00 moved from your Current account to your Saver account"))
+    }
+
+    @Test
+    fun `from name stops at into`() {
+        assertTx(
+            SpendParser.parse(hsbcPkg, "HSBC UK", "You've received £2,450.00 from ACME LTD SALARY into your account ending 4321."),
+            SpendParser.TYPE_IN, 2450.00, "Acme Salary", "Income & Salary"
+        )
+    }
+
+    @Test
+    fun `TfL travel charge title is the merchant`() {
+        assertTx(SpendParser.parse(walletPkg, "TfL Travel Charge", "£2.80 with Visa \u2022\u20221234"), SpendParser.TYPE_OUT, 2.80, "TfL", "Transport & Fuel")
+    }
+
+    @Test
+    fun `trailing company suffixes are stripped`() {
+        assertTx(SpendParser.parse(hsbcPkg, "HSBC UK", "Contactless payment of £4.50 at GREGGS PLC."), SpendParser.TYPE_OUT, 4.50, "Greggs", "Dining & Drinks")
+        assertTx(
+            SpendParser.parse("com.americanexpress.android.acctsvcs.uk", "American Express", "A charge of £89.00 at JOHN LEWIS PLC was made on your Card ending 1001."),
+            SpendParser.TYPE_OUT, 89.00, "John Lewis", "Shopping"
+        )
+        assertTx(SpendParser.parse(paypalPkg, "Your automatic payment to Spotify", "You paid £11.99 GBP to Spotify AB."), SpendParser.TYPE_OUT, 11.99, "Spotify")
+        assertTx(SpendParser.parse(paypalPkg, "Your purchase from Vinted", "You paid £15.50 to Vinted UAB."), SpendParser.TYPE_OUT, 15.50, "Vinted")
+        assertEquals("Ab", SpendParser.cleanMerchantName("AB"))
+    }
 }
