@@ -97,18 +97,42 @@ FINANCIAL_TX_VERB = re.compile(
     I)
 
 NAME = r"([A-Za-z0-9&'][^.,;:!?\n•*()|]{0,48}?)"
-TERM = r"(?=\s+(?:on|via|using|with|ref|reference|card|was|has|is|have|and|for)\b|\s+at\s+[0-9]|\s+-\s|[.,;:!?\n•*()|]|\s*$)"
+TERM = r"(?=\s+(?:on|via|using|with|ref|reference|card|was|has|is|have|and|for|into)\b|\s+at\s+[0-9]|\s+-\s|[.,;:!?\n•*()|]|\s*$)"
 IN_SENT_YOU = re.compile(NAME + r"\s+(?:has\s+)?sent you\b", I)
 IN_PAID_YOU = re.compile(NAME + r"\s+(?:has\s+)?paid you\b", I)
 IN_FROM = re.compile(r"\bfrom\s+" + NAME + TERM, I)
 OUT_DD = re.compile(r"\b(?:direct debit|standing order|payment|transfer)\s+to\s+" + NAME + r"(?=\s+(?:of|for)\b)", I)
 OUT_PAID_VENDOR = re.compile(r"\bpaid\s+" + NAME + r"(?=\s+(?:(?:" + CUR_ALT + r")?\s*" + NUM + r"))", I)
 OUT_PURCHASE_FROM = re.compile(r"\b(?:purchase|order)\s+(?:from|with)\s+" + NAME + r"(?:(?=\s+(?:you|your)\b)|" + TERM + r")", I)
-OUT_VENDOR_AMOUNT = re.compile(r"^(?:(?:Chase|HSBC|Monzo|Revolut|Barclays|Amex)\s+)?" + NAME + r"(?=\s+(?:(?:" + CUR_ALT + r")\s*" + NUM + r"))", I)
+OUT_VENDOR_AMOUNT = re.compile(r"^(?:(?:Chase|HSBC|Premier|Monzo|Revolut|Barclays|Amex)\s+)?" + NAME + r"(?=\s+(?:(?:" + CUR_ALT + r")\s*" + NUM + r"))", I | re.M)
 OUT_AT_TO = re.compile(r"\b(?:at|to)\s+" + NAME + TERM, I)
+# "You sent £30.00 GBP to Tom Jones." / "You paid £11.99 GBP to Spotify AB." is always an outflow,
+# even when another part of the notification says "sent you" / "received".
+OUT_YOU_SENT_TO = re.compile(r"\byou(?:'ve|’ve| have)?\s+(?:sent|paid)\s+(?:(?:" + CUR_ALT + r")\s?)?" + NUM + r"(?:\s?(?:GBP|EUR|USD))?\s+to\b", I)
+# Moves between the user's own accounts (Chase round-ups, "moved from your Current account to your Saver
+# account") are neither spending nor income: the notification is ignored.
+INTERNAL_MOVE = re.compile(r"\bmoved\b[^!?\n]{0,60}?\b(?:to|into)\s+your\b", I)
+# Card-processor prefixes ("PAYPAL *NETFLIX", "SQ *THE COFFEE HOUSE", "SumUp *Cafe Nero", "ZETTLE_*Shop").
+PROCESSOR_PREFIX = re.compile(r"\b(?:paypal|sq|sumup|zettle|iz|sp)\s?[*_]+\s*", I)
+LEADING_PROCESSOR = re.compile(r"^(?:paypal|sq|sumup|zettle|iz|sp)\s?[*_]+\s*", I)
+# Reference codes after '*' ("AMZN Mktp UK*AB12CD3E4"): 6+ capitals/digits including a digit.
+STAR_REFERENCE = re.compile(r"(?<=[A-Za-z0-9])\s?\*(?=[A-Z0-9]*[0-9])[A-Z0-9]{6,}\b")
+# Any other '*' between words ("UBER *TRIP") becomes a space; masked card digits ("****1234") are kept.
+STAR_BETWEEN_WORDS = re.compile(r"(?<=[A-Za-z0-9])\s*\*+\s*(?=[A-Za-z])")
+TRAILING_CHARGE = re.compile(r"\s+charges?$", I)
+COMPANY_SUFFIX = re.compile(r"(?i)[\s,]+(?:plc|ab|uab|inc|llc|gmbh|sa)\.?$")
+PRONOUN_NAME = re.compile(r"^(?:we|we've|we’ve|we have|they|it)$", I)
+
+
+def normalize_card_merchants(text: str) -> str:
+    text = PROCESSOR_PREFIX.sub("", text)
+    text = STAR_REFERENCE.sub("", text)
+    return STAR_BETWEEN_WORDS.sub(" ", text)
+
+
 DOMAIN = r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}"
 DOMAIN_FULL = re.compile(r"^" + DOMAIN + r"$", I)
-OUT_DOMAIN_AMOUNT = re.compile(r"^(?:(?:Chase|HSBC|Premier|Monzo|Revolut|Barclays|Amex)\s+)?(" + DOMAIN + r")(?=\s+(?:" + CUR_ALT + r")\s*" + NUM + r")", I)
+OUT_DOMAIN_AMOUNT = re.compile(r"^(?:(?:Chase|HSBC|Premier|Monzo|Revolut|Barclays|Amex)\s+)?(" + DOMAIN + r")(?=\s+(?:" + CUR_ALT + r")\s*" + NUM + r")", I | re.M)
 
 GENERIC_TITLE = re.compile(
     r"\b(?:alert|alerts|notification|payment|payments|purchase|transaction|activity|account|card|"
@@ -117,7 +141,7 @@ GENERIC_TITLE = re.compile(
 
 CATEGORY_RULES_OUT = {
     "Groceries": ["tesco", "sainsbury", "asda", "morrison", "aldi", "lidl", "waitrose", "m&s", "marks & spencer", "co-op", "grocery", "supermarket", "costco", "iceland", "ocado"],
-    "Dining & Drinks": ["costa", "starbucks", "mcdonald", "kfc", "subway", "greggs", "nando", "deliveroo", "uber eats", "just eat", "caffe", "coffee", "restaurant", "pub", "bar", "pizza", "burger", "pret", "five guys"],
+    "Dining & Drinks": ["costa", "cafe", "café", "nero", "starbucks", "mcdonald", "kfc", "subway", "greggs", "nando", "deliveroo", "uber eats", "just eat", "caffe", "coffee", "restaurant", "pub", "bar", "pizza", "burger", "pret", "five guys"],
     "Transport & Fuel": ["uber", "tfl", "transport for london", "trainline", "national rail", "shell", "bp", "esso", "texaco", "petrol", "parking", "bolt", "railway", "ringgo"],
     "Bills & Subscriptions": ["netflix", "spotify", "disney", "prime", "amazon prime", "apple.com", "google storage", "youtube", "broadband", "bt", "virgin media", "ee", "o2", "vodafone", "three", "water", "british gas", "octopus", "edf", "e.on", "gym", "puregym"],
     "Shopping": ["amazon", "ebay", "argos", "boots", "currys", "john lewis", "zara", "h&m", "primark", "tk maxx", "next", "asos", "shein", "ikea", "apple store"],
@@ -185,7 +209,7 @@ ACTION_WORDS = {
     "you", "your", "card", "cards", "account", "accounts", "make", "payment", "payments",
     "direct debit", "standing order", "transfer", "transfers", "alert", "alerts", "notification",
     "chase", "hsbc", "monzo", "revolut", "barclays", "paypal", "amex", "sent", "spend", "spent",
-    "charge", "charges", "transaction", "transactions", "ending", "approved"
+    "charge", "charges", "transaction", "transactions", "ending", "approved", "paid"
 }
 
 
@@ -204,7 +228,7 @@ def is_usable_name(c) -> bool:
             low = low[len(s):].strip(" :-\t")
     if len(low) < 2:
         return False
-    if low in ACTION_WORDS or low in ("money in", "money out") or PREM_ADV_LOWER.match(low):
+    if low in ACTION_WORDS or low in ("money in", "money out") or PREM_ADV_LOWER.match(low) or PRONOUN_NAME.match(low):
         return False
     if DOMAIN_FULL.match(low):
         return True
@@ -222,6 +246,8 @@ def clean_merchant(raw: str, source: str = "") -> str:
     clean = raw.strip()
     for s in KNOWN_SOURCES:
         clean = re.sub(r"(?i)^%s\s*[:\-]?\s*" % s, "", clean, count=1).strip()
+    clean = LEADING_PROCESSOR.sub("", clean)
+    clean = re.sub(r"^[*_\s]+", "", clean)
     clean = re.sub(r"(?i)^(?:at|to|from|with\s+your\s+card\s+at|spent\s+at|payment\s+to|payment\s+from)\s+", "", clean).strip()
     is_domain = bool(DOMAIN_FULL.match(clean))
     clean = re.sub(r"(?i)\s+on\s+\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?.*$", "", clean)
@@ -229,17 +255,18 @@ def clean_merchant(raw: str, source: str = "") -> str:
     clean = re.sub(r"(?i)\s+(?:via contactless|using card.*|card ending \d+.*|was approved.*|ref:?.*)$", "", clean)
     if not is_domain:
         clean = re.sub(r"(?i)\b(?:ltd|limited|uk)\b\.?", "", clean)
+        clean = COMPANY_SUFFIX.sub("", clean.strip())
     clean = re.sub(r"[^a-zA-Z0-9 &'. -]", " ", clean)
     clean = re.sub(r"\s+", " ", clean).strip()
     low = clean.lower()
     for key, name in [("tesco", "Tesco Stores"), ("sainsbury", "Sainsbury's"), ("asda", "ASDA"),
                       ("costa", "Costa Coffee"), ("pret", "Pret A Manger"), ("starbucks", "Starbucks"),
-                      ("steam", "Steam Games"), ("netflix", "Netflix"), ("uber eats", "Uber Eats")]:
+                      ("steam", "Steam Games"), ("netflix", "Netflix"), ("uber eats", "Uber Eats"), ("tfl", "TfL")]:
         if key in low:
             return name
     if "uber" in low and "eats" not in low:
         return "Uber"
-    for key, name in [("amazon", "Amazon"), ("shell", "Shell Petrol"), ("apple store", "Apple Store"),
+    for key, name in [("amazon", "Amazon"), ("amzn", "Amazon"), ("shell", "Shell Petrol"), ("apple store", "Apple Store"),
                       ("harrods", "Harrods"), ("british gas", "British Gas")]:
         if key in low:
             return name
@@ -305,7 +332,7 @@ def extract_merchant(tx_type, text, amount_end, title, source):
         m = OUT_DOMAIN_AMOUNT.search(text)
         if m and is_real_merchant(m.group(1)):
             return m.group(1).strip(), False
-    t = (title or "").strip()
+    t = TRAILING_CHARGE.sub("", (title or "").strip())
     if t and not GENERIC_TITLE.search(t) and find_first_money(t) is None \
             and not PREMIER_SOURCE_WORDS.match(t) \
             and not any(r.search(t) for r, _ in BANK_CONTENT_WORDS) and is_real_merchant(t):
@@ -415,9 +442,11 @@ def parse_spend(pkg: str, title, text):
                 "merchant": final_merchant, "merchantIsFallback": is_generic_pipe_merchant,
                 "category": categorize("%s %s" % (final_merchant, content), tx_type)}
 
-    if IGNORE.search(content) or PROMO.search(content):
+    if IGNORE.search(content) or PROMO.search(content) or INTERNAL_MOVE.search(content):
         return None
-    scrubbed = content
+    # Title and body are matched as separate lines so a name can never run across the join
+    # ("Salary" + "ACME LTD paid you" must not become "Salary Acme").
+    scrubbed = normalize_card_merchants("\n".join(p.strip() for p in (title, text) if p and p.strip()))
     for r in BALANCE_PHRASES:
         scrubbed = r.sub(" ", scrubbed)
     money = find_first_money(scrubbed)
@@ -431,6 +460,8 @@ def parse_spend(pkg: str, title, text):
     if sign == "+":
         tx_type = TYPE_IN
     elif sign in ("-", "\u2212"):
+        tx_type = TYPE_OUT
+    elif OUT_YOU_SENT_TO.search(scrubbed):
         tx_type = TYPE_OUT
     elif STRONG_IN.search(scrubbed):
         tx_type = TYPE_IN
@@ -475,6 +506,63 @@ class TestSpendParser(unittest.TestCase):
             self.assertEqual(res["category"], category, res)
         if source is not None:
             self.assertEqual(res["source"], source, res)
+
+    # --- Evaluation fixes (v2.3.0) ---
+    def test_star_card_merchants(self):
+        card = " with HSBC Premier Credit Card \u2022\u20221737"
+        self.check(parse_spend(HSBC, "HSBC UK", "PAYPAL *NETFLIX \u00a310.99" + card), TYPE_OUT, 10.99,
+                   merchant="Netflix", category="Bills & Subscriptions")
+        self.check(parse_spend(HSBC, "HSBC UK", "AMZN Mktp UK*AB12CD3E4 \u00a324.99" + card), TYPE_OUT, 24.99,
+                   merchant="Amazon", category="Shopping")
+        self.check(parse_spend(HSBC, None, "UBER *TRIP \u00a39.87" + card), TYPE_OUT, 9.87,
+                   merchant="Uber", category="Transport & Fuel")
+        self.check(parse_spend(GWALLET, "SumUp *Cafe Nero", "\u00a34.10 with Visa \u2022\u20221234"), TYPE_OUT, 4.10,
+                   merchant="Cafe Nero", category="Dining & Drinks")
+        self.check(parse_spend(GWALLET, "SQ *THE COFFEE HOUSE", "\u00a33.75 with Visa \u2022\u20221234"), TYPE_OUT, 3.75,
+                   merchant="The Coffee House", category="Dining & Drinks")
+        self.assertEqual(clean_merchant("SumUp *Cafe Nero"), "Cafe Nero")
+        self.assertEqual(clean_merchant("SQ *The Coffee House"), "The Coffee House")
+        # Domains are unaffected.
+        self.check(parse_spend(HSBC, None, "your-saving.com \u00a345.50" + card), TYPE_OUT, 45.50, merchant="your-saving.com")
+
+    def test_title_and_body_matched_separately(self):
+        self.check(parse_spend(PAYPAL, "Payment sent", "You sent \u00a330.00 GBP to Tom Jones."), TYPE_OUT, 30.00, merchant="Tom Jones")
+        self.check(parse_spend(PAYPAL, "You've got money", "Jane Doe sent you \u00a325.00 GBP."), TYPE_IN, 25.00, merchant="Jane Doe")
+        self.check(parse_spend("com.revolut.revolut", "Payment from Sarah", "You received \u00a315 from Sarah"), TYPE_IN, 15.0, merchant="Sarah")
+        self.check(parse_spend("com.revolut.revolut", "Paid \u20ac8.90 at Lidl", "Spent abroad on your card"), TYPE_OUT, 8.90,
+                   merchant="Lidl", category="Groceries")
+        self.check(parse_spend(CHASE, "Interest paid", "We've paid you \u00a34.12 in interest"), TYPE_IN, 4.12, merchant="")
+        self.check(parse_spend("com.monzo.android", "Salary", "ACME LTD paid you \u00a32,000.00"), TYPE_IN, 2000.00,
+                   merchant="Acme", category="Income & Salary")
+
+    def test_moves_between_own_accounts_ignored(self):
+        self.assertIsNone(parse_spend(CHASE, "Round-up", "We've moved \u00a30.55 to your Round-up account"))
+        self.assertIsNone(parse_spend(CHASE, "Money moved", "\u00a3200.00 moved from your Current account to your Saver account"))
+
+    def test_money_moved_to_someone_else_is_a_payment(self):
+        # Regression: "from your" alone must not mark a payment to another person as an internal move.
+        self.check(parse_spend(CHASE, "Payment sent", "You've moved \u00a350.00 from your Current account to Tom Smith"),
+                   TYPE_OUT, 50.00, merchant="Tom Smith")
+        self.assertEqual(parse_spend(CHASE, "Payment sent", "Money moved to Tom's account: \u00a320.00")["type"], TYPE_OUT)
+
+    def test_from_name_stops_at_into(self):
+        self.check(parse_spend(HSBC, "HSBC UK", "You've received \u00a32,450.00 from ACME LTD SALARY into your account ending 4321."),
+                   TYPE_IN, 2450.00, merchant="Acme Salary", category="Income & Salary")
+
+    def test_tfl_travel_charge_title(self):
+        self.check(parse_spend(GWALLET, "TfL Travel Charge", "\u00a32.80 with Visa \u2022\u20221234"), TYPE_OUT, 2.80,
+                   merchant="TfL", category="Transport & Fuel")
+
+    def test_company_suffixes_stripped(self):
+        self.check(parse_spend(HSBC, "HSBC UK", "Contactless payment of \u00a34.50 at GREGGS PLC."), TYPE_OUT, 4.50,
+                   merchant="Greggs", category="Dining & Drinks")
+        self.check(parse_spend("com.americanexpress.android.acctsvcs.uk", "American Express",
+                               "A charge of \u00a389.00 at JOHN LEWIS PLC was made on your Card ending 1001."),
+                   TYPE_OUT, 89.00, merchant="John Lewis", category="Shopping")
+        self.check(parse_spend(PAYPAL, "Your automatic payment to Spotify", "You paid \u00a311.99 GBP to Spotify AB."),
+                   TYPE_OUT, 11.99, merchant="Spotify")
+        self.check(parse_spend(PAYPAL, "Your purchase from Vinted", "You paid \u00a315.50 to Vinted UAB."), TYPE_OUT, 15.50, merchant="Vinted")
+        self.assertEqual(clean_merchant("AB"), "Ab")  # a lone suffix-like word is kept
 
     # --- Money Out ---
     def test_paypal_purchase_from_company_name(self):

@@ -38,6 +38,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +55,7 @@ import com.spendtracker.app.domain.budget.BudgetLine
 import com.spendtracker.app.domain.budget.BudgetSummary
 import com.spendtracker.app.ui.components.AppCard
 import com.spendtracker.app.ui.components.CategoryEmojiBox
+import com.spendtracker.app.ui.components.DestructiveButton
 import com.spendtracker.app.ui.components.DestructiveTextButton
 import com.spendtracker.app.ui.components.EmptyState
 import com.spendtracker.app.ui.components.SectionHeader
@@ -93,6 +96,22 @@ private data class BudgetEditTarget(
     val colorHex: String
 )
 
+private val BudgetEditTargetSaver = listSaver<BudgetEditTarget?, String>(
+    save = { t -> if (t == null) emptyList() else listOf(t.categoryKey, t.name, t.emoji, t.colorHex) },
+    restore = { l -> if (l.size == 4) BudgetEditTarget(l[0], l[1], l[2], l[3]) else null }
+)
+
+/** Error for the budget amount field, or null when [text] is blank or a valid positive amount. */
+internal fun budgetAmountError(text: String): String? {
+    if (text.isBlank() || CurrencyUtils.parseDecimalToMinor(text) != null) return null
+    val value = CurrencyUtils.normaliseAmount(text)?.toBigDecimalOrNull()
+    return if (value != null && value.signum() <= 0) {
+        "Enter an amount above 0"
+    } else {
+        "Enter an amount with up to 2 decimals"
+    }
+}
+
 @Composable
 fun BudgetScreen(
     uiState: BudgetUiState,
@@ -103,8 +122,11 @@ fun BudgetScreen(
     onApplySuggestions: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var editing: BudgetEditTarget? by remember { mutableStateOf<BudgetEditTarget?>(null) }
-    var showSuggestionDialog: Boolean by remember { mutableStateOf(false) }
+    // Saveable so an open sheet survives rotation.
+    var editing: BudgetEditTarget? by rememberSaveable(stateSaver = BudgetEditTargetSaver) {
+        mutableStateOf<BudgetEditTarget?>(null)
+    }
+    var showSuggestionDialog: Boolean by rememberSaveable { mutableStateOf(false) }
 
     val summary: BudgetSummary? = uiState.summary
 
@@ -598,7 +620,7 @@ fun EditBudgetSheet(
     onSave: (amountMinor: Long, rollover: Boolean) -> Unit,
     onRemove: (() -> Unit)?
 ) {
-    var amountText: String by remember {
+    var amountText: String by rememberSaveable {
         mutableStateOf(
             if (initialAmountMinor != null && initialAmountMinor > 0) {
                 CurrencyUtils.minorToDecimalString(initialAmountMinor).removeSuffix(".00")
@@ -607,9 +629,11 @@ fun EditBudgetSheet(
             }
         )
     }
-    var rollover: Boolean by remember { mutableStateOf(initialRollover) }
+    var rollover: Boolean by rememberSaveable { mutableStateOf(initialRollover) }
+    var confirmRemove: Boolean by rememberSaveable { mutableStateOf(false) }
     val parsed: Long? = CurrencyUtils.parseDecimalToMinor(amountText)
-    val showError: Boolean = amountText.isNotBlank() && parsed == null
+    val amountError: String? = budgetAmountError(amountText)
+    val showError: Boolean = amountError != null
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -634,7 +658,7 @@ fun EditBudgetSheet(
                 singleLine = true,
                 isError = showError,
                 supportingText = if (showError) {
-                    { Text("Enter an amount with up to 2 decimals") }
+                    { Text(amountError.orEmpty()) }
                 } else {
                     null
                 },
@@ -664,12 +688,32 @@ fun EditBudgetSheet(
             if (onRemove != null) {
                 DestructiveTextButton(
                     text = "Remove budget",
-                    onClick = onRemove,
+                    onClick = { confirmRemove = true },
                     leadingIcon = Icons.Outlined.Delete,
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 )
             }
         }
+    }
+
+    if (confirmRemove && onRemove != null) {
+        AlertDialog(
+            onDismissRequest = { confirmRemove = false },
+            title = { Text("Remove budget?") },
+            text = { Text("$categoryName will no longer have a monthly budget. Your transactions are not affected.") },
+            confirmButton = {
+                DestructiveButton(
+                    text = "Remove",
+                    onClick = {
+                        confirmRemove = false
+                        onRemove()
+                    }
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRemove = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 

@@ -196,16 +196,23 @@ fun TransactionRowItem(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 val isIncome = tx.type == TransactionType.INCOME
+                val transfer = isTransferItem(tx)
                 val finance = SpendTrackerTheme.finance
                 Text(
-                    text = CurrencyUtils.formatSignedMinor(tx.amountMinor, isPositive = isIncome),
+                    // Transfers move money between your own accounts: no sign, muted, not in totals.
+                    text = if (transfer) CurrencyUtils.formatMinor(tx.amountMinor)
+                    else CurrencyUtils.formatSignedMinor(tx.amountMinor, isPositive = isIncome),
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     softWrap = false,
-                    color = if (isIncome) finance.income else MaterialTheme.colorScheme.onSurface
+                    color = when {
+                        transfer -> MaterialTheme.colorScheme.onSurfaceVariant
+                        isIncome -> finance.income
+                        else -> MaterialTheme.colorScheme.onSurface
+                    }
                 )
                 Text(
-                    text = timeStr,
+                    text = if (transfer) "⇄ Transfer · $timeStr" else timeStr,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -215,3 +222,16 @@ fun TransactionRowItem(
         }
     }
 }
+
+/** Internal transfer rows: shown in the feed but never counted in spending or income totals. */
+fun isTransferItem(tx: TransactionItem): Boolean =
+    tx.type == TransactionType.TRANSFER || tx.categoryKey == "INTERNAL_TRANSFER"
+
+/**
+ * The receiving leg of a transfer pair (stored on the destination account). The feed lists only the
+ * sending leg, so a transfer between two of the user's accounts appears once, not twice.
+ */
+fun isTransferDestinationLeg(tx: TransactionItem): Boolean =
+    tx.type == TransactionType.TRANSFER &&
+        tx.destinationAccountId != null &&
+        tx.accountId == tx.destinationAccountId

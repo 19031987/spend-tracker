@@ -72,7 +72,8 @@ fun AddTransactionSheet(
         emoji: String,
         colorHex: String,
         type: TransactionType,
-        ruleMerchant: String?
+        ruleMerchant: String?,
+        onCreated: (CategoryEntity) -> Unit
     ) -> Unit,
     onSubmit: (NewTransaction) -> Unit,
     defaultAccountId: Long? = null
@@ -102,6 +103,7 @@ fun AddTransactionSheet(
     )
 
     val activeCategory = categories.firstOrNull { it.key == selectedCategoryKey }
+    val currencySymbol = remember { localCurrencySymbol() }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         SheetContainer {
@@ -248,7 +250,7 @@ fun AddTransactionSheet(
                 label = { Text("Amount") },
                 prefix = {
                     Text(
-                        text = if (type == TransactionType.INCOME) "+£ " else "−£ ",
+                        text = if (type == TransactionType.INCOME) "+$currencySymbol " else "−$currencySymbol ",
                         color = if (type == TransactionType.INCOME) finance.income else finance.expense
                     )
                 },
@@ -336,12 +338,23 @@ fun AddTransactionSheet(
                 showCategoryPicker = false
             },
             onCreateCategory = { name, groupId, newGroupName, emoji, colorHex, cType, ruleMerchant ->
-                onCreateCategory(name, groupId, newGroupName, emoji, colorHex, cType, ruleMerchant)
+                onCreateCategory(name, groupId, newGroupName, emoji, colorHex, cType, ruleMerchant) { created ->
+                    // Select the category the user just made.
+                    selectedCategoryKey = created.key
+                    autoAssignedCategory = null
+                }
                 showCategoryPicker = false
             }
         )
     }
 }
+
+/** Symbol of the device currency, as used by [CurrencyUtils.formatMinor] (e.g. "£"). */
+internal fun localCurrencySymbol(locale: Locale = Locale.getDefault()): String =
+    runCatching { java.text.NumberFormat.getCurrencyInstance(locale).currency?.getSymbol(locale) }
+        .getOrNull()
+        ?.takeIf { it.isNotBlank() }
+        ?: "£"
 
 /** "12.34" or "12,34" to 1234. Returns null if invalid, <= 0, or has more than 2 decimals. */
 internal fun parseMinorUnits(input: String): Long? = CurrencyUtils.parseDecimalToMinor(input)

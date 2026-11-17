@@ -1,5 +1,6 @@
 package com.spendtracker.app.ui.dashboard
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -72,7 +73,10 @@ fun DashboardRoute(
     onOpenTransactions: () -> Unit,
     onOpenTransaction: (TransactionItem) -> Unit,
     onCategoryClick: (TransactionItem) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenRecurringItem: (itemId: Long) -> Unit = { onOpenRecurring() },
+    onOpenGoal: (goalId: Long) -> Unit = { onOpenGoals() },
+    onOpenTopCategory: (TopCategory) -> Unit = { onOpenCashFlow() }
 ) {
     val uiState: DashboardUiState by viewModel.uiState.collectAsStateWithLifecycle()
     DashboardScreen(
@@ -85,7 +89,10 @@ fun DashboardRoute(
         onOpenTransactions = onOpenTransactions,
         onOpenTransaction = onOpenTransaction,
         onCategoryClick = onCategoryClick,
-        modifier = modifier
+        modifier = modifier,
+        onOpenRecurringItem = onOpenRecurringItem,
+        onOpenGoal = onOpenGoal,
+        onOpenTopCategory = onOpenTopCategory
     )
 }
 
@@ -100,7 +107,10 @@ fun DashboardScreen(
     onOpenTransactions: () -> Unit,
     onOpenTransaction: (TransactionItem) -> Unit,
     onCategoryClick: (TransactionItem) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenRecurringItem: (itemId: Long) -> Unit = { onOpenRecurring() },
+    onOpenGoal: (goalId: Long) -> Unit = { onOpenGoals() },
+    onOpenTopCategory: (TopCategory) -> Unit = { onOpenCashFlow() }
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -130,17 +140,26 @@ fun DashboardScreen(
         }
         if (uiState.upcoming.isNotEmpty()) {
             item(key = "upcoming") {
-                UpcomingCard(items = uiState.upcoming, today = uiState.today, onOpen = onOpenRecurring)
+                UpcomingCard(
+                    items = uiState.upcoming,
+                    today = uiState.today,
+                    onOpen = onOpenRecurring,
+                    onOpenItem = onOpenRecurringItem
+                )
             }
         }
         if (uiState.topCategories.isNotEmpty()) {
             item(key = "top_categories") {
-                TopCategoriesCard(categories = uiState.topCategories, onOpen = onOpenCashFlow)
+                TopCategoriesCard(
+                    categories = uiState.topCategories,
+                    onOpen = onOpenCashFlow,
+                    onOpenCategory = onOpenTopCategory
+                )
             }
         }
         if (uiState.goals.isNotEmpty()) {
             item(key = "goals") {
-                GoalsCard(goals = uiState.goals, onOpen = onOpenGoals)
+                GoalsCard(goals = uiState.goals, onOpen = onOpenGoals, onOpenGoal = onOpenGoal)
             }
         }
         item(key = "recent_header") {
@@ -319,25 +338,39 @@ private fun ReviewCard(count: Int, onOpen: () -> Unit) {
     }
 }
 
+/** Full-width clickable row with a rounded ripple; the vertical padding keeps a 48dp+ target. */
 @Composable
-private fun UpcomingCard(items: List<RecurringOccurrence>, today: LocalDate, onOpen: () -> Unit) {
+private fun Modifier.tappableRow(onClickLabel: String, onClick: () -> Unit): Modifier =
+    this
+        .fillMaxWidth()
+        .clip(MaterialTheme.shapes.small)
+        .clickable(onClickLabel = onClickLabel, onClick = onClick)
+        .padding(vertical = Spacing.xs)
+
+@Composable
+private fun UpcomingCard(
+    items: List<RecurringOccurrence>,
+    today: LocalDate,
+    onOpen: () -> Unit,
+    onOpenItem: (Long) -> Unit
+) {
     DashboardCard(title = "Upcoming", onAction = onOpen) {
-        Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             items.forEach { occurrence ->
-                UpcomingRow(occurrence = occurrence, today = today)
+                UpcomingRow(occurrence = occurrence, today = today, onClick = { onOpenItem(occurrence.itemId) })
             }
         }
     }
 }
 
 @Composable
-private fun UpcomingRow(occurrence: RecurringOccurrence, today: LocalDate) {
+private fun UpcomingRow(occurrence: RecurringOccurrence, today: LocalDate, onClick: () -> Unit) {
     val overdue: Boolean = occurrence.status == OccurrenceStatus.OVERDUE
     val date: LocalDate = occurrence.expectedDate
     val monthAbbrev: String = date.month.getDisplayName(DateTextStyle.SHORT, Locale.getDefault())
     val finance = SpendTrackerTheme.finance
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.tappableRow(onClickLabel = "Edit recurring payment", onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
@@ -386,12 +419,18 @@ private fun UpcomingRow(occurrence: RecurringOccurrence, today: LocalDate) {
 }
 
 @Composable
-private fun TopCategoriesCard(categories: List<TopCategory>, onOpen: () -> Unit) {
+private fun TopCategoriesCard(
+    categories: List<TopCategory>,
+    onOpen: () -> Unit,
+    onOpenCategory: (TopCategory) -> Unit
+) {
     DashboardCard(title = "Top spending", onAction = onOpen) {
-        Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             categories.forEach { category ->
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.tappableRow(onClickLabel = "Show ${category.name} transactions") {
+                        onOpenCategory(category)
+                    },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(Spacing.md)
                 ) {
@@ -435,12 +474,12 @@ private fun TopCategoriesCard(categories: List<TopCategory>, onOpen: () -> Unit)
 }
 
 @Composable
-private fun GoalsCard(goals: List<GoalProgress>, onOpen: () -> Unit) {
+private fun GoalsCard(goals: List<GoalProgress>, onOpen: () -> Unit, onOpenGoal: (Long) -> Unit) {
     DashboardCard(title = "Goals", onAction = onOpen) {
-        Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             goals.forEach { goal ->
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.tappableRow(onClickLabel = "Open ${goal.name}") { onOpenGoal(goal.goalId) },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(Spacing.md)
                 ) {

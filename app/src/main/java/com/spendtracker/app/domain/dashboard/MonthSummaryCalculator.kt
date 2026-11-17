@@ -1,9 +1,12 @@
 package com.spendtracker.app.domain.dashboard
 
+import com.spendtracker.app.domain.RefundAttribution
 import com.spendtracker.app.domain.TransactionItem
 import com.spendtracker.app.domain.isIncome
 import com.spendtracker.app.domain.isSpending
 import com.spendtracker.app.domain.monthOf
+import com.spendtracker.app.domain.netSpendMinor
+import com.spendtracker.app.domain.spendCategoryKey
 import java.time.YearMonth
 import java.time.ZoneId
 
@@ -27,8 +30,6 @@ data class TopCategory(
 
 object MonthSummaryCalculator {
 
-    private const val UNCATEGORISED_KEY: String = "OTHER_EXPENSE"
-
     fun summarize(transactions: List<TransactionItem>, month: YearMonth, zone: ZoneId): MonthSummary {
         var spent = 0L
         var income = 0L
@@ -36,17 +37,18 @@ object MonthSummaryCalculator {
         var priorIncome = 0L
         for (tx in transactions) {
             val txMonth: YearMonth = monthOf(tx.timestamp, zone)
+            // Refunds are negative spending (netSpendMinor), never income.
             if (txMonth == month) {
-                if (tx.isSpending()) spent += tx.amountMinor
+                spent += tx.netSpendMinor()
                 if (tx.isIncome()) income += tx.amountMinor
             } else if (txMonth.isBefore(month)) {
-                if (tx.isSpending()) priorSpent += tx.amountMinor
+                priorSpent += tx.netSpendMinor()
                 if (tx.isIncome()) priorIncome += tx.amountMinor
             }
         }
         return MonthSummary(
             month = month,
-            spentMinor = spent,
+            spentMinor = maxOf(0L, spent),
             incomeMinor = income,
             carriedOverMinor = priorIncome - priorSpent
         )
@@ -59,16 +61,23 @@ object MonthSummaryCalculator {
         zone: ZoneId,
         limit: Int = 5
     ): List<TopCategory> {
-        val spending: List<TransactionItem> = transactions.filter {
-            it.isSpending() && monthOf(it.timestamp, zone) == month
+        if (limit <= 0) return emptyList()
+        val attribution: RefundAttribution = RefundAttribution.of(transactions)
+        val inMonth: List<TransactionItem> = transactions.filter { monthOf(it.timestamp, zone) == month }
+        // Net per category: spending minus refunds attributed to that category, never below zero.
+        val amounts: MutableMap<String, Long> = LinkedHashMap()
+        val labels: MutableMap<String, TransactionItem> = HashMap()
+        for (tx in inMonth) {
+            val key: String = tx.spendCategoryKey(attribution) ?: continue
+            amounts[key] = (amounts[key] ?: 0L) + tx.netSpendMinor()
+            if (tx.isSpending() && key !in labels) labels[key] = tx
         }
-        val total: Long = spending.sumOf { it.amountMinor }
-        if (total <= 0L || limit <= 0) return emptyList()
-        return spending
-            .groupBy { it.categoryKey ?: UNCATEGORISED_KEY }
-            .map { (key, items) ->
-                val first: TransactionItem = items.first()
-                val amount: Long = items.sumOf { it.amountMinor }
+        val positive: Map<String, Long> = amounts.filter { (key, amount) -> amount > 0L && key in labels }
+        val total: Long = positive.values.sum()
+        if (total <= 0L) return emptyList()
+        return positive
+            .map { (key, amount) ->
+                val first: TransactionItem = labels.getValue(key)
                 TopCategory(
                     categoryKey = key,
                     name = first.categoryName,

@@ -2,6 +2,7 @@
 
 package com.spendtracker.app.ui
 
+import android.app.DatePickerDialog
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,7 +10,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import com.spendtracker.app.data.AccountEntity
 import com.spendtracker.app.data.CategoryEntity
@@ -48,6 +53,7 @@ import com.spendtracker.app.ui.components.SheetHeader
 import com.spendtracker.app.ui.theme.Spacing
 import com.spendtracker.app.ui.util.CurrencyUtils
 import com.spendtracker.app.ui.util.DateUtils
+import java.util.Calendar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -67,9 +73,20 @@ fun EditTransactionSheet(
         merchant: String?,
         note: String?,
         excludeFromSpending: Boolean,
-        ruleMerchant: String?
+        ruleMerchant: String?,
+        timestamp: Long
     ) -> Unit,
-    onDelete: (Long) -> Unit
+    onDelete: (Long) -> Unit,
+    onCreateCategory: (
+        name: String,
+        groupId: Long?,
+        newGroupName: String?,
+        emoji: String,
+        colorHex: String,
+        type: TransactionType,
+        ruleMerchant: String?,
+        onCreated: (CategoryEntity) -> Unit
+    ) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -95,7 +112,12 @@ fun EditTransactionSheet(
     var localError by rememberSaveable { mutableStateOf<String?>(null) }
     var autoRuleChecked by rememberSaveable { mutableStateOf(false) }
     var showCategoryPicker by rememberSaveable { mutableStateOf(false) }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showDeleteConfirm by rememberSaveable { mutableStateOf(false) }
+    // Date can be changed; the original time of day is kept.
+    var timestamp by rememberSaveable { mutableStateOf(transaction.timestamp) }
+    val context = LocalContext.current
+    val currencySymbol = remember { localCurrencySymbol() }
+    val wasTransfer = transaction.type == TransactionType.TRANSFER || transaction.categoryKey == "INTERNAL_TRANSFER"
 
     val deduplicatedAccounts = remember(accounts) { deduplicateAccounts(accounts) }
 
@@ -110,8 +132,24 @@ fun EditTransactionSheet(
         SheetContainer {
             SheetHeader(
                 title = "Edit transaction",
-                subtitle = DateUtils.formatDateTime(transaction.timestamp)
+                subtitle = DateUtils.formatDateTime(timestamp)
             )
+
+            if (wasTransfer) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                ) {
+                    Text(
+                        "Filed as a transfer between your accounts, so it's left out of totals. " +
+                            "If it's really a payment, pick Money out or Money in and save.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm)
+                    )
+                }
+            }
 
             // 2-way Transaction Type Selector: Money Out vs Money In
             val types = listOf(
@@ -150,12 +188,37 @@ fun EditTransactionSheet(
             OutlinedTextField(
                 value = amountText,
                 onValueChange = { amountText = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
-                label = { Text("Amount (£)") },
+                label = { Text("Amount ($currencySymbol)") },
                 placeholder = { Text("0.00") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 modifier = Modifier.fillMaxWidth()
             )
+
+            // Date (keeps the original time of day)
+            OutlinedButton(
+                onClick = {
+                    val cal = Calendar.getInstance().apply {
+                        if (timestamp > 0) timeInMillis = timestamp
+                    }
+                    DatePickerDialog(
+                        context,
+                        { _, year, month, dayOfMonth ->
+                            timestamp = withDate(timestamp, year, month, dayOfMonth)
+                        },
+                        cal.get(Calendar.YEAR),
+                        cal.get(Calendar.MONTH),
+                        cal.get(Calendar.DAY_OF_MONTH)
+                    ).show()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Outlined.CalendarToday, contentDescription = null)
+                Text(
+                    text = "Date: " + if (timestamp > 0) DateUtils.formatDateYear(timestamp) else "Not set",
+                    modifier = Modifier.padding(start = Spacing.sm).weight(1f)
+                )
+            }
 
             // Account Picker
             AccountDropdownSelector(
@@ -253,7 +316,8 @@ fun EditTransactionSheet(
                             merchantText.trim().takeIf { it.isNotEmpty() },
                             note.trim().takeIf { it.isNotEmpty() },
                             excludeFromSpending,
-                            if (autoRuleChecked && merchantText.isNotBlank()) merchantText.trim() else null
+                            if (autoRuleChecked && merchantText.isNotBlank()) merchantText.trim() else null,
+                            timestamp
                         )
                     }
                 }
@@ -305,9 +369,24 @@ fun EditTransactionSheet(
                 }
                 showCategoryPicker = false
             },
-            onCreateCategory = { _, _, _, _, _, _, _ ->
+            onCreateCategory = { name, groupId, newGroupName, emoji, colorHex, cType, ruleMerchant ->
+                onCreateCategory(name, groupId, newGroupName, emoji, colorHex, cType, ruleMerchant) { created ->
+                    // Apply the category the user just made.
+                    selectedCategoryKey = created.key
+                    if (created.key == "INTERNAL_TRANSFER") excludeFromSpending = true
+                }
                 showCategoryPicker = false
             }
         )
     }
+}
+
+/** [original] moved to the given calendar date, keeping its time of day (now if [original] is unset). */
+internal fun withDate(original: Long, year: Int, month: Int, dayOfMonth: Int): Long {
+    val cal = Calendar.getInstance()
+    if (original > 0) cal.timeInMillis = original
+    cal.set(Calendar.YEAR, year)
+    cal.set(Calendar.MONTH, month)
+    cal.set(Calendar.DAY_OF_MONTH, dayOfMonth)
+    return cal.timeInMillis
 }

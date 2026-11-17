@@ -50,6 +50,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.spendtracker.app.ui.components.AppCard
 import com.spendtracker.app.ui.components.BaselineBanner
+import com.spendtracker.app.ui.components.EmptyState
+import androidx.compose.material.icons.outlined.CompareArrows
 import com.spendtracker.app.ui.components.SectionHeader
 import com.spendtracker.app.ui.theme.ScreenPadding
 import com.spendtracker.app.ui.theme.Spacing
@@ -131,6 +133,16 @@ fun ComparisonContent(
                         modifier = Modifier.size(36.dp)
                     )
                 }
+            }
+        } else if (!state.hasData || state.breakdownItems.isEmpty()) {
+            // No real data for either period (the ViewModel sets hasData): say so instead of
+            // showing an all-zero comparison.
+            item(key = "empty") {
+                EmptyState(
+                    title = "Not enough data to compare yet",
+                    body = state.emptyMessage,
+                    icon = Icons.Outlined.CompareArrows
+                )
             }
         } else {
             // Section 2: Overview Summary Comparison Card

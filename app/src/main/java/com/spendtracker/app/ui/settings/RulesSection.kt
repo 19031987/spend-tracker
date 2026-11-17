@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -12,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,6 +30,7 @@ import com.spendtracker.app.domain.MatchType
 import com.spendtracker.app.ui.SettingsViewModel
 import com.spendtracker.app.ui.components.AppCard
 import com.spendtracker.app.ui.components.CategoryEmojiBox
+import com.spendtracker.app.ui.components.DestructiveButton
 import com.spendtracker.app.ui.components.DestructiveTextButton
 import com.spendtracker.app.ui.components.EmptyState
 import com.spendtracker.app.ui.components.PrimaryButton
@@ -55,6 +58,7 @@ fun RulesSection(
     var categoryKey by rememberSaveable { mutableStateOf<String?>(null) }
     val selectedKey = categoryKey ?: pickable.firstOrNull()?.key
     var editingRuleId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var deletingRuleId by rememberSaveable { mutableStateOf<Long?>(null) }
 
     SheetContainer(modifier = Modifier.padding(top = Spacing.lg)) {
         AppCard(verticalSpacing = Spacing.md) {
@@ -109,7 +113,7 @@ fun RulesSection(
                         onClick = { editingRuleId = r.id },
                         leading = { CategoryEmojiBox(emoji = cat?.emoji ?: "🏷️", colorHex = cat?.colorHex, size = 40.dp) },
                         trailing = {
-                            IconButton(onClick = { viewModel.deleteRule(r.id) }) {
+                            IconButton(onClick = { deletingRuleId = r.id }) {
                                 Icon(Icons.Outlined.Delete, contentDescription = "Delete rule", tint = MaterialTheme.colorScheme.error)
                             }
                         }
@@ -129,10 +133,37 @@ fun RulesSection(
                 editingRuleId = null
             },
             onDelete = {
-                viewModel.deleteRule(editing.id)
                 editingRuleId = null
+                deletingRuleId = editing.id
             },
             onDismiss = { editingRuleId = null }
+        )
+    }
+
+    val deleting = rules.firstOrNull { it.id == deletingRuleId }
+    if (deleting != null) {
+        val catName = categories.firstOrNull { it.key == deleting.categoryKey }?.name ?: deleting.categoryKey
+        AlertDialog(
+            onDismissRequest = { deletingRuleId = null },
+            title = { Text("Delete rule?") },
+            text = {
+                Text(
+                    "${matchLabel(deleting.matchType)} \"${deleting.pattern}\" → $catName will stop applying " +
+                        "to new transactions. Existing transactions keep their category."
+                )
+            },
+            confirmButton = {
+                DestructiveButton(
+                    text = "Delete",
+                    onClick = {
+                        viewModel.deleteRule(deleting.id)
+                        deletingRuleId = null
+                    }
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingRuleId = null }) { Text("Cancel") }
+            }
         )
     }
 }

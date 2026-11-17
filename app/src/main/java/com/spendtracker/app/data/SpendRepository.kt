@@ -106,38 +106,42 @@ class SpendRepository(
             )
         }
 
-        val deduped = mutableListOf<com.spendtracker.app.domain.TransactionItem>()
-        for (item in mappedItems) {
-            fun matchesCandidate(existing: com.spendtracker.app.domain.TransactionItem, requireBothKnown: Boolean): Boolean {
-                if (existing.amountMinor != item.amountMinor) return false
-                if (!isSameOrEquivalentBank(existing.source, item.source) || !isPremierOrHsbcBank(existing.source)) return false
-                if (kotlin.math.abs(existing.timestamp - item.timestamp) > 180_000L) return false
-                val bothKnown = !isUnknownOrGenericMerchant(existing.merchant, "HSBC") && !isUnknownOrGenericMerchant(item.merchant, "HSBC")
-                if (requireBothKnown && !bothKnown) return false
-                return isMerchantDuplicate(existing.merchant, item.merchant, "HSBC")
-            }
-            val matchIdx = deduped.indexOfFirst { matchesCandidate(it, requireBothKnown = true) }
-                .takeIf { it >= 0 }
-                ?: deduped.indexOfFirst { matchesCandidate(it, requireBothKnown = false) }
-            if (matchIdx >= 0) {
-                val existing = deduped[matchIdx]
-                val bestMerchant = existing.merchant ?: item.merchant
-                val existingCatDefault = existing.categoryKey == "OTHER_EXPENSE" || existing.categoryKey == "OTHER_INCOME"
-                val itemCatSpecific = item.categoryKey != "OTHER_EXPENSE" && item.categoryKey != "OTHER_INCOME"
-                deduped[matchIdx] = existing.copy(
-                    accountName = "HSBC",
-                    source = "HSBC",
-                    merchant = bestMerchant,
-                    categoryKey = if (existingCatDefault && itemCatSpecific) item.categoryKey else existing.categoryKey,
-                    categoryName = if (existingCatDefault && itemCatSpecific) item.categoryName else existing.categoryName,
-                    categoryEmoji = if (existingCatDefault && itemCatSpecific) item.categoryEmoji else existing.categoryEmoji,
-                    categoryColorHex = if (existingCatDefault && itemCatSpecific) item.categoryColorHex else existing.categoryColorHex,
-                    needsReview = existing.needsReview || item.needsReview
+        // Same duplicate rules as insert time and the on-open repair (dedupDecision): same type and
+        // amount, never transfers; same bank within DEDUP_WINDOW_MILLIS, or wallet + funding bank
+        // within WALLET_DEDUP_WINDOW_MILLIS (the bank row is kept).
+        val deduped = dedupeRows(
+            mappedItems,
+            key = { item ->
+                DedupKey(
+                    amountMinor = item.amountMinor,
+                    type = item.type,
+                    source = item.source,
+                    accountId = item.accountId,
+                    merchant = item.merchant,
+                    timestamp = item.timestamp,
+                    isTransfer = item.type == TransactionType.TRANSFER || item.categoryKey == "INTERNAL_TRANSFER",
+                    isManual = !isAutoCapturedNote(item.note)
                 )
-            } else {
-                deduped.add(item)
+            },
+            merge = { survivor, other, kind ->
+                fun keyOf(i: com.spendtracker.app.domain.TransactionItem) =
+                    DedupKey(i.amountMinor, i.type, i.source, i.accountId, i.merchant, i.timestamp)
+                val bank = resolvePreferredBankSource(other.source, survivor.source)
+                val takeOtherCategory = mergedDedupCategory(survivor.categoryKey, other.categoryKey) != survivor.categoryKey
+                val bankAccount = canonicalNameMap[bank.lowercase(Locale.ROOT)]
+                survivor.copy(
+                    accountId = bankAccount?.id ?: survivor.accountId,
+                    accountName = bankAccount?.name ?: if (isPremierOrHsbcBank(bank)) "HSBC" else survivor.accountName,
+                    source = bankAccount?.name ?: if (isPremierOrHsbcBank(bank)) "HSBC" else survivor.source,
+                    merchant = mergedDedupMerchant(keyOf(survivor), keyOf(other), kind),
+                    categoryKey = if (takeOtherCategory) other.categoryKey else survivor.categoryKey,
+                    categoryName = if (takeOtherCategory) other.categoryName else survivor.categoryName,
+                    categoryEmoji = if (takeOtherCategory) other.categoryEmoji else survivor.categoryEmoji,
+                    categoryColorHex = if (takeOtherCategory) other.categoryColorHex else survivor.categoryColorHex,
+                    needsReview = survivor.needsReview || other.needsReview
+                )
             }
-        }
+        )
         deduped
     }
 
@@ -161,51 +165,21 @@ class SpendRepository(
                     it.isNotEmpty() && !isUnknownOrGenericMerchant(it, accName)
                 }
 
-                val existingDup = if (!isInternalTransfer) {
-                    transactionDao.findMatchingDuplicate(
-                        absAmountMinor = transaction.amountMinor,
-                        sourceName = accName,
+                // Entries added by hand (Add sheet, Undo) are saved as-is: never merged with another
+                // row. Duplicate detection applies only to notification-captured rows (listener service).
+                transactionDao.insert(
+                    TransactionEntity(
                         accountId = targetAccountId,
+                        amount = signed,
+                        category = chosenCategory,
+                        note = transaction.note?.trim()?.takeIf { it.isNotEmpty() },
                         timestamp = transaction.timestamp,
+                        type = txType,
+                        excludeFromSpending = isInternalTransfer,
                         merchant = cleanMerchant,
-                        windowMillis = 60_000L
+                        source = canonicalAccount.name
                     )
-                } else null
-
-                if (existingDup != null) {
-                    val preferredBank = resolvePreferredBankSource(existingDup.source, accName)
-                    val preferredAccount = if (preferredBank.equals(accName, ignoreCase = true)) {
-                        canonicalAccount
-                    } else {
-                        accountDao.getOrCreate(preferredBank)
-                    }
-                    val enrichedMerchant = cleanMerchant ?: existingDup.merchant?.takeIf {
-                        !isUnknownOrGenericMerchant(it, preferredBank)
-                    }
-                    transactionDao.update(
-                        existingDup.copy(
-                            accountId = preferredAccount.id,
-                            source = preferredAccount.name,
-                            merchant = enrichedMerchant,
-                            category = if (existingDup.category.isNullOrBlank() || existingDup.category == "OTHER_EXPENSE" || existingDup.category == "OTHER_INCOME") chosenCategory else existingDup.category,
-                            note = transaction.note?.trim()?.takeIf { it.isNotEmpty() } ?: existingDup.note
-                        )
-                    )
-                } else {
-                    transactionDao.insert(
-                        TransactionEntity(
-                            accountId = targetAccountId,
-                            amount = signed,
-                            category = chosenCategory,
-                            note = transaction.note?.trim()?.takeIf { it.isNotEmpty() },
-                            timestamp = transaction.timestamp,
-                            type = txType,
-                            excludeFromSpending = isInternalTransfer,
-                            merchant = cleanMerchant,
-                            source = canonicalAccount.name
-                        )
-                    )
-                }
+                )
             }
             is NewTransaction.Transfer -> {
                 val rawAccounts = accountDao.getAllRaw().associateBy { it.id }
@@ -233,7 +207,9 @@ class SpendRepository(
         categoryKey: String?,
         merchant: String?,
         note: String?,
-        excludeFromSpending: Boolean
+        excludeFromSpending: Boolean,
+        /** New epoch-ms timestamp, or null to keep the current one. */
+        timestamp: Long? = null
     ) {
         val rawAccounts = accountDao.getAllRaw().associateBy { it.id }
         val srcName = normalizeBankName(rawAccounts[accountId]?.name ?: "Chase")
@@ -252,10 +228,21 @@ class SpendRepository(
                 sourceName = canonicalSrc.name,
                 destinationName = dstName
             )
+            if (timestamp != null) {
+                val source = transactionDao.getById(id)
+                if (source != null) {
+                    transactionDao.update(source.copy(timestamp = timestamp))
+                    source.pairedTransactionId?.let { pairId ->
+                        transactionDao.getById(pairId)?.let { transactionDao.update(it.copy(timestamp = timestamp)) }
+                    }
+                }
+            }
         } else {
             val existing = transactionDao.getById(id) ?: return
             if (existing.pairedTransactionId != null) {
-                transactionDao.deleteWithPair(existing.pairedTransactionId)
+                // Only the other leg: deleteWithPair(pairId) would also match this row
+                // (its pairedTransactionId == pairId) and the update below would then be lost.
+                transactionDao.deleteById(existing.pairedTransactionId)
             }
             val signed = if (type == TransactionType.EXPENSE) -amountMinor else amountMinor
             transactionDao.update(
@@ -269,7 +256,8 @@ class SpendRepository(
                     pairedTransactionId = null,
                     excludeFromSpending = excludeFromSpending,
                     merchant = merchant?.trim()?.takeIf { it.isNotEmpty() },
-                    source = canonicalSrc.name
+                    source = canonicalSrc.name,
+                    timestamp = timestamp ?: existing.timestamp
                 )
             )
         }

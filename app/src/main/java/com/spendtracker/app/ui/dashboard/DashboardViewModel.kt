@@ -24,6 +24,7 @@ import com.spendtracker.app.domain.goals.GoalProgress
 import com.spendtracker.app.domain.recurring.OccurrenceStatus
 import com.spendtracker.app.domain.recurring.RecurringDetector
 import com.spendtracker.app.domain.recurring.RecurringOccurrence
+import com.spendtracker.app.domain.todayFlow
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
@@ -82,13 +83,13 @@ class DashboardViewModel(
         PlanningInputs(recurring, goals, contributions)
     }
 
-    val uiState: StateFlow<DashboardUiState> = combine(spendInputs, planningInputs) { spend, planning ->
-        buildState(spend, planning)
+    // todayFlow re-emits after midnight, so "today", the current month and statuses never go stale.
+    val uiState: StateFlow<DashboardUiState> = combine(spendInputs, planningInputs, todayFlow()) { spend, planning, today ->
+        buildState(spend, planning, today)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardUiState())
 
-    private fun buildState(spend: SpendInputs, planning: PlanningInputs): DashboardUiState {
+    private fun buildState(spend: SpendInputs, planning: PlanningInputs, today: LocalDate): DashboardUiState {
         val zone: ZoneId = ZoneId.systemDefault()
-        val today: LocalDate = LocalDate.now()
         val month: YearMonth = YearMonth.from(today)
         val transactions: List<TransactionItem> = spend.transactions
 
@@ -106,18 +107,8 @@ class DashboardViewModel(
             )
         }
 
-        val windowEnd: LocalDate = today.plusDays(UPCOMING_WINDOW_DAYS)
-        val months: List<YearMonth> = listOf(month, YearMonth.from(windowEnd)).distinct()
-        val upcoming: List<RecurringOccurrence> = months
-            .flatMap { m ->
-                RecurringDetector.occurrencesInMonth(planning.recurring, m, transactions, today, zone)
-            }
-            .filter { occurrence ->
-                (occurrence.status == OccurrenceStatus.UPCOMING || occurrence.status == OccurrenceStatus.OVERDUE) &&
-                    !occurrence.expectedDate.isAfter(windowEnd)
-            }
-            .sortedWith(compareBy<RecurringOccurrence> { it.expectedDate }.thenBy { it.displayName })
-            .take(MAX_UPCOMING)
+        val upcoming: List<RecurringOccurrence> =
+            upcomingOccurrences(planning.recurring, transactions, today, zone, MAX_UPCOMING)
 
         val goals: List<GoalProgress> = GoalCalculator
             .summary(planning.goals, planning.contributions, today, zone)
@@ -142,11 +133,37 @@ class DashboardViewModel(
         )
     }
 
-    private companion object {
-        const val UPCOMING_WINDOW_DAYS: Long = 7L
-        const val MAX_UPCOMING: Int = 4
-        const val MAX_GOALS: Int = 3
-        const val MAX_RECENT: Int = 5
-        const val MAX_TOP_CATEGORIES: Int = 5
+    companion object {
+        private const val UPCOMING_WINDOW_DAYS: Long = 7L
+
+        /**
+         * Due/overdue recurring payments for Home: everything still unpaid up to a week ahead,
+         * including last month's overdue ones (so they do not vanish on the 1st). Overdue first
+         * by date, then upcoming.
+         */
+        fun upcomingOccurrences(
+            recurring: List<RecurringItemEntity>,
+            transactions: List<TransactionItem>,
+            today: LocalDate,
+            zone: ZoneId,
+            limit: Int
+        ): List<RecurringOccurrence> {
+            val month: YearMonth = YearMonth.from(today)
+            val windowEnd: LocalDate = today.plusDays(UPCOMING_WINDOW_DAYS)
+            val months: List<YearMonth> = listOf(month.minusMonths(1), month, YearMonth.from(windowEnd)).distinct()
+            return months
+                .flatMap { m -> RecurringDetector.occurrencesInMonth(recurring, m, transactions, today, zone) }
+                .filter { occurrence ->
+                    (occurrence.status == OccurrenceStatus.UPCOMING || occurrence.status == OccurrenceStatus.OVERDUE) &&
+                        !occurrence.expectedDate.isAfter(windowEnd)
+                }
+                .sortedWith(compareBy<RecurringOccurrence> { it.expectedDate }.thenBy { it.displayName })
+                .take(limit)
+        }
+
+        private const val MAX_UPCOMING: Int = 4
+        private const val MAX_GOALS: Int = 3
+        private const val MAX_RECENT: Int = 5
+        private const val MAX_TOP_CATEGORIES: Int = 5
     }
 }

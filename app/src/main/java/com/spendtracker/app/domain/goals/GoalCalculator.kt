@@ -52,7 +52,9 @@ object GoalCalculator {
         val windowSum: Long = mine
             .filter { it.timestamp in windowStart until windowEnd }
             .sumOf { it.amountMinor }
-        val average: Long = maxOf(0L, windowSum / AVERAGE_WINDOW_MONTHS)
+        // Divide by the months the goal has actually been saving for (up to 3), so a new goal's
+        // pace is not understated: started 10 days ago -> 1 month, 6 weeks ago -> 2 months.
+        val average: Long = maxOf(0L, windowSum / averageWindowMonths(goal, mine, today, zone))
 
         val complete: Boolean = saved >= goal.targetMinor
 
@@ -69,6 +71,8 @@ object GoalCalculator {
         val status: GoalStatus = when {
             complete -> GoalStatus.COMPLETE
             targetDate == null -> GoalStatus.NO_TARGET_DATE
+            // The deadline has passed and the goal is not complete: behind, whatever the pace.
+            targetDate.isBefore(today) -> GoalStatus.BEHIND
             average >= (monthlyNeeded ?: 0L) && average > 0L -> GoalStatus.ON_TRACK
             projected != null && !projected.isAfter(targetDate) -> GoalStatus.ON_TRACK
             else -> GoalStatus.BEHIND
@@ -106,6 +110,24 @@ object GoalCalculator {
                 progress(goal, byGoal[goal.id].orEmpty(), today, zone)
             }
             .sortedBy { it.status == GoalStatus.COMPLETE }
+    }
+
+    /**
+     * Months to average over: months (rounded up) since the goal was created or its first
+     * contribution, whichever is earlier, clamped to 1..[AVERAGE_WINDOW_MONTHS].
+     */
+    internal fun averageWindowMonths(
+        goal: GoalEntity,
+        contributions: List<GoalContributionEntity>,
+        today: LocalDate,
+        zone: ZoneId
+    ): Long {
+        val startMillis: Long = (contributions.map { it.timestamp } + goal.createdAt).minOrNull() ?: goal.createdAt
+        val start: LocalDate = Instant.ofEpochMilli(startMillis).atZone(zone).toLocalDate()
+        if (!start.isBefore(today)) return 1L
+        var months: Long = ChronoUnit.MONTHS.between(start, today)
+        if (start.plusMonths(months).isBefore(today)) months += 1L
+        return months.coerceIn(1L, AVERAGE_WINDOW_MONTHS)
     }
 
     private fun monthsLeft(today: LocalDate, target: LocalDate): Long {

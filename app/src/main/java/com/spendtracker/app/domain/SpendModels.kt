@@ -44,6 +44,37 @@ object PeriodCalculator {
         Period.MONTH -> PeriodWindow(w.period, w.startDate.minusMonths(1), w.startDate)
         Period.YEAR -> PeriodWindow(w.period, w.startDate.minusYears(1), w.startDate)
     }
+
+    /**
+     * The part of [current] that has elapsed by the end of [today] (empty before it starts, whole
+     * once it has finished).
+     */
+    fun currentToDate(current: PeriodWindow, today: LocalDate): PeriodWindow {
+        val end: LocalDate = when {
+            today.isBefore(current.startDate) -> current.startDate
+            !today.isBefore(current.endExclusive) -> current.endExclusive
+            else -> today.plusDays(1)
+        }
+        return PeriodWindow(current.period, current.startDate, end)
+    }
+
+    /**
+     * Like-for-like previous window: the previous period truncated to the same number of elapsed
+     * days as [current] has at [today] (clamped to the previous period's length; the whole previous
+     * period once [current] has finished). E.g. on 3 March: 1–3 Feb; on 30 March: all of February.
+     */
+    fun previousToDate(current: PeriodWindow, today: LocalDate): PeriodWindow {
+        val previous: PeriodWindow = previous(current)
+        val elapsed: PeriodWindow = currentToDate(current, today)
+        if (elapsed.endExclusive == current.endExclusive) return previous
+        val days: Long = ChronoUnit.DAYS.between(elapsed.startDate, elapsed.endExclusive)
+        val end: LocalDate = previous.startDate.plusDays(days)
+        return PeriodWindow(
+            current.period,
+            previous.startDate,
+            if (end.isAfter(previous.endExclusive)) previous.endExclusive else end
+        )
+    }
 }
 
 data class ChartBar(val label: String, val current: Long, val previous: Long)
