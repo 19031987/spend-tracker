@@ -7,6 +7,7 @@ import com.spendtracker.app.data.GoalEntity
 import com.spendtracker.app.data.PlanningRepository
 import com.spendtracker.app.domain.goals.GoalCalculator
 import com.spendtracker.app.domain.goals.GoalProgress
+import com.spendtracker.app.domain.todayFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -56,11 +57,12 @@ class GoalsViewModel(private val planningRepository: PlanningRepository) : ViewM
     val uiState: StateFlow<GoalsUiState> = combine(
         planningRepository.observeGoals(),
         planningRepository.observeContributions(),
-        selectedId
-    ) { goals: List<GoalEntity>, contributions: List<GoalContributionEntity>, selected: Long? ->
+        selectedId,
+        todayFlow()
+    ) { goals: List<GoalEntity>, contributions: List<GoalContributionEntity>, selected: Long?, today: LocalDate ->
         val zone: ZoneId = ZoneId.systemDefault()
         val progress: List<GoalProgress> =
-            GoalCalculator.summary(goals, contributions, LocalDate.now(zone), zone)
+            GoalCalculator.summary(goals, contributions, today, zone)
         val selectedGoal: GoalProgress? = progress.firstOrNull { it.goalId == selected }
         GoalsUiState(
             goals = progress,
@@ -76,7 +78,7 @@ class GoalsViewModel(private val planningRepository: PlanningRepository) : ViewM
             totalSavedMinor = progress.sumOf { it.savedMinor },
             totalTargetMinor = progress.sumOf { it.targetMinor },
             goalEntities = goals.filter { !it.archived },
-            archivedGoals = archivedGoalProgress(goals, contributions, LocalDate.now(zone), zone)
+            archivedGoals = archivedGoalProgress(goals, contributions, today, zone)
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GoalsUiState())
 

@@ -118,4 +118,23 @@ class MonthSummaryCalculatorTest {
         assertEquals("OTHER_EXPENSE", top.single().categoryKey)
         assertEquals(1f, top.single().share, 0.0001f)
     }
+
+    // D22: refunds reduce spending and are not income.
+    @Test
+    fun `refunds reduce spend and are not counted as income`() {
+        val refund = tx(TransactionType.INCOME, 2_000, LocalDate.of(2026, 11, 9), categoryKey = "OTHER_INCOME", name = "Other income")
+            .copy(merchant = "Tesco", note = "Captured from Chase alert: Refund from Tesco")
+        val items = listOf(
+            tx(TransactionType.INCOME, 250_000, LocalDate.of(2026, 11, 1), categoryKey = "SALARY", name = "Salary"),
+            tx(TransactionType.EXPENSE, 10_000, LocalDate.of(2026, 11, 3)).copy(merchant = "Tesco"),
+            refund
+        )
+        val summary = MonthSummaryCalculator.summarize(items, november, zone)
+        assertEquals(8_000L, summary.spentMinor)
+        assertEquals(250_000L, summary.incomeMinor)
+        val top = MonthSummaryCalculator.topCategories(items, november, zone)
+        assertEquals(1, top.size)
+        assertEquals("GROCERIES", top.single().categoryKey)
+        assertEquals(8_000L, top.single().amountMinor)
+    }
 }

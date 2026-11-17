@@ -175,4 +175,40 @@ class GoalCalculatorTest {
         val result = GoalCalculator.summary(goals, emptyList(), today, zone)
         assertEquals(listOf(4L, 2L, 1L), result.map { it.goalId })
     }
+
+    // D21: average over the months the goal has existed (max 3), not always 3.
+    @Test
+    fun `new goal averages over one month not three`() {
+        val p = calc(
+            goal(createdAt = millis(today.minusDays(10))),
+            listOf(contribution(9_000L, today.minusDays(5)))
+        )
+        assertEquals(9_000L, p.averageMonthlyContributionMinor)
+    }
+
+    @Test
+    fun `goal started six weeks ago averages over two months`() {
+        val p = calc(
+            goal(createdAt = millis(today.minusWeeks(6))),
+            listOf(contribution(6_000L, today.minusWeeks(5)), contribution(4_000L, today.minusDays(3)))
+        )
+        assertEquals(5_000L, p.averageMonthlyContributionMinor)
+    }
+
+    @Test
+    fun `backdated first contribution counts as the start`() {
+        val g = goal(createdAt = millis(today.minusDays(2)))
+        val c = listOf(contribution(12_000L, today.minusMonths(2).minusDays(1)))
+        assertEquals(3L, GoalCalculator.averageWindowMonths(g, c, today, zone))
+        assertEquals(1L, GoalCalculator.averageWindowMonths(g, emptyList(), today, zone))
+    }
+
+    @Test
+    fun `past target date and incomplete is behind even with a strong pace`() {
+        val p = calc(
+            goal(target = 100_000L, targetDate = LocalDate.of(2026, 6, 1)),
+            listOf(contribution(90_000L, today.minusDays(2)))
+        )
+        assertEquals(GoalStatus.BEHIND, p.status)
+    }
 }

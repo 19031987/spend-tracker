@@ -196,4 +196,43 @@ class BudgetCalculatorTest {
         assertTrue("RENT" !in result)
         assertTrue("SALARY" !in result)
     }
+
+    // D20: no rollover from months before the budget existed.
+    @Test
+    fun `no rollover when the budget was created this month`() {
+        val createdThisMonth = BudgetEntity(
+            categoryKey = "DINING", amountMinor = 20000, rollover = true,
+            updatedAt = ts(2026, 11, 3)
+        )
+        val s = summarize(
+            listOf(createdThisMonth),
+            listOf(expense("DINING", 2000, month = 10, day = 10), expense("DINING", 3000))
+        )
+        val line = s.sections.single().lines.single()
+        assertEquals(0L, line.rolloverInMinor)
+        assertEquals(17000L, line.availableMinor)
+    }
+
+    @Test
+    fun `rollover applies when the budget existed before this month`() {
+        val existing = BudgetEntity(
+            categoryKey = "DINING", amountMinor = 20000, rollover = true,
+            updatedAt = ts(2026, 10, 20)
+        )
+        val s = summarize(listOf(existing), listOf(expense("DINING", 15000, month = 10, day = 10)))
+        assertEquals(5000L, s.sections.single().lines.single().rolloverInMinor)
+    }
+
+    // D22: a refund lowers its category's spend and is not income.
+    @Test
+    fun `refund attributed to a category lowers its spend`() {
+        val purchase = expense("SHOPPING", 6000, day = 2).copy(merchant = "Zara")
+        val refund = TransactionItem(
+            id = 999L, type = TransactionType.INCOME, amountMinor = 2000, accountId = 1, accountName = "Chase",
+            categoryKey = "OTHER_INCOME", merchant = "Zara", note = "Refund", timestamp = ts(2026, 11, 6)
+        )
+        val s = summarize(listOf(budget("SHOPPING", 10000)), listOf(purchase, refund))
+        assertEquals(4000L, s.sections.single().lines.single().spentMinor)
+        assertEquals(0L, s.incomeMinor)
+    }
 }

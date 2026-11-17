@@ -4,13 +4,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.spendtracker.app.data.BudgetEntity
 import com.spendtracker.app.data.CategoryEntity
+import com.spendtracker.app.data.CategoryGroupEntity
 import com.spendtracker.app.data.PlanningRepository
 import com.spendtracker.app.data.SpendRepository
 import com.spendtracker.app.data.TransactionType
+import com.spendtracker.app.domain.TransactionItem
 import com.spendtracker.app.domain.budget.BudgetCalculator
 import com.spendtracker.app.domain.budget.BudgetSummary
 import com.spendtracker.app.domain.budget.suggestedBudgets
-import java.time.LocalDate
+import com.spendtracker.app.domain.todayFlow
 import java.time.YearMonth
 import java.time.ZoneId
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,23 +48,40 @@ class BudgetViewModel(
     private val planningRepository: PlanningRepository
 ) : ViewModel() {
 
-    private val selectedMonth: MutableStateFlow<YearMonth> = MutableStateFlow(YearMonth.now())
+    /** Null = follow the current month (it moves on by itself at month end). */
+    private val selectedMonth: MutableStateFlow<YearMonth?> = MutableStateFlow(null)
 
-    val uiState: StateFlow<BudgetUiState> = combine(
-        selectedMonth,
+    private data class Inputs(
+        val budgets: List<BudgetEntity>,
+        val categories: List<CategoryEntity>,
+        val groups: List<CategoryGroupEntity>,
+        val transactions: List<TransactionItem>
+    )
+
+    private val inputs = combine(
         planningRepository.observeBudgets(),
         repository.observeCategories(),
         repository.observeGroups(),
         repository.observeTransactionItems()
-    ) { month, budgets, categories, groups, transactions ->
+    ) { budgets, categories, groups, transactions -> Inputs(budgets, categories, groups, transactions) }
+
+    val uiState: StateFlow<BudgetUiState> = combine(
+        selectedMonth,
+        todayFlow(),
+        inputs
+    ) { selected, today, input ->
+        val budgets: List<BudgetEntity> = input.budgets
+        val categories: List<CategoryEntity> = input.categories
+        val transactions: List<TransactionItem> = input.transactions
+        val month: YearMonth = selected ?: YearMonth.from(today)
         val zone: ZoneId = ZoneId.systemDefault()
         val summary: BudgetSummary = BudgetCalculator.summarize(
             month = month,
             budgets = budgets,
             categories = categories,
-            groups = groups,
+            groups = input.groups,
             transactions = transactions,
-            today = LocalDate.now(),
+            today = today,
             zone = zone
         )
         val budgetedKeys: Set<String> = budgets.map { it.categoryKey }.toSet()
@@ -93,11 +112,18 @@ class BudgetViewModel(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BudgetUiState())
 
     fun previousMonth() {
-        selectedMonth.value = selectedMonth.value.minusMonths(1)
+        moveMonth(-1L)
     }
 
     fun nextMonth() {
-        selectedMonth.value = selectedMonth.value.plusMonths(1)
+        moveMonth(1L)
+    }
+
+    private fun moveMonth(by: Long) {
+        val current: YearMonth = YearMonth.now()
+        val target: YearMonth = (selectedMonth.value ?: current).plusMonths(by)
+        // Back on the current month: follow it again so it rolls over at month end.
+        selectedMonth.value = if (target == current) null else target
     }
 
     fun setBudget(categoryKey: String, amountMinor: Long, rollover: Boolean) {

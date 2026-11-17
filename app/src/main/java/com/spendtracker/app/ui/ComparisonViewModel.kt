@@ -5,9 +5,15 @@ import androidx.lifecycle.viewModelScope
 import com.spendtracker.app.data.CategoryEntity
 import com.spendtracker.app.data.SpendRepository
 import com.spendtracker.app.data.TransactionEntity
-import com.spendtracker.app.data.TransactionType
 import com.spendtracker.app.domain.Period
 import com.spendtracker.app.domain.PeriodCalculator
+import com.spendtracker.app.domain.TimeRange
+import com.spendtracker.app.domain.firstDayOfWeek
+import com.spendtracker.app.domain.netSpendInRange
+import com.spendtracker.app.domain.netSpendMinor
+import com.spendtracker.app.domain.refundAttributionOfEntities
+import com.spendtracker.app.domain.spendCategoryKey
+import com.spendtracker.app.domain.todayFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,9 +26,7 @@ import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.TextStyle
 import java.time.temporal.TemporalAdjusters
-import java.time.temporal.WeekFields
 import java.util.Locale
-import kotlin.math.abs
 import kotlin.math.max
 
 /**
@@ -76,7 +80,20 @@ data class ComparisonUiState(
     /** Guard against misleading comparisons when history is insufficient (< 7 or < 30 days) */
     val isInitialPeriod: Boolean = false,
     val historyDays: Long = 0L,
-    val onboardingMessage: String = "Building your baseline: comparisons will appear after your first week/month"
+    val onboardingMessage: String = "Building your baseline: comparisons will appear after your first week/month",
+    /** False when neither period has any spending: show [emptyMessage] instead of the chart/list. */
+    val hasData: Boolean = true,
+    val emptyMessage: String = "Not enough data yet"
+)
+
+/** Result of one comparison: the breakdown plus like-for-like totals (see [ComparisonViewModel.computeComparison]). */
+data class ComparisonResult(
+    val breakdown: List<DataPoint>,
+    /** Spend so far in the current period. */
+    val currentTotal: Double,
+    /** Spend over the same number of days at the start of the previous period. */
+    val previousTotal: Double,
+    val hasData: Boolean
 )
 
 /**
@@ -93,15 +110,20 @@ class ComparisonViewModel(
     private var cachedTransactions: List<TransactionEntity> = emptyList()
     private var cachedCategories: Map<String, CategoryEntity> = emptyMap()
 
+    /** Refreshed by [todayFlow] so the windows move on after midnight. */
+    private var currentDate: LocalDate = LocalDate.now()
+
     init {
         if (repository != null) {
             viewModelScope.launch {
                 combine(
                     repository.observeTransactions(),
-                    repository.observeCategories()
-                ) { txs, cats ->
-                    Pair(txs, cats)
-                }.collect { (txs, cats) ->
+                    repository.observeCategories(),
+                    todayFlow()
+                ) { txs, cats, today ->
+                    Triple(txs, cats, today)
+                }.collect { (txs, cats, today) ->
+                    currentDate = today
                     cachedTransactions = txs
                     cachedCategories = cats.associateBy { it.key }
                     val historyDays = calculateHistoryDays(txs)
@@ -164,18 +186,15 @@ class ComparisonViewModel(
         val period = _uiState.value.selectedPeriod
         val mode = _uiState.value.comparisonMode
 
-        val breakdown = if (mode == ComparisonMode.CATEGORIES) {
-            if (repository != null && cachedTransactions.isNotEmpty()) {
-                calculateCategoryComparison(period, cachedTransactions, cachedCategories)
-            } else {
-                generateSampleCategoryData(period)
-            }
-        } else {
-            calculateIntervalComparison(period, cachedTransactions)
-        }
-
-        val currentTotal = breakdown.sumOf { it.currentValue }
-        val previousTotal = breakdown.sumOf { it.previousValue }
+        val result = computeComparison(
+            period = period,
+            mode = mode,
+            transactions = cachedTransactions,
+            categoriesMap = cachedCategories,
+            today = if (repository != null) currentDate else LocalDate.now()
+        )
+        val currentTotal = result.currentTotal
+        val previousTotal = result.previousTotal
 
         val isInitial = initialPeriodOverride ?: if (repository != null) {
             isInitialBaseline(_uiState.value.historyDays, period)
@@ -184,7 +203,7 @@ class ComparisonViewModel(
         }
 
         val pctChange = when {
-            isInitial -> 0.0
+            isInitial || !result.hasData -> 0.0
             previousTotal > 0.0 -> ((currentTotal - previousTotal) / previousTotal) * 100.0
             currentTotal > 0.0 -> 100.0
             else -> 0.0
@@ -198,92 +217,87 @@ class ComparisonViewModel(
                 previousPeriodTotal = previousTotal,
                 percentageChange = pctChange,
                 isIncrease = currentTotal >= previousTotal,
-                breakdownItems = breakdown,
+                breakdownItems = result.breakdown,
                 isLoading = false,
-                isInitialPeriod = isInitial
+                isInitialPeriod = isInitial,
+                hasData = result.hasData
             )
         }
+    }
+
+    /**
+     * Pure comparison. Totals are always like-for-like: the current period so far against the
+     * same number of days at the start of the previous period (on 3 March: 1-3 March vs 1-3 Feb).
+     * By-category bars use the same windows; by-time bars compare slot by slot (day, week, month).
+     * Spend = spending minus refunds (refunds are never income). No data -> empty breakdown and
+     * hasData = false (no sample data).
+     */
+    fun computeComparison(
+        period: ComparisonPeriod,
+        mode: ComparisonMode,
+        transactions: List<TransactionEntity>,
+        categoriesMap: Map<String, CategoryEntity>,
+        today: LocalDate,
+        zone: ZoneId = ZoneId.systemDefault(),
+        locale: Locale = Locale.getDefault(),
+        firstDay: DayOfWeek = firstDayOfWeek(locale)
+    ): ComparisonResult {
+        val curWindow = PeriodCalculator.current(period.toDomain(), today, firstDay)
+        val curRange = PeriodCalculator.currentToDate(curWindow, today).toRange(zone)
+        val prevRange = PeriodCalculator.previousToDate(curWindow, today).toRange(zone)
+
+        val breakdown = if (mode == ComparisonMode.CATEGORIES) {
+            calculateCategoryComparison(transactions, categoriesMap, curRange, prevRange)
+        } else {
+            calculateIntervalComparison(period, transactions, today, zone, locale, firstDay)
+        }
+        return ComparisonResult(
+            breakdown = breakdown,
+            currentTotal = netSpendInRange(transactions, curRange) / 100.0,
+            previousTotal = netSpendInRange(transactions, prevRange) / 100.0,
+            hasData = breakdown.any { it.currentValue > 0.0 || it.previousValue > 0.0 }
+        )
+    }
+
+    private fun ComparisonPeriod.toDomain(): Period = when (this) {
+        ComparisonPeriod.WEEK -> Period.WEEK
+        ComparisonPeriod.MONTH -> Period.MONTH
+        ComparisonPeriod.YEAR -> Period.YEAR
     }
 
     private fun calculateCategoryComparison(
-        period: ComparisonPeriod,
         transactions: List<TransactionEntity>,
-        categoriesMap: Map<String, CategoryEntity>
+        categoriesMap: Map<String, CategoryEntity>,
+        curRange: TimeRange,
+        prevRange: TimeRange
     ): List<DataPoint> {
-        val domainPeriod = when (period) {
-            ComparisonPeriod.WEEK -> Period.WEEK
-            ComparisonPeriod.MONTH -> Period.MONTH
-            ComparisonPeriod.YEAR -> Period.YEAR
-        }
-        val today = LocalDate.now()
-        val firstDay = WeekFields.of(Locale.getDefault()).firstDayOfWeek
-        val curWindow = PeriodCalculator.current(domainPeriod, today, firstDay)
-        val prevWindow = PeriodCalculator.previous(curWindow)
-        val zone = ZoneId.systemDefault()
-        val curRange = curWindow.toRange(zone)
-        val prevRange = prevWindow.toRange(zone)
+        val attribution = refundAttributionOfEntities(transactions)
 
-        val expenses = transactions.filter {
-            it.type == TransactionType.EXPENSE &&
-            !it.excludeFromSpending &&
-            (it.category == null || it.category != "INTERNAL_TRANSFER")
+        fun byCategory(range: TimeRange): Map<String, Double> {
+            val sums = HashMap<String, Long>()
+            for (tx in transactions) {
+                if (tx.timestamp < range.start || tx.timestamp >= range.end) continue
+                val key = tx.spendCategoryKey(attribution) ?: continue
+                sums[key] = (sums[key] ?: 0L) + tx.netSpendMinor()
+            }
+            return sums.mapValues { (_, minor) -> max(0L, minor) / 100.0 }
         }
 
-        val curTxs = expenses.filter { it.timestamp >= curRange.start && it.timestamp < curRange.end }
-        val prevTxs = expenses.filter { it.timestamp >= prevRange.start && it.timestamp < prevRange.end }
+        val curByCategory = byCategory(curRange)
+        val prevByCategory = byCategory(prevRange)
 
-        val curByCategory = curTxs.groupBy { it.category ?: "OTHER_EXPENSE" }
-            .mapValues { (_, txList) -> txList.sumOf { abs(it.amount.toDouble()) } / 100.0 }
-        val prevByCategory = prevTxs.groupBy { it.category ?: "OTHER_EXPENSE" }
-            .mapValues { (_, txList) -> txList.sumOf { abs(it.amount.toDouble()) } / 100.0 }
-
-        val allCatKeys = (curByCategory.keys + prevByCategory.keys).toSet()
-
-        if (allCatKeys.isEmpty()) {
-            return generateSampleCategoryData(period)
-        }
-
-        return allCatKeys.map { catKey ->
+        return (curByCategory.keys + prevByCategory.keys).toSet().map { catKey ->
             val entity = categoriesMap[catKey]
             val emoji = entity?.emoji ?: "🏷️"
             val name = entity?.name ?: catKey.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
-            val label = "$emoji $name"
-            val curVal = curByCategory[catKey] ?: 0.0
-            val prevVal = prevByCategory[catKey] ?: 0.0
             DataPoint(
-                label = label,
-                currentValue = curVal,
-                previousValue = prevVal
+                label = "$emoji $name",
+                currentValue = curByCategory[catKey] ?: 0.0,
+                previousValue = prevByCategory[catKey] ?: 0.0
             )
-        }.sortedByDescending { max(it.currentValue, it.previousValue) }
-    }
-
-    private fun generateSampleCategoryData(period: ComparisonPeriod): List<DataPoint> = when (period) {
-        ComparisonPeriod.WEEK -> listOf(
-            DataPoint(label = "🛒 Groceries", currentValue = 168.50, previousValue = 145.20),
-            DataPoint(label = "🍽️ Dining Out", currentValue = 94.00, previousValue = 122.50),
-            DataPoint(label = "⚡ Utilities & Bills", currentValue = 65.00, previousValue = 65.00),
-            DataPoint(label = "🚗 Transport", currentValue = 48.20, previousValue = 35.80),
-            DataPoint(label = "🛍️ Shopping & Lifestyle", currentValue = 52.80, previousValue = 78.00),
-            DataPoint(label = "🍿 Subscriptions", currentValue = 10.99, previousValue = 10.99)
-        )
-        ComparisonPeriod.MONTH -> listOf(
-            DataPoint(label = "🛒 Groceries", currentValue = 680.00, previousValue = 612.40),
-            DataPoint(label = "🏠 Rent & Housing", currentValue = 1250.00, previousValue = 1250.00),
-            DataPoint(label = "🍽️ Dining Out", currentValue = 385.20, previousValue = 440.00),
-            DataPoint(label = "⚡ Utilities & Bills", currentValue = 210.00, previousValue = 195.50),
-            DataPoint(label = "🚗 Transport", currentValue = 195.00, previousValue = 168.00),
-            DataPoint(label = "🛍️ Shopping & Lifestyle", currentValue = 245.50, previousValue = 310.00),
-            DataPoint(label = "🍿 Subscriptions", currentValue = 34.99, previousValue = 34.99)
-        )
-        ComparisonPeriod.YEAR -> listOf(
-            DataPoint(label = "🏠 Rent & Housing", currentValue = 15000.00, previousValue = 14400.00),
-            DataPoint(label = "🛒 Groceries", currentValue = 7850.00, previousValue = 7200.00),
-            DataPoint(label = "🍽️ Dining Out", currentValue = 4400.00, previousValue = 4800.00),
-            DataPoint(label = "⚡ Utilities & Bills", currentValue = 2600.00, previousValue = 2450.00),
-            DataPoint(label = "🚗 Transport", currentValue = 2280.00, previousValue = 2100.00),
-            DataPoint(label = "🛍️ Shopping & Lifestyle", currentValue = 3100.00, previousValue = 3450.00)
-        )
+        }
+            .filter { it.currentValue > 0.0 || it.previousValue > 0.0 }
+            .sortedByDescending { max(it.currentValue, it.previousValue) }
     }
 
     fun calculateIntervalComparison(
@@ -291,17 +305,16 @@ class ComparisonViewModel(
         transactions: List<TransactionEntity>,
         today: LocalDate = LocalDate.now(),
         zone: ZoneId = ZoneId.systemDefault(),
-        locale: Locale = Locale.getDefault()
+        locale: Locale = Locale.getDefault(),
+        firstDay: DayOfWeek = firstDayOfWeek(locale)
     ): List<DataPoint> {
-        val expenses = transactions.filter {
-            it.type == TransactionType.EXPENSE &&
-            !it.excludeFromSpending &&
-            (it.category == null || it.category != "INTERNAL_TRANSFER")
-        }
+        // Spending minus refunds; slots never go below zero.
+        val counted = transactions.filter { it.netSpendMinor() != 0L }
+        fun spendIn(start: Long, end: Long): Double =
+            max(0L, counted.filter { it.timestamp >= start && it.timestamp < end }.sumOf { it.netSpendMinor() }) / 100.0
 
         return when (period) {
             ComparisonPeriod.WEEK -> {
-                val firstDay = DayOfWeek.MONDAY
                 val curStart = today.with(TemporalAdjusters.previousOrSame(firstDay))
                 val prevStart = curStart.minusDays(7)
                 (0 until 7).map { i ->
@@ -316,10 +329,8 @@ class ComparisonViewModel(
                         prevDay.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
                     )
 
-                    val curVal = expenses.filter { it.timestamp >= curRange.first && it.timestamp < curRange.second }
-                        .sumOf { abs(it.amount.toDouble()) } / 100.0
-                    val prevVal = expenses.filter { it.timestamp >= prevRange.first && it.timestamp < prevRange.second }
-                        .sumOf { abs(it.amount.toDouble()) } / 100.0
+                    val curVal = spendIn(curRange.first, curRange.second)
+                    val prevVal = spendIn(prevRange.first, prevRange.second)
                     val label = curDay.dayOfWeek.getDisplayName(TextStyle.SHORT, locale)
                     DataPoint(label = label, currentValue = curVal, previousValue = prevVal)
                 }
@@ -343,10 +354,8 @@ class ComparisonViewModel(
                         prevStart.plusDays(endDayPrev.toLong()).atStartOfDay(zone).toInstant().toEpochMilli()
                     )
 
-                    val curVal = expenses.filter { it.timestamp >= curRange.first && it.timestamp < curRange.second }
-                        .sumOf { abs(it.amount.toDouble()) } / 100.0
-                    val prevVal = expenses.filter { it.timestamp >= prevRange.first && it.timestamp < prevRange.second }
-                        .sumOf { abs(it.amount.toDouble()) } / 100.0
+                    val curVal = spendIn(curRange.first, curRange.second)
+                    val prevVal = spendIn(prevRange.first, prevRange.second)
                     DataPoint(label = "Week ${i + 1}", currentValue = curVal, previousValue = prevVal)
                 }
             }
@@ -365,10 +374,8 @@ class ComparisonViewModel(
                         prevYm.plusMonths(1).atDay(1).atStartOfDay(zone).toInstant().toEpochMilli()
                     )
 
-                    val curVal = expenses.filter { it.timestamp >= curRange.first && it.timestamp < curRange.second }
-                        .sumOf { abs(it.amount.toDouble()) } / 100.0
-                    val prevVal = expenses.filter { it.timestamp >= prevRange.first && it.timestamp < prevRange.second }
-                        .sumOf { abs(it.amount.toDouble()) } / 100.0
+                    val curVal = spendIn(curRange.first, curRange.second)
+                    val prevVal = spendIn(prevRange.first, prevRange.second)
                     val label = curYm.month.getDisplayName(TextStyle.SHORT, locale)
                     DataPoint(label = label, currentValue = curVal, previousValue = prevVal)
                 }

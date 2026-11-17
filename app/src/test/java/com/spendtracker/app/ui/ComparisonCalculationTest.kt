@@ -76,14 +76,19 @@ class ComparisonCalculationTest {
     }
 
     @Test
-    fun `established baseline period calculates non-zero percentage change accurately`() {
+    fun `without data there is no sample data and no percentage change`() {
+        // A5: the old fallback showed invented figures (Groceries 168.50, Rent 1,250...).
         val vm = ComparisonViewModel()
         vm.setInitialPeriod(false)
         vm.selectPeriod(ComparisonPeriod.WEEK)
 
         val state = vm.uiState.value
         assertFalse(state.isInitialPeriod)
-        assertTrue("Percentage change should be calculated when baseline is established", state.percentageChange != 0.0)
+        assertFalse(state.hasData)
+        assertTrue(state.breakdownItems.isEmpty())
+        assertEquals(0.0, state.currentPeriodTotal, 0.001)
+        assertEquals(0.0, state.percentageChange, 0.001)
+        assertEquals("Not enough data yet", state.emptyMessage)
     }
 
     @Test
@@ -96,11 +101,12 @@ class ComparisonCalculationTest {
     fun `comparison mode can switch between categories and interval`() {
         val vm = ComparisonViewModel()
         assertEquals(ComparisonMode.CATEGORIES, vm.uiState.value.comparisonMode)
-        assertTrue(vm.uiState.value.breakdownItems.isNotEmpty())
+        assertTrue(vm.uiState.value.breakdownItems.isEmpty()) // no data: empty, not sample data
 
         vm.selectMode(ComparisonMode.INTERVAL)
         assertEquals(ComparisonMode.INTERVAL, vm.uiState.value.comparisonMode)
-        assertTrue(vm.uiState.value.breakdownItems.isNotEmpty())
+        assertTrue(vm.uiState.value.breakdownItems.isNotEmpty()) // zero-filled day slots
+        assertFalse(vm.uiState.value.hasData)
 
         vm.selectMode(ComparisonMode.CATEGORIES)
         assertEquals(ComparisonMode.CATEGORIES, vm.uiState.value.comparisonMode)

@@ -10,6 +10,10 @@ import com.spendtracker.app.domain.CategoryShare
 import com.spendtracker.app.domain.ChartBar
 import com.spendtracker.app.domain.Period
 import com.spendtracker.app.domain.PeriodCalculator
+import com.spendtracker.app.domain.firstDayOfWeek
+import com.spendtracker.app.domain.isIncome
+import com.spendtracker.app.domain.netSpendInRange
+import com.spendtracker.app.domain.todayFlow
 import com.spendtracker.app.ui.util.CurrencyUtils
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,7 +42,12 @@ data class AnalyticsUiState(
     val period: Period = Period.WEEK,
     val isLoading: Boolean = true,
     val currentTotalMinor: Long = 0,
+    /** Previous period's spend over the same number of elapsed days (like-for-like; used for [deltaPercent]). */
     val previousTotalMinor: Long = 0,
+    /** Previous period's whole spend, for reference. */
+    val previousFullPeriodTotalMinor: Long = 0,
+    /** True while the current period is still in progress, i.e. [previousTotalMinor] is "same point last period". */
+    val isPartialPeriod: Boolean = false,
     /** Null when the previous period had no spend (percentage undefined) or during initial baseline period. */
     val deltaPercent: Double? = null,
     val dailyAverageMinor: Long = 0,
@@ -59,70 +68,14 @@ class AnalyticsViewModel(private val repository: SpendRepository) : ViewModel() 
 
     private val selectedPeriod = MutableStateFlow(Period.WEEK)
 
-    val uiState: StateFlow<AnalyticsUiState> = selectedPeriod
-        .flatMapLatest { period ->
+    // todayFlow re-emits after midnight so the windows (and the repository snapshot) are rebuilt.
+    val uiState: StateFlow<AnalyticsUiState> = combine(selectedPeriod, todayFlow()) { period, today -> period to today }
+        .flatMapLatest { (period, today) ->
             combine(
                 repository.observeAnalytics(period),
                 repository.observeTransactions()
             ) { snapshot, transactions ->
-                val oldestTs = transactions.minOfOrNull { it.timestamp }
-                val historyDays = if (oldestTs != null) {
-                    val diff = System.currentTimeMillis() - oldestTs
-                    maxOf(0L, diff / (24L * 60 * 60 * 1000L))
-                } else 0L
-
-                val requiredDays = when (period) {
-                    Period.WEEK -> 7L
-                    Period.MONTH -> 30L
-                    Period.YEAR -> 30L
-                }
-                val isInitial = (historyDays < requiredDays) || (snapshot.previousTotal <= 0L && historyDays < 30L)
-
-                val delta = if (!isInitial && snapshot.previousTotal > 0) {
-                    (snapshot.currentTotal - snapshot.previousTotal) * 100.0 / snapshot.previousTotal
-                } else null
-
-                val today = LocalDate.now()
-                val daysElapsed = calculateDaysElapsed(period, today)
-                val totalDays = calculateTotalDaysInPeriod(period, today)
-                val dailyAverage = if (daysElapsed > 0) snapshot.currentTotal / daysElapsed else 0L
-                val projectedTotal = dailyAverage * totalDays
-
-                val firstDayOfWeek = DayOfWeek.MONDAY
-                val currentWindow = PeriodCalculator.current(period, today, firstDayOfWeek)
-                val periodRange = currentWindow.toRange(ZoneId.systemDefault())
-
-                val currentTxs = transactions.filter {
-                    it.timestamp >= periodRange.start &&
-                    it.timestamp < periodRange.end &&
-                    !it.excludeFromSpending
-                }
-
-                val totalIncome = currentTxs
-                    .filter { it.type == TransactionType.INCOME }
-                    .sumOf { abs(it.amount) }
-
-                val netSavings = totalIncome - snapshot.currentTotal
-                val savingsRate = if (totalIncome > 0) (netSavings * 100.0 / totalIncome) else null
-
-                val insights = generateInsights(period, delta, snapshot, currentTxs)
-
-                AnalyticsUiState(
-                    period = period,
-                    isLoading = false,
-                    currentTotalMinor = snapshot.currentTotal,
-                    previousTotalMinor = snapshot.previousTotal,
-                    deltaPercent = delta,
-                    dailyAverageMinor = dailyAverage,
-                    projectedPeriodTotalMinor = projectedTotal,
-                    totalIncomeMinor = totalIncome,
-                    netSavingsMinor = netSavings,
-                    savingsRatePercent = savingsRate,
-                    bars = snapshot.bars,
-                    categories = snapshot.categories,
-                    insights = insights,
-                    isInitialPeriod = isInitial
-                )
+                buildState(period, today, snapshot, transactions, ZoneId.systemDefault(), firstDayOfWeek())
             }
                 .onStart { emit(AnalyticsUiState(period = period, isLoading = true)) }
                 .catch { e ->
@@ -142,9 +95,94 @@ class AnalyticsViewModel(private val repository: SpendRepository) : ViewModel() 
     }
 
     companion object {
-        fun calculateDaysElapsed(period: Period, today: LocalDate = LocalDate.now()): Long = when (period) {
+        /**
+         * Pure state builder. Spend totals use the shared rule (spending minus refunds; refunds are
+         * not income). The delta compares like-for-like: the current period so far against the
+         * same number of days at the start of the previous period.
+         */
+        fun buildState(
+            period: Period,
+            today: LocalDate,
+            snapshot: AnalyticsSnapshot,
+            transactions: List<TransactionEntity>,
+            zone: ZoneId,
+            firstDay: DayOfWeek,
+            nowMillis: Long = System.currentTimeMillis()
+        ): AnalyticsUiState {
+            val oldestTs = transactions.minOfOrNull { it.timestamp }
+            val historyDays = if (oldestTs != null) {
+                maxOf(0L, (nowMillis - oldestTs) / (24L * 60 * 60 * 1000L))
+            } else 0L
+
+            val requiredDays = when (period) {
+                Period.WEEK -> 7L
+                Period.MONTH -> 30L
+                Period.YEAR -> 30L
+            }
+
+            val currentWindow = PeriodCalculator.current(period, today, firstDay)
+            val previousWindow = PeriodCalculator.previous(currentWindow)
+            val currentRange = currentWindow.toRange(zone)
+            val previousToDateRange = PeriodCalculator.previousToDate(currentWindow, today).toRange(zone)
+
+            val currentTotal = netSpendInRange(transactions, currentRange)
+            val previousToDate = netSpendInRange(transactions, previousToDateRange)
+            val previousFull = netSpendInRange(transactions, previousWindow.toRange(zone))
+
+            val isInitial = (historyDays < requiredDays) || (previousFull <= 0L && historyDays < 30L)
+
+            val delta = if (!isInitial && previousToDate > 0) {
+                (currentTotal - previousToDate) * 100.0 / previousToDate
+            } else null
+
+            val daysElapsed = calculateDaysElapsed(period, today, firstDay)
+            val totalDays = calculateTotalDaysInPeriod(period, today)
+            val dailyAverage = if (daysElapsed > 0) currentTotal / daysElapsed else 0L
+            val projectedTotal = dailyAverage * totalDays
+
+            val currentTxs = transactions.filter {
+                it.timestamp >= currentRange.start &&
+                    it.timestamp < currentRange.end &&
+                    !it.excludeFromSpending
+            }
+
+            val totalIncome = currentTxs
+                .filter { it.isIncome() }
+                .sumOf { abs(it.amount) }
+
+            val netSavings = totalIncome - currentTotal
+            val savingsRate = if (totalIncome > 0) (netSavings * 100.0 / totalIncome) else null
+
+            val adjustedSnapshot = snapshot.copy(currentTotal = currentTotal, previousTotal = previousToDate)
+            val insights = generateInsights(period, delta, adjustedSnapshot, currentTxs)
+
+            return AnalyticsUiState(
+                period = period,
+                isLoading = false,
+                currentTotalMinor = currentTotal,
+                previousTotalMinor = previousToDate,
+                previousFullPeriodTotalMinor = previousFull,
+                isPartialPeriod = PeriodCalculator.currentToDate(currentWindow, today).endExclusive != currentWindow.endExclusive,
+                deltaPercent = delta,
+                dailyAverageMinor = dailyAverage,
+                projectedPeriodTotalMinor = projectedTotal,
+                totalIncomeMinor = totalIncome,
+                netSavingsMinor = netSavings,
+                savingsRatePercent = savingsRate,
+                bars = snapshot.bars,
+                categories = snapshot.categories,
+                insights = insights,
+                isInitialPeriod = isInitial
+            )
+        }
+
+        fun calculateDaysElapsed(
+            period: Period,
+            today: LocalDate = LocalDate.now(),
+            firstDay: DayOfWeek = firstDayOfWeek()
+        ): Long = when (period) {
             Period.WEEK -> {
-                val startOfWeek = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                val startOfWeek = today.with(TemporalAdjusters.previousOrSame(firstDay))
                 (ChronoUnit.DAYS.between(startOfWeek, today) + 1).coerceIn(1, 7)
             }
             Period.MONTH -> today.dayOfMonth.toLong()

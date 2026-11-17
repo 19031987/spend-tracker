@@ -251,8 +251,9 @@ class RecurringDetectorTest {
     fun `occurrences ignore stopped items and wrong direction payments`() {
         val items = listOf(
             item(1L, "gym", LocalDate.of(2026, 10, 15), status = "IGNORED"),
-            item(2L, "acme", LocalDate.of(2026, 10, 3), 5000L)
+            item(2L, "acme", LocalDate.of(2026, 10, 1), 5000L)
         )
+        // Expected 1 Nov; overdue on 6 Nov because 1 Nov + 4 days has passed (D24).
         val txs = listOf(tx("Acme", LocalDate.of(2026, 11, 3), 5000L, TransactionType.INCOME))
         val result = RecurringDetector.occurrencesInMonth(items, YearMonth.of(2026, 11), txs, today, zone)
         assertEquals(1, result.size)
@@ -288,5 +289,29 @@ class RecurringDetectorTest {
         val aug = RecurringDetector.occurrencesInMonth(items, YearMonth.of(2026, 8), txs, today, zone)
         assertTrue(aug.isEmpty())
         assertNotNull(sep.single().actualAmountMinor)
+    }
+
+    // D24: not overdue while a late payment could still match (window +-4 days, +-2 weekly).
+    @Test
+    fun `payment is due not overdue until the matching window has passed`() {
+        val monthly = listOf(item(1L, "gym", LocalDate.of(2026, 10, 3)))
+        // Expected 3 Nov; today 6 Nov is within +4 days.
+        val due = RecurringDetector.occurrencesInMonth(monthly, YearMonth.of(2026, 11), emptyList(), today, zone)
+        assertEquals(OccurrenceStatus.UPCOMING, due.single().status)
+        // 8 Nov: 3 Nov + 4 days has passed.
+        val late = RecurringDetector.occurrencesInMonth(monthly, YearMonth.of(2026, 11), emptyList(), LocalDate.of(2026, 11, 8), zone)
+        assertEquals(OccurrenceStatus.OVERDUE, late.single().status)
+        // On the last day of the window it is still due.
+        val edge = RecurringDetector.occurrencesInMonth(monthly, YearMonth.of(2026, 11), emptyList(), LocalDate.of(2026, 11, 7), zone)
+        assertEquals(OccurrenceStatus.UPCOMING, edge.single().status)
+    }
+
+    @Test
+    fun `weekly payment becomes overdue after two days`() {
+        val weekly = listOf(item(1L, "cafe", LocalDate.of(2026, 11, 2), frequency = RecurringFrequency.WEEKLY))
+        val onFourth = RecurringDetector.occurrencesInMonth(weekly, YearMonth.of(2026, 11), emptyList(), LocalDate.of(2026, 11, 4), zone)
+        assertEquals(OccurrenceStatus.UPCOMING, onFourth.first().status)
+        val onFifth = RecurringDetector.occurrencesInMonth(weekly, YearMonth.of(2026, 11), emptyList(), LocalDate.of(2026, 11, 5), zone)
+        assertEquals(OccurrenceStatus.OVERDUE, onFifth.first().status)
     }
 }

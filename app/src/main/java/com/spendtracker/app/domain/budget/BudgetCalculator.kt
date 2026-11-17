@@ -4,11 +4,13 @@ import com.spendtracker.app.data.BudgetEntity
 import com.spendtracker.app.data.CategoryEntity
 import com.spendtracker.app.data.CategoryGroupEntity
 import com.spendtracker.app.data.TransactionType
+import com.spendtracker.app.domain.RefundAttribution
 import com.spendtracker.app.domain.TransactionItem
 import com.spendtracker.app.domain.isIncome
-import com.spendtracker.app.domain.isSpending
 import com.spendtracker.app.domain.monthOf
 import com.spendtracker.app.domain.monthProgress
+import com.spendtracker.app.domain.netSpendMinor
+import com.spendtracker.app.domain.spendCategoryKey
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
@@ -53,8 +55,6 @@ data class BudgetSummary(
 
 object BudgetCalculator {
 
-    private const val OTHER_EXPENSE_KEY: String = "OTHER_EXPENSE"
-
     fun summarize(
         month: YearMonth,
         budgets: List<BudgetEntity>,
@@ -68,19 +68,27 @@ object BudgetCalculator {
         val spentThisMonth: MutableMap<String, Long> = HashMap()
         val spentPrevMonth: MutableMap<String, Long> = HashMap()
         var income = 0L
+        val attribution: RefundAttribution = RefundAttribution.of(transactions)
         for (tx in transactions) {
             val txMonth: YearMonth = monthOf(tx.timestamp, zone)
             if (txMonth == month && tx.isIncome()) {
                 income += tx.amountMinor
             }
-            if (!tx.isSpending()) continue
-            val key: String = tx.categoryKey ?: OTHER_EXPENSE_KEY
+            // Spending adds to its category; a refund subtracts from the category it was attributed to.
+            val key: String = tx.spendCategoryKey(attribution) ?: continue
+            val net: Long = tx.netSpendMinor()
             when (txMonth) {
-                month -> spentThisMonth[key] = (spentThisMonth[key] ?: 0L) + tx.amountMinor
-                previous -> spentPrevMonth[key] = (spentPrevMonth[key] ?: 0L) + tx.amountMinor
+                month -> spentThisMonth[key] = (spentThisMonth[key] ?: 0L) + net
+                previous -> spentPrevMonth[key] = (spentPrevMonth[key] ?: 0L) + net
                 else -> Unit
             }
         }
+        spentThisMonth.replaceAll { _, v -> maxOf(0L, v) }
+        spentPrevMonth.replaceAll { _, v -> maxOf(0L, v) }
+        // Rollover is one month deep and only from a month in which the budget already existed.
+        // BudgetEntity has no createdAt, so updatedAt (set on create and on every edit) is the
+        // conservative "exists since": a budget created or changed this month carries nothing over.
+        val monthStart: Long = month.atDay(1).atStartOfDay(zone).toInstant().toEpochMilli()
 
         val budgetByKey: Map<String, BudgetEntity> = budgets.associateBy { it.categoryKey }
         val groupById: Map<Long, CategoryGroupEntity> = groups.associateBy { it.id }
@@ -98,7 +106,7 @@ object BudgetCalculator {
             val spent: Long = spentThisMonth[category.key] ?: 0L
             if (budget == null && spent == 0L) continue
             val group: CategoryGroupEntity? = groupById[category.groupId]
-            val rolloverIn: Long = if (budget != null && budget.rollover) {
+            val rolloverIn: Long = if (budget != null && budget.rollover && budget.updatedAt < monthStart) {
                 budget.amountMinor - (spentPrevMonth[category.key] ?: 0L)
             } else {
                 0L
@@ -169,12 +177,12 @@ fun suggestedBudgets(
 ): Map<String, Long> {
     val first: YearMonth = month.minusMonths(3)
     val totals: MutableMap<String, Long> = HashMap()
+    val attribution: RefundAttribution = RefundAttribution.of(transactions)
     for (tx in transactions) {
-        if (!tx.isSpending()) continue
+        val key: String = tx.spendCategoryKey(attribution) ?: continue
         val m: YearMonth = monthOf(tx.timestamp, zone)
         if (m.isBefore(first) || !m.isBefore(month)) continue
-        val key: String = tx.categoryKey ?: "OTHER_EXPENSE"
-        totals[key] = (totals[key] ?: 0L) + tx.amountMinor
+        totals[key] = (totals[key] ?: 0L) + tx.netSpendMinor()
     }
     val result: MutableMap<String, Long> = LinkedHashMap()
     for (category in categories) {

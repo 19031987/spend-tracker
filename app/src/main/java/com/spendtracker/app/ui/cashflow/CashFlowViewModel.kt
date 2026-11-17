@@ -8,6 +8,7 @@ import com.spendtracker.app.domain.cashflow.BreakdownDimension
 import com.spendtracker.app.domain.cashflow.BreakdownRow
 import com.spendtracker.app.domain.cashflow.CashFlowCalculator
 import com.spendtracker.app.domain.cashflow.CashFlowReport
+import com.spendtracker.app.domain.todayFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -37,46 +38,57 @@ data class CashFlowUiState(
     val hasData: Boolean = false,
     val drillDown: CashFlowDrillDown? = null
 ) {
+    /** False until there is at least one finished month with activity (averages exclude this month). */
+    val hasAverages: Boolean get() = (report?.averageMonthCount ?: 0) > 0
+
     val canGoNext: Boolean get() = selectedMonth.isBefore(currentMonth)
 }
 
 class CashFlowViewModel(private val repository: SpendRepository) : ViewModel() {
 
     private val zone: ZoneId = ZoneId.systemDefault()
-    private val currentMonth: YearMonth = YearMonth.now(zone)
+
+    /** Read fresh each time so the current month moves on after month end. */
+    private fun currentMonth(): YearMonth = YearMonth.now(zone)
 
     private data class Controls(
-        val month: YearMonth,
+        /** Null = follow the current month. */
+        val month: YearMonth? = null,
         val range: Int = 6,
         val dimension: BreakdownDimension = BreakdownDimension.CATEGORY,
         val showIncome: Boolean = false,
         val drill: BreakdownRow? = null
     )
 
-    private val controls = MutableStateFlow(Controls(month = currentMonth))
+    private val controls = MutableStateFlow(Controls())
 
     val uiState: StateFlow<CashFlowUiState> = combine(
         controls,
         repository.observeTransactionItems(),
         repository.observeCategories(),
-        repository.observeGroups()
-    ) { c, transactions, categories, groups ->
+        repository.observeGroups(),
+        todayFlow()
+    ) { controlState, transactions, categories, groups, today ->
+        val currentMonth: YearMonth = YearMonth.from(today)
+        val selected: YearMonth = controlState.month?.takeIf { !it.isAfter(currentMonth) } ?: currentMonth
+        val c: Controls = controlState.copy(month = selected)
         // Keep the chart window ending at the current month unless the selection falls before it.
         val windowStart = currentMonth.minusMonths((c.range - 1).toLong())
-        val endMonth = if (c.month.isBefore(windowStart)) {
-            minOf(currentMonth, c.month.plusMonths((c.range - 1).toLong()))
+        val endMonth = if (selected.isBefore(windowStart)) {
+            minOf(currentMonth, selected.plusMonths((c.range - 1).toLong()))
         } else {
             currentMonth
         }
         val report = CashFlowCalculator.report(
             transactions = transactions,
-            selectedMonth = c.month,
+            selectedMonth = selected,
             monthsBack = c.range,
             dimension = c.dimension,
             categories = categories,
             groups = groups,
             zone = zone,
-            endMonth = endMonth
+            endMonth = endMonth,
+            inProgressMonth = currentMonth
         )
         val drillDown = c.drill?.let { row ->
             CashFlowDrillDown(
@@ -87,7 +99,7 @@ class CashFlowViewModel(private val repository: SpendRepository) : ViewModel() {
                 amountMinor = row.amountMinor,
                 transactions = CashFlowCalculator.transactionsFor(
                     transactions = transactions,
-                    month = c.month,
+                    month = selected,
                     dimension = c.dimension,
                     key = row.key,
                     income = c.showIncome,
@@ -98,7 +110,7 @@ class CashFlowViewModel(private val repository: SpendRepository) : ViewModel() {
         }
         CashFlowUiState(
             currentMonth = currentMonth,
-            selectedMonth = c.month,
+            selectedMonth = selected,
             rangeMonths = c.range,
             dimension = c.dimension,
             showIncome = c.showIncome,
@@ -109,21 +121,27 @@ class CashFlowViewModel(private val repository: SpendRepository) : ViewModel() {
     }.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
-        CashFlowUiState(currentMonth = currentMonth, selectedMonth = currentMonth)
+        CashFlowUiState(currentMonth = currentMonth(), selectedMonth = currentMonth())
     )
 
+    /** Stores null for the current month so the selection keeps following it after month end. */
+    private fun normalise(month: YearMonth): YearMonth? {
+        val current = currentMonth()
+        return if (!month.isBefore(current)) null else month
+    }
+
     fun selectMonth(month: YearMonth) {
-        val clamped = if (month.isAfter(currentMonth)) currentMonth else month
-        controls.update { it.copy(month = clamped, drill = null) }
+        controls.update { it.copy(month = normalise(month), drill = null) }
     }
 
     fun previousMonth() {
-        controls.update { it.copy(month = it.month.minusMonths(1), drill = null) }
+        controls.update { it.copy(month = normalise((it.month ?: currentMonth()).minusMonths(1)), drill = null) }
     }
 
     fun nextMonth() {
         controls.update {
-            if (it.month.isBefore(currentMonth)) it.copy(month = it.month.plusMonths(1), drill = null) else it
+            val month = it.month ?: return@update it
+            it.copy(month = normalise(month.plusMonths(1)), drill = null)
         }
     }
 

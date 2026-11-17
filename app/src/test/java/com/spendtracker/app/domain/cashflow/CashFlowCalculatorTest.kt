@@ -233,4 +233,53 @@ class CashFlowCalculatorTest {
         val inc = CashFlowCalculator.transactionsFor(list, nov, BreakdownDimension.CATEGORY, "SALARY", true, categories, zone)
         assertEquals(listOf(2L), inc.map { it.id })
     }
+
+    // D23: the in-progress month is charted but not averaged.
+    @Test
+    fun `averages exclude the in progress month`() {
+        val list = listOf(
+            expense(1, 1000, LocalDate.of(2026, 9, 2)),
+            expense(2, 3000, LocalDate.of(2026, 10, 2)),
+            expense(3, 100, LocalDate.of(2026, 11, 2)),
+            income(4, 8000, LocalDate.of(2026, 10, 3))
+        )
+        val report = CashFlowCalculator.report(
+            list, nov, 6, BreakdownDimension.CATEGORY, categories, groups, zone, inProgressMonth = nov
+        )
+        assertEquals(2000L, report.averageMonthlyExpenseMinor)
+        assertEquals(4000L, report.averageMonthlyIncomeMinor)
+        assertEquals(2, report.averageMonthCount)
+        assertEquals(100L, report.months.last().expenseMinor)
+    }
+
+    @Test
+    fun `only the in progress month has data gives no average`() {
+        val list = listOf(expense(1, 500, LocalDate.of(2026, 11, 2)))
+        val report = CashFlowCalculator.report(
+            list, nov, 6, BreakdownDimension.CATEGORY, categories, groups, zone, inProgressMonth = nov
+        )
+        assertEquals(0L, report.averageMonthlyExpenseMinor)
+        assertEquals(0, report.averageMonthCount)
+    }
+
+    // D22: refunds are negative spending, not income.
+    @Test
+    fun `refund lowers expense and its category row and is not income`() {
+        val refund = tx(10, TransactionType.INCOME, 1500, LocalDate.of(2026, 11, 8), "OTHER_INCOME", "Tesco")
+            .copy(note = "Captured from Chase alert: refund from Tesco")
+        val list = listOf(
+            expense(1, 4000, LocalDate.of(2026, 11, 2)),
+            income(2, 9000, LocalDate.of(2026, 11, 1)),
+            refund
+        )
+        val month = CashFlowCalculator.monthly(list, nov, 1, zone).single()
+        assertEquals(2500L, month.expenseMinor)
+        assertEquals(9000L, month.incomeMinor)
+        val expenseRows = CashFlowCalculator.breakdown(list, nov, BreakdownDimension.CATEGORY, false, categories, groups, zone)
+        assertEquals(2500L, expenseRows.single().amountMinor)
+        val incomeRows = CashFlowCalculator.breakdown(list, nov, BreakdownDimension.CATEGORY, true, categories, groups, zone)
+        assertEquals(listOf("SALARY"), incomeRows.map { it.key })
+        val drill = CashFlowCalculator.transactionsFor(list, nov, BreakdownDimension.CATEGORY, "GROCERIES", false, categories, zone)
+        assertEquals(listOf(10L, 1L), drill.map { it.id })
+    }
 }

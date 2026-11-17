@@ -210,7 +210,9 @@ object RecurringDetector {
                                 OccurrenceStatus.PAID
                             }
                         }
-                        expected.isBefore(today) -> OccurrenceStatus.OVERDUE
+                        // A payment can still match up to [window] days late, so it is only
+                        // overdue once that matching window has passed; until then it is due.
+                        expected.plusDays(window).isBefore(today) -> OccurrenceStatus.OVERDUE
                         else -> OccurrenceStatus.UPCOMING
                     }
                     result += RecurringOccurrence(
