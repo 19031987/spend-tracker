@@ -7,6 +7,8 @@ Tests:
      verifying transaction remapping (accountId, destinationAccountId, source), duplicate purging,
      orphan remapping, and unique constraint enforcement.
   4. UI Deduplication Logic: AccountPicker, Carousel aggregation, and Filter Chip deduplication.
+  5. Transaction duplicate rules (mirror of dedupDecision & co. in data/TransactionDao.kt): same type,
+     never transfers, one shared same-bank window, wallet (PayPal / Google Pay) + bank pairs keep the bank row.
 """
 
 import sqlite3
@@ -251,6 +253,204 @@ def cleanup_and_consolidate_accounts_db(conn):
     cur.execute("DROP INDEX IF EXISTS index_accounts_name")
     cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS index_accounts_name ON accounts(name COLLATE NOCASE)")
     conn.commit()
+
+
+
+# ---------------------------------------------------------------------------------------------
+# Duplicate rules: 1:1 mirror of the top-level functions in data/TransactionDao.kt
+# (dedupDecision, pickDedupMatch, mergedDedupMerchant, mergedDedupCategory, dedupeRows).
+# isMerchantDuplicate's SpendParser.cleanMerchantName fallback is reduced to a case-insensitive compare.
+# ---------------------------------------------------------------------------------------------
+
+DEDUP_WINDOW_MILLIS = 180_000
+WALLET_DEDUP_WINDOW_MILLIS = 300_000
+MAX_DEDUP_WINDOW_MILLIS = 300_000
+WALLET_SOURCES = {"PayPal", "Google Pay", "Apple Pay", "Samsung Pay"}
+
+_GENERIC_MERCHANTS = {
+    "card payment", "payment", "unknown", "unknown vendor", "transaction", "money in", "money out",
+    "hsbc payment", "chase payment", "premier payment", "hsbc", "premier", "chase",
+}
+
+WALLET_MERCHANT_PREFIX = re.compile(
+    r"^\s*(?:paypal|pp(?=\s*\*)|google\s*pay|google|gpay|apple\s*pay|samsung\s*pay)\b\s*[*:\-]?\s*",
+    re.IGNORECASE,
+)
+
+
+def is_unknown_or_generic_merchant(m, source_name=None):
+    if m is None or not m.strip():
+        return True
+    t = m.strip().lower()
+    if t in _GENERIC_MERCHANTS:
+        return True
+    return bool(source_name and source_name.strip() and t == source_name.strip().lower())
+
+
+def is_premier_or_hsbc_bank(bank):
+    return bool(bank and bank.strip()) and normalize_bank_name(bank).lower() == "hsbc"
+
+
+def is_same_or_equivalent_bank(a, b):
+    if not a or not a.strip() or not b or not b.strip():
+        return False
+    if a.strip().lower() == b.strip().lower():
+        return True
+    if is_premier_or_hsbc_bank(a) and is_premier_or_hsbc_bank(b):
+        return True
+    return normalize_bank_name(a).lower() == normalize_bank_name(b).lower()
+
+
+def is_wallet_source(source):
+    return bool(source and source.strip()) and normalize_bank_name(source) in WALLET_SOURCES
+
+
+def resolve_preferred_bank_source(existing_source, new_source):
+    if is_premier_or_hsbc_bank(existing_source) or is_premier_or_hsbc_bank(new_source):
+        return "HSBC"
+    if is_wallet_source(new_source) and existing_source and existing_source.strip() and not is_wallet_source(existing_source):
+        return normalize_bank_name(existing_source)
+    if is_wallet_source(existing_source) and new_source and new_source.strip() and not is_wallet_source(new_source):
+        return normalize_bank_name(new_source)
+    return normalize_bank_name(new_source if new_source is not None else existing_source)
+
+
+def is_merchant_duplicate(existing, new, source_name=None):
+    if is_unknown_or_generic_merchant(existing, source_name) or is_unknown_or_generic_merchant(new, source_name):
+        return True
+    return existing.strip().lower() == new.strip().lower()
+
+
+def strip_wallet_merchant_prefix(merchant):
+    if merchant is None:
+        return ""
+    return WALLET_MERCHANT_PREFIX.sub("", merchant, count=1).strip()
+
+
+def merchant_names_wallet(merchant):
+    return bool(merchant and merchant.strip()) and WALLET_MERCHANT_PREFIX.search(merchant) is not None
+
+
+def wallet_merchant_key(merchant):
+    return re.sub(r"[^a-z0-9]+", " ", strip_wallet_merchant_prefix(merchant).lower()).strip()
+
+
+def _is_generic_for_pairing(merchant, source):
+    if is_unknown_or_generic_merchant(merchant, source):
+        return True
+    stripped = strip_wallet_merchant_prefix(merchant)
+    return merchant_names_wallet(merchant) and (not stripped or is_unknown_or_generic_merchant(stripped, source))
+
+
+def is_wallet_merchant_compatible(bank_merchant, bank_source, wallet_merchant, wallet_source):
+    if _is_generic_for_pairing(bank_merchant, bank_source) or _is_generic_for_pairing(wallet_merchant, wallet_source):
+        return True
+    b = wallet_merchant_key(bank_merchant)
+    w = wallet_merchant_key(wallet_merchant)
+    if not b or not w:
+        return True
+    if b == w or b.startswith(w) or w.startswith(b):
+        return True
+    b_first = b.split(" ")[0]
+    w_first = w.split(" ")[0]
+    return len(b_first) >= 3 and b_first == w_first
+
+
+def dedup_key(amount, type_, source, merchant, timestamp, account_id=None, is_transfer=False):
+    """Mirror of DedupKey (type_ is 'EXPENSE' / 'INCOME' / 'TRANSFER')."""
+    return {"amount": amount, "type": type_, "source": source, "account_id": account_id,
+            "merchant": merchant, "timestamp": timestamp, "is_transfer": is_transfer}
+
+
+def dedup_decision(existing, incoming):
+    """Returns (kind, survivor) with kind 'SAME_BANK' / 'WALLET_BANK' and survivor 'EXISTING' / 'INCOMING', or None."""
+    if existing["is_transfer"] or incoming["is_transfer"]:
+        return None
+    if existing["type"] == "TRANSFER" or incoming["type"] == "TRANSFER":
+        return None
+    if existing["type"] != incoming["type"]:
+        return None
+    amount = abs(existing["amount"])
+    if amount == 0 or amount != abs(incoming["amount"]):
+        return None
+    dt = abs(existing["timestamp"] - incoming["timestamp"])
+
+    existing_wallet = is_wallet_source(existing["source"])
+    incoming_wallet = is_wallet_source(incoming["source"])
+    if existing_wallet != incoming_wallet:
+        if dt > WALLET_DEDUP_WINDOW_MILLIS:
+            return None
+        bank = incoming if existing_wallet else existing
+        wallet = existing if existing_wallet else incoming
+        if normalize_bank_name(bank["source"]) == "Others":
+            return None
+        if not is_wallet_merchant_compatible(bank["merchant"], bank["source"], wallet["merchant"], wallet["source"]):
+            return None
+        return ("WALLET_BANK", "INCOMING" if existing_wallet else "EXISTING")
+
+    if dt > DEDUP_WINDOW_MILLIS:
+        return None
+    same_account = existing["account_id"] is not None and existing["account_id"] == incoming["account_id"]
+    if not same_account and not is_same_or_equivalent_bank(existing["source"], incoming["source"]):
+        return None
+    if not is_merchant_duplicate(existing["merchant"], incoming["merchant"],
+                                 resolve_preferred_bank_source(existing["source"], incoming["source"])):
+        return None
+    return ("SAME_BANK", "EXISTING")
+
+
+def pick_dedup_match(candidates, incoming):
+    best = None
+    for index, candidate in enumerate(candidates):
+        decision = dedup_decision(candidate, incoming)
+        if decision is None:
+            continue
+        both_known = (not is_unknown_or_generic_merchant(candidate["merchant"], candidate["source"])
+                      and not is_unknown_or_generic_merchant(incoming["merchant"], incoming["source"]))
+        tier = (0 if decision[0] == "SAME_BANK" else 2) + (0 if both_known else 1)
+        rank = (tier, abs(candidate["timestamp"] - incoming["timestamp"]))
+        if best is None or rank < best[2]:
+            best = (index, decision, rank)
+    return None if best is None else (best[0], best[1])
+
+
+def merged_dedup_merchant(survivor, other, kind):
+    survivor_generic = is_unknown_or_generic_merchant(survivor["merchant"], survivor["source"])
+    if kind == "SAME_BANK":
+        if not survivor_generic:
+            return survivor["merchant"]
+        if not is_unknown_or_generic_merchant(other["merchant"], other["source"]):
+            return other["merchant"]
+        return None
+    other_usable = (not _is_generic_for_pairing(other["merchant"], other["source"])
+                    and not merchant_names_wallet(other["merchant"]))
+    if other_usable and (survivor_generic or merchant_names_wallet(survivor["merchant"])):
+        return other["merchant"].strip()
+    if survivor_generic:
+        return None
+    return survivor["merchant"]
+
+
+def merged_dedup_category(survivor_category, other_category):
+    def is_default(c):
+        return not c or not c.strip() or c in ("OTHER_EXPENSE", "OTHER_INCOME", "General Spend")
+    return other_category if is_default(survivor_category) and not is_default(other_category) else survivor_category
+
+
+def dedupe_rows(rows, key, merge):
+    kept, kept_keys = [], []
+    for row in rows:
+        incoming = key(row)
+        hit = pick_dedup_match(kept_keys, incoming)
+        if hit is None:
+            kept.append(row)
+            kept_keys.append(incoming)
+            continue
+        index, (kind, survivor) = hit
+        merged = merge(kept[index], row, kind) if survivor == "EXISTING" else merge(row, kept[index], kind)
+        kept[index] = merged
+        kept_keys[index] = key(merged)
+    return kept
 
 
 class TestBankNormalization(unittest.TestCase):
@@ -571,42 +771,23 @@ class TestTransactionDeduplication(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
-    def simulate_find_duplicate(self, abs_amount, source_name, account_id, timestamp, new_merchant, window_millis=60000):
-        min_ts = timestamp - window_millis
-        max_ts = timestamp + window_millis
+    def simulate_find_duplicate(self, abs_amount, source_name, account_id, timestamp, new_merchant,
+                                tx_type="INCOME", window_millis=MAX_DEDUP_WINDOW_MILLIS):
+        """Mirror of TransactionDao.findDedupCandidates (SQL) + findDedupMatch (dedup_decision ranking)."""
         self.cur.execute("""
-            SELECT id, accountId, amount, merchant, source, timestamp
+            SELECT id, accountId, amount, merchant, source, timestamp, type
             FROM transactions
             WHERE ABS(amount) = ?
-              AND (
-                  LOWER(TRIM(source)) = LOWER(TRIM(?))
-                  OR accountId = ?
-                  OR (
-                      LOWER(TRIM(?)) IN ('hsbc', 'premier', 'hsbc premier', 'premier account', 'premier bank', 'hsbc advance', 'advance', 'advance account')
-                      AND LOWER(TRIM(source)) IN ('hsbc', 'premier', 'hsbc premier', 'premier account', 'premier bank', 'hsbc advance', 'advance', 'advance account')
-                  )
-              )
-              AND timestamp BETWEEN ? AND ?
+              AND type = ?
+              AND type != 'TRANSFER'
+              AND ABS(timestamp - ?) <= ?
             ORDER BY ABS(timestamp - ?) ASC
-        """, (abs_amount, source_name, account_id, source_name, min_ts, max_ts, timestamp))
+        """, (abs_amount, tx_type, timestamp, window_millis, timestamp))
         rows = self.cur.fetchall()
-        generic_labels = ("card payment", "payment", "unknown", "unknown vendor", "transaction", "money in", "money out", "hsbc payment", "chase payment", "premier payment", "hsbc", "premier", "chase", source_name.lower())
-        is_generic_new = not new_merchant or new_merchant.strip().lower() in generic_labels
-        if not is_generic_new:
-            for r in rows:
-                existing_merchant = r[3]
-                is_generic_existing = not existing_merchant or existing_merchant.strip().lower() in generic_labels
-                if not is_generic_existing and existing_merchant.strip().lower() == new_merchant.strip().lower():
-                    return r
-        for r in rows:
-            existing_merchant = r[3]
-            # Deduplication rule: candidate matches if both generic/blank OR names match
-            is_generic_existing = not existing_merchant or existing_merchant.strip().lower() in generic_labels
-            if is_generic_existing or is_generic_new:
-                return r
-            if existing_merchant.strip().lower() == new_merchant.strip().lower():
-                return r
-        return None
+        keys = [dedup_key(abs(r[2]), r[6], r[4], r[3], r[5], account_id=r[1]) for r in rows]
+        incoming = dedup_key(abs_amount, tx_type, source_name, new_merchant, timestamp, account_id=account_id)
+        hit = pick_dedup_match(keys, incoming)
+        return None if hit is None else rows[hit[0]]
 
     def test_dedup_same_amount_same_bank_different_merchants(self):
         # Two payments of £10 within 60s from different senders should both be inserted
@@ -657,7 +838,7 @@ class TestTransactionDeduplication(unittest.TestCase):
         # First row arrives as Premier
         self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (5, -1550, 'Costa Coffee', 'Premier', ?, 'EXPENSE')", (ts,))
         # Second row arrives as HSBC with same amount and same vendor
-        dup = self.simulate_find_duplicate(1550, "HSBC", 1, ts + 3000, "Costa Coffee")
+        dup = self.simulate_find_duplicate(1550, "HSBC", 1, ts + 3000, "Costa Coffee", tx_type="EXPENSE")
         self.assertIsNotNone(dup, "Premier and HSBC with same amount and same vendor must be detected as duplicate")
         # Update existing record to save the HSBC one
         self.cur.execute("UPDATE transactions SET accountId = 1, source = 'HSBC' WHERE id = ?", (dup[0],))
@@ -672,7 +853,7 @@ class TestTransactionDeduplication(unittest.TestCase):
         # First row arrives as Premier with unknown vendor
         self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (5, -2000, NULL, 'Premier', ?, 'EXPENSE')", (ts,))
         # Second row arrives as HSBC with same amount and unknown vendor
-        dup = self.simulate_find_duplicate(2000, "HSBC", 1, ts + 4000, None)
+        dup = self.simulate_find_duplicate(2000, "HSBC", 1, ts + 4000, None, tx_type="EXPENSE")
         self.assertIsNotNone(dup, "Premier and HSBC unknown transaction with same amount within window must be duplicate")
         self.cur.execute("UPDATE transactions SET accountId = 1, source = 'HSBC' WHERE id = ?", (dup[0],))
         self.cur.execute("SELECT COUNT(*), source FROM transactions")
@@ -687,29 +868,173 @@ class TestTransactionDeduplication(unittest.TestCase):
         # Row 2: HSBC with Unknown vendor at t=102s
         self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (1, -1550, NULL, 'HSBC', ?, 'EXPENSE')", (ts + 2000,))
         # Incoming HSBC notification with Costa Coffee at t=103s should match Row 1 (Costa Coffee) first
-        dup = self.simulate_find_duplicate(1550, "HSBC", 1, ts + 3000, "Costa Coffee")
+        dup = self.simulate_find_duplicate(1550, "HSBC", 1, ts + 3000, "Costa Coffee", tx_type="EXPENSE")
         self.assertIsNotNone(dup)
         self.assertEqual(dup[3], "Costa Coffee")
 
     def test_unknown_transactions_different_amount_and_different_time_not_duplicate(self):
         ts = 100000
         # 1. Unknown transaction of £12.00 at t=100s
-        dup1 = self.simulate_find_duplicate(1200, "HSBC", 1, ts, None)
+        dup1 = self.simulate_find_duplicate(1200, "HSBC", 1, ts, None, tx_type="EXPENSE")
         self.assertIsNone(dup1)
         self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (1, -1200, NULL, 'HSBC', ?, 'EXPENSE')", (ts,))
 
         # 2. Unknown transaction of £35.00 at t=500s (different amount and different time)
-        dup2 = self.simulate_find_duplicate(3500, "HSBC", 1, ts + 400000, None)
+        dup2 = self.simulate_find_duplicate(3500, "HSBC", 1, ts + 400000, None, tx_type="EXPENSE")
         self.assertIsNone(dup2, "Unknown transaction with different amount and different time must NOT be duplicate")
         self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (1, -3500, NULL, 'HSBC', ?, 'EXPENSE')", (ts + 400000,))
 
         # 3. Unknown transaction of £12.00 at t=500s (same amount, different time outside window)
-        dup3 = self.simulate_find_duplicate(1200, "HSBC", 1, ts + 400000, None)
+        dup3 = self.simulate_find_duplicate(1200, "HSBC", 1, ts + 400000, None, tx_type="EXPENSE")
         self.assertIsNone(dup3, "Unknown transaction at different time outside window must NOT be duplicate")
         self.cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (1, -1200, NULL, 'HSBC', ?, 'EXPENSE')", (ts + 400000,))
 
         self.cur.execute("SELECT COUNT(*) FROM transactions")
         self.assertEqual(self.cur.fetchone()[0], 3)
+
+
+class TestDedupRules(unittest.TestCase):
+    """Mirror of app/src/test/java/com/spendtracker/app/data/DedupRulesTest.kt."""
+    T0 = 1_700_000_000_000
+
+    def k(self, amount, source, merchant, at=None, type_="EXPENSE", account_id=None, is_transfer=False):
+        return dedup_key(amount, type_, source, merchant, self.T0 if at is None else at, account_id, is_transfer)
+
+    def test_paypal_and_chase_same_purchase_bank_kept(self):
+        paypal = self.k(3000, "PayPal", "Amazon")
+        chase = self.k(3000, "Chase", "PAYPAL *AMAZON", at=self.T0 + 90_000)
+        self.assertEqual(dedup_decision(paypal, chase), ("WALLET_BANK", "INCOMING"))
+        self.assertEqual(dedup_decision(chase, paypal), ("WALLET_BANK", "EXISTING"))
+
+    def test_google_pay_and_bank_same_purchase(self):
+        bank = self.k(450, "Monzo", "PRET A MANGER", at=self.T0 + 5_000)
+        self.assertEqual(dedup_decision(bank, self.k(450, "Google Pay", "Pret"))[0], "WALLET_BANK")
+        self.assertEqual(dedup_decision(bank, self.k(450, "Google Wallet", None))[0], "WALLET_BANK")
+
+    def test_wallet_merchant_enriches_bank(self):
+        bank = self.k(1250, "Chase", "PAYPAL *UBER")
+        paypal = self.k(1250, "PayPal", "Uber")
+        self.assertEqual(merged_dedup_merchant(bank, paypal, "WALLET_BANK"), "Uber")
+        self.assertEqual(merged_dedup_merchant(self.k(1250, "Chase", None), paypal, "WALLET_BANK"), "Uber")
+        self.assertEqual(merged_dedup_merchant(self.k(1250, "Chase", "Uber Eats"), paypal, "WALLET_BANK"), "Uber Eats")
+        self.assertEqual(merged_dedup_merchant(bank, self.k(1250, "PayPal", "PayPal"), "WALLET_BANK"), "PAYPAL *UBER")
+
+    def test_unrelated_merchants_not_merged(self):
+        self.assertIsNone(dedup_decision(self.k(3000, "Chase", "Tesco"), self.k(3000, "PayPal", "Amazon", at=self.T0 + 10_000)))
+
+    def test_wallet_window(self):
+        bank = self.k(3000, "Chase", None)
+        self.assertIsNotNone(dedup_decision(bank, self.k(3000, "PayPal", "Amazon", at=self.T0 + WALLET_DEDUP_WINDOW_MILLIS)))
+        self.assertIsNone(dedup_decision(bank, self.k(3000, "PayPal", "Amazon", at=self.T0 + WALLET_DEDUP_WINDOW_MILLIS + 1)))
+
+    def test_same_wallet_different_merchants_never_merged(self):
+        self.assertIsNone(dedup_decision(self.k(1000, "PayPal", "Uber"), self.k(1000, "PayPal", "Amazon", at=self.T0 + 5_000)))
+        self.assertEqual(dedup_decision(self.k(1000, "PayPal", "Uber"), self.k(1000, "PayPal", "Uber", at=self.T0 + 5_000))[0], "SAME_BANK")
+
+    def test_two_wallets_or_unknown_source_not_merged(self):
+        self.assertIsNone(dedup_decision(self.k(1000, "PayPal", None), self.k(1000, "Google Pay", None, at=self.T0 + 1_000)))
+        self.assertIsNone(dedup_decision(self.k(1000, "Others", None), self.k(1000, "PayPal", None, at=self.T0 + 1_000)))
+
+    def test_preferred_source_is_bank(self):
+        self.assertEqual(resolve_preferred_bank_source("Chase", "PayPal"), "Chase")
+        self.assertEqual(resolve_preferred_bank_source("PayPal", "Chase"), "Chase")
+        self.assertEqual(resolve_preferred_bank_source("Google Pay", "Premier"), "HSBC")
+        self.assertEqual(resolve_preferred_bank_source("Premier", "HSBC"), "HSBC")
+
+    def test_card_payment_and_money_received_never_merged(self):
+        spend = self.k(2500, "HSBC", None, at=self.T0 + 10_000)
+        received = self.k(2500, "HSBC", None, at=self.T0 + 40_000, type_="INCOME")
+        self.assertIsNone(dedup_decision(spend, received))
+        self.assertIsNone(dedup_decision(received, spend))
+
+    def test_transfers_never_deduplicated(self):
+        leg = self.k(5000, "HSBC", None, type_="TRANSFER")
+        self.assertIsNone(dedup_decision(leg, self.k(5000, "HSBC", None, type_="TRANSFER", at=self.T0 + 1_000)))
+        self.assertIsNone(dedup_decision(self.k(5000, "HSBC", None, is_transfer=True), self.k(5000, "HSBC", None, at=self.T0 + 1_000)))
+
+    def test_hsbc_premier_shared_window(self):
+        premier = self.k(1550, "Premier", None)
+        self.assertEqual(dedup_decision(premier, self.k(1550, "HSBC", "Costa Coffee", at=self.T0 + 150_000))[0], "SAME_BANK")
+        self.assertEqual(dedup_decision(premier, self.k(1550, "HSBC", None, at=self.T0 + DEDUP_WINDOW_MILLIS))[0], "SAME_BANK")
+        self.assertIsNone(dedup_decision(premier, self.k(1550, "HSBC", None, at=self.T0 + DEDUP_WINDOW_MILLIS + 1)))
+
+    def test_pick_prefers_same_bank_known_then_closest(self):
+        incoming = self.k(1550, "HSBC", "Costa Coffee", at=self.T0 + 3_000)
+        candidates = [
+            self.k(1550, "HSBC", None, at=self.T0 + 2_000),
+            self.k(1550, "Premier", "Costa Coffee", at=self.T0),
+            self.k(1550, "PayPal", "Costa Coffee", at=self.T0 + 3_000),
+        ]
+        self.assertEqual(pick_dedup_match(candidates, incoming)[0], 1)
+        self.assertIsNone(pick_dedup_match([self.k(1550, "HSBC", None, type_="INCOME")], incoming))
+
+    def test_category_merge(self):
+        self.assertEqual(merged_dedup_category("OTHER_EXPENSE", "SHOPPING"), "SHOPPING")
+        self.assertEqual(merged_dedup_category("DINING", "SHOPPING"), "DINING")
+        self.assertEqual(merged_dedup_category("DINING", "OTHER_EXPENSE"), "DINING")
+        self.assertEqual(merged_dedup_category(None, "SHOPPING"), "SHOPPING")
+
+    def test_view_dedup_counts_paypal_purchase_once(self):
+        rows = [
+            (3, self.k(3000, "Chase", "PAYPAL *AMAZON", at=self.T0 + 60_000)),
+            (2, self.k(3000, "PayPal", "Amazon")),
+            (1, self.k(500, "Chase", "Tesco", at=self.T0 - 10_000)),
+        ]
+
+        def merge(survivor, other, kind):
+            k = dict(survivor[1])
+            k["merchant"] = merged_dedup_merchant(survivor[1], other[1], kind)
+            return (survivor[0], k)
+
+        out = dedupe_rows(rows, key=lambda r: r[1], merge=merge)
+        self.assertEqual([r[0] for r in out], [3, 1])
+        self.assertEqual(out[0][1]["merchant"], "Amazon")
+        self.assertEqual(sum(r[1]["amount"] for r in out), 3500)
+
+    def test_view_dedup_keeps_bank_when_wallet_first(self):
+        rows = [(2, self.k(3000, "PayPal", "Amazon", at=self.T0 + 60_000)), (1, self.k(3000, "Chase", None))]
+        out = dedupe_rows(rows, key=lambda r: r[1], merge=lambda s, o, kind: s)
+        self.assertEqual([r[0] for r in out], [1])
+
+    def test_view_dedup_never_merges_expense_with_income_or_transfer(self):
+        rows = [
+            (1, self.k(2500, "HSBC", None)),
+            (2, self.k(2500, "HSBC", None, at=self.T0 + 30_000, type_="INCOME")),
+            (3, self.k(2500, "HSBC", None, at=self.T0 + 40_000, type_="TRANSFER")),
+        ]
+        self.assertEqual(len(dedupe_rows(rows, key=lambda r: r[1], merge=lambda s, o, kind: s)), 3)
+
+    def test_wallet_merchant_helpers(self):
+        self.assertEqual(strip_wallet_merchant_prefix("PAYPAL *UBER"), "UBER")
+        self.assertEqual(strip_wallet_merchant_prefix("Google Pay"), "")
+        self.assertEqual(strip_wallet_merchant_prefix("Tesco"), "Tesco")
+        self.assertTrue(merchant_names_wallet("PayPal Payment"))
+        self.assertFalse(merchant_names_wallet("Premier Inn"))
+        self.assertTrue(is_wallet_merchant_compatible("PAYPAL *UBER TRIP", "Chase", "Uber", "PayPal"))
+        self.assertFalse(is_wallet_merchant_compatible("Tesco", "Chase", "Amazon", "PayPal"))
+
+    def test_insert_time_scenarios_sqlite(self):
+        """End-to-end with the candidate SQL: PayPal + Chase stored once; spend + income both stored."""
+        conn = sqlite3.connect(":memory:")
+        cur = conn.cursor()
+        cur.execute("CREATE TABLE transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, accountId INTEGER, amount INTEGER, "
+                    "merchant TEXT, source TEXT, timestamp INTEGER, type TEXT)")
+
+        def find(abs_amount, source, account_id, ts, merchant, type_):
+            cur.execute("SELECT id, accountId, amount, merchant, source, timestamp, type FROM transactions "
+                        "WHERE ABS(amount) = ? AND type = ? AND type != 'TRANSFER' AND ABS(timestamp - ?) <= ? "
+                        "ORDER BY ABS(timestamp - ?) ASC", (abs_amount, type_, ts, MAX_DEDUP_WINDOW_MILLIS, ts))
+            rows = cur.fetchall()
+            hit = pick_dedup_match([dedup_key(abs(r[2]), r[6], r[4], r[3], r[5], r[1]) for r in rows],
+                                   dedup_key(abs_amount, type_, source, merchant, ts, account_id))
+            return None if hit is None else rows[hit[0]]
+
+        t = self.T0
+        cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (7, -3000, 'Amazon', 'PayPal', ?, 'EXPENSE')", (t,))
+        self.assertIsNotNone(find(3000, "Chase", 1, t + 120_000, None, "EXPENSE"), "Chase alert must merge into the PayPal row")
+        cur.execute("INSERT INTO transactions(accountId, amount, merchant, source, timestamp, type) VALUES (2, -2500, NULL, 'HSBC', ?, 'EXPENSE')", (t + 10_000,))
+        self.assertIsNone(find(2500, "HSBC", 2, t + 40_000, None, "INCOME"), "Money received must not merge into a card payment")
+        conn.close()
 
 
 if __name__ == "__main__":

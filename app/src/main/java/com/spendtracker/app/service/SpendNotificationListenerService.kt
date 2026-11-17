@@ -6,12 +6,18 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.spendtracker.app.data.AppDatabase
+import com.spendtracker.app.data.DedupKey
+import com.spendtracker.app.data.DedupKind
+import com.spendtracker.app.data.DedupSurvivor
 import com.spendtracker.app.data.SpendDatabase
 import com.spendtracker.app.data.TransactionEntity
 import com.spendtracker.app.data.TransactionType
 import com.spendtracker.app.data.isUnknownOrGenericMerchant
+import com.spendtracker.app.data.mergedDedupCategory
+import com.spendtracker.app.data.mergedDedupMerchant
 import com.spendtracker.app.data.normalizeBankName
 import com.spendtracker.app.data.resolvePreferredBankSource
+import com.spendtracker.app.data.toDedupKey
 import com.spendtracker.app.domain.CategorizationEngine
 import com.spendtracker.app.domain.Classification
 import com.spendtracker.app.domain.MatchType
@@ -121,17 +127,24 @@ class SpendNotificationListenerService : NotificationListenerService() {
                         val signedAmount = if (txType == TransactionType.EXPENSE) -minorAmount else minorAmount
                         val merchantName = if (parsedWithBank.merchantIsFallback || isUnknownOrGenericMerchant(parsedWithBank.merchant, sourceAccount.name)) null else parsedWithBank.merchant
 
-                        // Time-Window Fingerprinting: |t_new - t_existing| <= 60s AND amount matches AND source bank matches (including Premier <-> HSBC) AND merchant matches
-                        val existingTx = roomDb.transactionDao().findMatchingDuplicate(
-                            absAmountMinor = minorAmount,
-                            sourceName = sourceAccount.name,
+                        // Duplicate detection (see dedupDecision): same type and amount, never transfers;
+                        // same bank (HSBC == Premier) within DEDUP_WINDOW_MILLIS, or a wallet alert
+                        // (PayPal / Google Pay) + the funding bank's alert within WALLET_DEDUP_WINDOW_MILLIS.
+                        val incomingKey = DedupKey(
+                            amountMinor = minorAmount,
+                            type = txType,
+                            source = sourceAccount.name,
                             accountId = sourceAccount.id,
-                            timestamp = eventTimestamp,
                             merchant = merchantName,
-                            windowMillis = 60_000L
+                            timestamp = eventTimestamp
                         )
+                        val dedupHit = roomDb.transactionDao().findDedupMatch(incomingKey)
 
-                        if (existingTx != null) {
+                        if (dedupHit != null) {
+                            val (existingTx, decision) = dedupHit
+                            val existingKey = existingTx.toDedupKey()
+                            val survivorKey = if (decision.survivor == DedupSurvivor.EXISTING) existingKey else incomingKey
+                            val otherKey = if (decision.survivor == DedupSurvivor.EXISTING) incomingKey else existingKey
                             val preferredSource = resolvePreferredBankSource(existingTx.source, sourceAccount.name)
                             val preferredAccount = if (preferredSource.equals(sourceAccount.name, ignoreCase = true)) {
                                 sourceAccount
@@ -139,14 +152,20 @@ class SpendNotificationListenerService : NotificationListenerService() {
                                 roomDb.accountDao().getOrCreate(preferredSource)
                             }
 
-                            // Update existing record (enrichment with vendor/reference and HSBC bank preference) rather than creating a duplicate row
-                            val enrichedMerchant = when {
-                                !merchantName.isNullOrBlank() && isUnknownOrGenericMerchant(existingTx.merchant, existingTx.source) -> merchantName
-                                isUnknownOrGenericMerchant(existingTx.merchant, existingTx.source) -> null
-                                else -> existingTx.merchant
-                            }
+                            // Update the existing record (vendor enrichment, bank preference) rather than creating a
+                            // duplicate row. Type and amount sign are never changed here.
+                            val enrichedMerchant = mergedDedupMerchant(survivorKey, otherKey, decision.kind)
                             val rawAlertText = parsedWithBank.rawText.ifBlank { content.orEmpty() }
                             val enrichedNote = when {
+                                decision.kind == DedupKind.WALLET_BANK -> when {
+                                    existingTx.note.isNullOrBlank() && rawAlertText.isNotBlank() ->
+                                        "Captured from ${preferredAccount.name} alert: $rawAlertText"
+                                    // The bank alert replaces the wallet's as the row's evidence; keep both texts.
+                                    decision.survivor == DedupSurvivor.INCOMING && rawAlertText.isNotBlank() ->
+                                        "Captured from ${preferredAccount.name} alert: $rawAlertText" +
+                                            (existingTx.note?.let { "\n$it" } ?: "")
+                                    else -> existingTx.note
+                                }
                                 existingTx.note.isNullOrBlank() && rawAlertText.isNotBlank() ->
                                     "Captured from ${preferredAccount.name} alert: $rawAlertText"
                                 existingTx.note != null && (!merchantName.isNullOrBlank() && isUnknownOrGenericMerchant(existingTx.merchant, existingTx.source)) && rawAlertText.isNotBlank() ->
@@ -162,36 +181,17 @@ class SpendNotificationListenerService : NotificationListenerService() {
                                     }
                                 else -> existingTx.note
                             }
-                            val defaultCat = if (txType == TransactionType.INCOME) "OTHER_INCOME" else "OTHER_EXPENSE"
-                            val enrichedCategory = if ((existingTx.category.isNullOrBlank() ||
-                                                         existingTx.category == "OTHER_EXPENSE" ||
-                                                         existingTx.category == "OTHER_INCOME" ||
-                                                         existingTx.category == "General Spend") &&
-                                                        resolvedCategoryKey != defaultCat) {
-                                resolvedCategoryKey
-                            } else if (existingTx.type == TransactionType.EXPENSE && txType == TransactionType.INCOME && existingTx.category == "OTHER_EXPENSE") {
-                                resolvedCategoryKey
-                            } else {
-                                existingTx.category
-                            }
-                            val enrichedType = if (existingTx.type == TransactionType.EXPENSE && txType == TransactionType.INCOME) {
-                                txType
-                            } else {
-                                existingTx.type
-                            }
-                            val enrichedAmount = if (enrichedType == TransactionType.INCOME) minorAmount else -minorAmount
+                            val enrichedCategory = mergedDedupCategory(existingTx.category, resolvedCategoryKey)
 
                             val enriched = existingTx.copy(
                                 accountId = preferredAccount.id,
                                 source = preferredAccount.name,
                                 merchant = enrichedMerchant,
                                 note = enrichedNote,
-                                category = enrichedCategory,
-                                type = enrichedType,
-                                amount = enrichedAmount
+                                category = enrichedCategory
                             )
                             roomDb.transactionDao().update(enriched)
-                            Log.i(TAG, "Deduplication: enriched existing transaction id=${existingTx.id} (bank=${preferredAccount.name}) instead of creating duplicate row")
+                            Log.i(TAG, "Deduplication (${decision.kind}): enriched existing transaction id=${existingTx.id} (bank=${preferredAccount.name}) instead of creating duplicate row")
                         } else {
                             val rawAlertText = parsedWithBank.rawText.ifBlank { content.orEmpty() }
                             val transaction = TransactionEntity(

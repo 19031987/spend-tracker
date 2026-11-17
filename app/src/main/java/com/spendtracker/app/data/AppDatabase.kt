@@ -446,13 +446,8 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
             )
             """.trimIndent()
         )
-        // 4. Remove between-account transfer records and normalize missing/mismatched default categories
-        db.execSQL(
-            """
-            DELETE FROM transactions
-            WHERE type = 'TRANSFER' OR category = 'INTERNAL_TRANSFER'
-            """.trimIndent()
-        )
+        // 4. Normalize missing/mismatched default categories. (Transfers are user-created and are kept:
+        //    this step used to delete every TRANSFER row on each app open.)
         db.execSQL(
             """
             UPDATE categories
@@ -475,9 +470,13 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
             """.trimIndent()
         )
 
-        // 5. Deduplicate transactions in Room (including Premier <-> HSBC duplicates with same amount & vendor,
-        //    or unknown vendor with same amount within the time window), always saving the HSBC one.
-        //    Unknown transactions with different amount or different time are NOT considered duplicates.
+        // 5. Deduplicate transactions in Room with the same rules as insert time and the list view
+        //    (dedupDecision): same type and amount, never transfers or paired legs, never a sign flip;
+        //    same bank (HSBC == Premier) within DEDUP_WINDOW_MILLIS, or a wallet alert (PayPal / Google Pay)
+        //    + the funding bank's alert within WALLET_DEDUP_WINDOW_MILLIS, keeping the bank row.
+        //    Conservative: only a row captured from an alert ("Captured from ..." note) is ever deleted,
+        //    rows excluded from spending are left alone, and a wallet row is only deleted while it is
+        //    still unreviewed (needsReview = 1), i.e. the user has not touched it.
         val hsbcAccCursor = db.query("SELECT id FROM accounts WHERE LOWER(TRIM(name)) = 'hsbc' LIMIT 1")
         val hsbcAccountId = if (hsbcAccCursor.moveToFirst()) hsbcAccCursor.getLong(0) else null
         hsbcAccCursor.close()
@@ -485,17 +484,35 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
         data class RoomTxRow(
             val id: Long,
             var accountId: Long,
-            var amount: Long,
+            val amount: Long,
             var category: String?,
             var merchant: String?,
             var note: String?,
             var source: String?,
             val timestamp: Long,
-            var type: String
-        )
+            val type: String,
+            val paired: Boolean,
+            val excluded: Boolean,
+            val needsReview: Boolean
+        ) {
+            val autoCaptured: Boolean get() = note?.startsWith("Captured from", ignoreCase = true) == true
+            fun key(): DedupKey {
+                val txType = runCatching { TransactionType.valueOf(type) }.getOrDefault(TransactionType.EXPENSE)
+                return DedupKey(
+                    amountMinor = kotlin.math.abs(amount),
+                    type = txType,
+                    source = source,
+                    accountId = accountId,
+                    merchant = merchant,
+                    timestamp = timestamp,
+                    isTransfer = txType == TransactionType.TRANSFER || category == "INTERNAL_TRANSFER" || paired
+                )
+            }
+        }
 
         val txCursor = db.query(
-            "SELECT id, accountId, amount, category, merchant, note, source, timestamp, type FROM transactions ORDER BY timestamp ASC, id ASC"
+            "SELECT id, accountId, amount, category, merchant, note, source, timestamp, type, " +
+                "pairedTransactionId, excludeFromSpending, needsReview FROM transactions ORDER BY timestamp ASC, id ASC"
         )
         val allRows = mutableListOf<RoomTxRow>()
         while (txCursor.moveToNext()) {
@@ -509,7 +526,10 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
                     note = if (txCursor.isNull(5)) null else txCursor.getString(5),
                     source = if (txCursor.isNull(6)) null else txCursor.getString(6),
                     timestamp = txCursor.getLong(7),
-                    type = txCursor.getString(8) ?: "EXPENSE"
+                    type = txCursor.getString(8) ?: "EXPENSE",
+                    paired = !txCursor.isNull(9),
+                    excluded = !txCursor.isNull(10) && txCursor.getInt(10) != 0,
+                    needsReview = !txCursor.isNull(11) && txCursor.getInt(11) != 0
                 )
             )
         }
@@ -517,98 +537,67 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
 
         val keptRows = mutableListOf<RoomTxRow>()
         val duplicateIdsToDelete = mutableListOf<Long>()
+        val premierPrefix = Regex("(?i)^Captured from\\s+(?:HSBC\\s+)?Premier(?:\\s+Account|\\s+Bank)?")
 
-        fun isCandidateMatch(kept: RoomTxRow, row: RoomTxRow, requireBothKnown: Boolean): Boolean {
-            if (kotlin.math.abs(kept.amount) != kotlin.math.abs(row.amount)) return false
-            if (!isSameOrEquivalentBank(kept.source ?: "HSBC", row.source ?: "HSBC")) return false
-            val preferredBank = resolvePreferredBankSource(kept.source, row.source)
-            val bothKnown = !isUnknownOrGenericMerchant(kept.merchant, preferredBank) &&
-                !isUnknownOrGenericMerchant(row.merchant, preferredBank)
-            if (requireBothKnown && !bothKnown) return false
-            if (!isMerchantDuplicate(kept.merchant, row.merchant, preferredBank)) return false
-
-            val involvesPremier = (kept.source?.contains("premier", ignoreCase = true) == true) ||
-                (row.source?.contains("premier", ignoreCase = true) == true) ||
-                (kept.note?.contains("premier", ignoreCase = true) == true) ||
-                (row.note?.contains("premier", ignoreCase = true) == true)
-
-            val windowMillis = if (bothKnown) 600_000L else if (involvesPremier) 300_000L else 180_000L
-            return kotlin.math.abs(kept.timestamp - row.timestamp) <= windowMillis
-        }
+        fun canDelete(row: RoomTxRow, kind: DedupKind): Boolean =
+            row.autoCaptured && !row.excluded && (kind == DedupKind.SAME_BANK || row.needsReview)
 
         for (row in allRows) {
-            val match = keptRows.lastOrNull { kept -> isCandidateMatch(kept, row, requireBothKnown = true) }
-                ?: keptRows.lastOrNull { kept -> isCandidateMatch(kept, row, requireBothKnown = false) }
+            val eligible = keptRows.filter {
+                !it.excluded && kotlin.math.abs(it.amount) == kotlin.math.abs(row.amount) &&
+                    row.timestamp - it.timestamp <= MAX_DEDUP_WINDOW_MILLIS
+            }
+            val hit = if (row.excluded) null else pickDedupMatch(eligible.map { it.key() }, row.key())
+            val match = hit?.let { eligible[it.first] }
+            val decision = hit?.second
+            val survivor = if (decision?.survivor == DedupSurvivor.INCOMING) row else match
+            val dropped = if (decision?.survivor == DedupSurvivor.INCOMING) match else row
 
-            if (match != null) {
-                val preferredBank = resolvePreferredBankSource(match.source, row.source)
+            if (match != null && decision != null && survivor != null && dropped != null && canDelete(dropped, decision.kind)) {
+                val preferredBank = resolvePreferredBankSource(dropped.source, survivor.source)
                 val targetAccountId = if (preferredBank.equals("HSBC", ignoreCase = true) && hsbcAccountId != null) {
                     hsbcAccountId
                 } else {
-                    match.accountId
+                    survivor.accountId
                 }
-                val enrichedMerchant = if (isUnknownOrGenericMerchant(match.merchant, preferredBank) &&
-                    !isUnknownOrGenericMerchant(row.merchant, preferredBank)) {
-                    row.merchant
-                } else if (isUnknownOrGenericMerchant(match.merchant, preferredBank)) {
-                    null
-                } else {
-                    match.merchant
-                }
-                val matchCatIsDefault = match.category.isNullOrBlank() || match.category == "OTHER_EXPENSE" || match.category == "OTHER_INCOME"
-                val rowCatIsSpecific = !row.category.isNullOrBlank() && row.category != "OTHER_EXPENSE" && row.category != "OTHER_INCOME"
-                val useRowCategoryAndType = matchCatIsDefault && rowCatIsSpecific
-
-                val enrichedCategory = if (useRowCategoryAndType) row.category else match.category
-                val enrichedType = if (useRowCategoryAndType) {
-                    row.type
-                } else if (match.type == "EXPENSE" && row.type == "INCOME" && (row.note?.contains("money in", ignoreCase = true) == true)) {
-                    "INCOME"
-                } else {
-                    match.type
-                }
-                val absAmt = kotlin.math.abs(match.amount)
-                val enrichedAmount = if (enrichedType == "INCOME") absAmt else -absAmt
-
+                val enrichedMerchant = mergedDedupMerchant(survivor.key(), dropped.key(), decision.kind)
+                val enrichedCategory = mergedDedupCategory(survivor.category, dropped.category)
                 val rawPreferredNote = when {
-                    match.note.isNullOrBlank() && !row.note.isNullOrBlank() -> row.note
-                    match.note?.contains("Premier", ignoreCase = true) == true &&
-                        row.note?.contains("HSBC", ignoreCase = true) == true &&
-                        !isUnknownOrGenericMerchant(row.merchant, preferredBank) -> row.note
-                    else -> match.note
+                    survivor.note.isNullOrBlank() && !dropped.note.isNullOrBlank() -> dropped.note
+                    decision.kind == DedupKind.SAME_BANK &&
+                        survivor.note?.contains("Premier", ignoreCase = true) == true &&
+                        dropped.note?.contains("HSBC", ignoreCase = true) == true &&
+                        !isUnknownOrGenericMerchant(dropped.merchant, preferredBank) -> dropped.note
+                    else -> survivor.note
                 }
-                val enrichedNote = rawPreferredNote?.replace(
-                    Regex("(?i)^Captured from\\s+(?:HSBC\\s+)?Premier(?:\\s+Account|\\s+Bank)?"),
-                    "Captured from $preferredBank"
-                )
+                val enrichedNote = rawPreferredNote?.replace(premierPrefix, "Captured from $preferredBank")
 
-                match.accountId = targetAccountId
-                match.source = preferredBank
-                match.merchant = enrichedMerchant
-                match.category = enrichedCategory
-                match.type = enrichedType
-                match.amount = enrichedAmount
-                match.note = enrichedNote
+                survivor.accountId = targetAccountId
+                survivor.source = preferredBank
+                survivor.merchant = enrichedMerchant
+                survivor.category = enrichedCategory
+                survivor.note = enrichedNote
 
+                // Type and amount are never changed: both rows already have the same type and amount.
                 db.execSQL(
-                    "UPDATE transactions SET accountId = ?, source = ?, merchant = ?, category = ?, type = ?, amount = ?, note = ? WHERE id = ?",
-                    arrayOf(targetAccountId, preferredBank, enrichedMerchant, enrichedCategory, enrichedType, enrichedAmount, enrichedNote, match.id)
+                    "UPDATE transactions SET accountId = ?, source = ?, merchant = ?, category = ?, note = ? WHERE id = ?",
+                    arrayOf<Any?>(targetAccountId, preferredBank, enrichedMerchant, enrichedCategory, enrichedNote, survivor.id)
                 )
-                duplicateIdsToDelete.add(row.id)
+                duplicateIdsToDelete.add(dropped.id)
+                if (survivor === row) {
+                    keptRows[keptRows.indexOfFirst { it === match }] = row
+                }
             } else {
                 if (isPremierOrHsbcBank(row.source) || row.note?.contains("Captured from Premier", ignoreCase = true) == true) {
                     val targetAccountId = hsbcAccountId ?: row.accountId
-                    val cleanNote = row.note?.replace(
-                        Regex("(?i)^Captured from\\s+(?:HSBC\\s+)?Premier(?:\\s+Account|\\s+Bank)?"),
-                        "Captured from HSBC"
-                    )
+                    val cleanNote = row.note?.replace(premierPrefix, "Captured from HSBC")
                     if (row.source != "HSBC" || row.accountId != targetAccountId || row.note != cleanNote) {
                         row.source = "HSBC"
                         row.accountId = targetAccountId
                         row.note = cleanNote
                         db.execSQL(
                             "UPDATE transactions SET accountId = ?, source = 'HSBC', note = ? WHERE id = ?",
-                            arrayOf(targetAccountId, cleanNote, row.id)
+                            arrayOf<Any?>(targetAccountId, cleanNote, row.id)
                         )
                     }
                 }
