@@ -111,7 +111,7 @@ OUT_AT_TO = re.compile(r"\b(?:at|to)\s+" + NAME + TERM, I)
 OUT_YOU_SENT_TO = re.compile(r"\byou(?:'ve|’ve| have)?\s+(?:sent|paid)\s+(?:(?:" + CUR_ALT + r")\s?)?" + NUM + r"(?:\s?(?:GBP|EUR|USD))?\s+to\b", I)
 # Moves between the user's own accounts (Chase round-ups, "moved from your Current account to your Saver
 # account") are neither spending nor income: the notification is ignored.
-INTERNAL_MOVE = re.compile(r"\bmoved\b[^!?\n]{0,60}?\b(?:to|into|from)\s+your\b", I)
+INTERNAL_MOVE = re.compile(r"\bmoved\b[^!?\n]{0,60}?\b(?:to|into)\s+your\b", I)
 # Card-processor prefixes ("PAYPAL *NETFLIX", "SQ *THE COFFEE HOUSE", "SumUp *Cafe Nero", "ZETTLE_*Shop").
 PROCESSOR_PREFIX = re.compile(r"\b(?:paypal|sq|sumup|zettle|iz|sp)\s?[*_]+\s*", I)
 LEADING_PROCESSOR = re.compile(r"^(?:paypal|sq|sumup|zettle|iz|sp)\s?[*_]+\s*", I)
@@ -538,6 +538,12 @@ class TestSpendParser(unittest.TestCase):
     def test_moves_between_own_accounts_ignored(self):
         self.assertIsNone(parse_spend(CHASE, "Round-up", "We've moved \u00a30.55 to your Round-up account"))
         self.assertIsNone(parse_spend(CHASE, "Money moved", "\u00a3200.00 moved from your Current account to your Saver account"))
+
+    def test_money_moved_to_someone_else_is_a_payment(self):
+        # Regression: "from your" alone must not mark a payment to another person as an internal move.
+        self.check(parse_spend(CHASE, "Payment sent", "You've moved \u00a350.00 from your Current account to Tom Smith"),
+                   TYPE_OUT, 50.00, merchant="Tom Smith")
+        self.assertEqual(parse_spend(CHASE, "Payment sent", "Money moved to Tom's account: \u00a320.00")["type"], TYPE_OUT)
 
     def test_from_name_stops_at_into(self):
         self.check(parse_spend(HSBC, "HSBC UK", "You've received \u00a32,450.00 from ACME LTD SALARY into your account ending 4321."),

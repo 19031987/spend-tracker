@@ -505,7 +505,8 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
                     accountId = accountId,
                     merchant = merchant,
                     timestamp = timestamp,
-                    isTransfer = txType == TransactionType.TRANSFER || category == "INTERNAL_TRANSFER" || paired
+                    isTransfer = txType == TransactionType.TRANSFER || category == "INTERNAL_TRANSFER" || paired,
+                    isManual = !autoCaptured
                 )
             }
         }

@@ -55,6 +55,10 @@ fun firstDayOfWeek(locale: Locale = Locale.getDefault()): DayOfWeek = WeekFields
 private val REFUND_TEXT: Regex =
     Regex("\\b(?:refund(?:ed|s)?|chargeback|charge back|reversal|reversed)\\b", RegexOption.IGNORE_CASE)
 
+// Tax and government repayments are income, not negative spending, even when the alert says "refund".
+private val GOVERNMENT_REFUND_TEXT: Regex =
+    Regex("\\b(?:hmrc|tax refund|council tax|dwp|student loans?)\\b", RegexOption.IGNORE_CASE)
+
 private const val OTHER_INCOME_KEY: String = "OTHER_INCOME"
 const val UNCATEGORISED_EXPENSE_KEY: String = "OTHER_EXPENSE"
 
@@ -71,6 +75,9 @@ fun isRefundLike(
     if (categoryKey?.contains("REFUND", ignoreCase = true) == true) return true
     if (categoryName?.contains("refund", ignoreCase = true) == true) return true
     if (categoryKey != null && categoryKey != OTHER_INCOME_KEY) return false
+    if (GOVERNMENT_REFUND_TEXT.containsMatchIn(merchant.orEmpty()) || GOVERNMENT_REFUND_TEXT.containsMatchIn(note.orEmpty())) {
+        return false
+    }
     return REFUND_TEXT.containsMatchIn(merchant.orEmpty()) || REFUND_TEXT.containsMatchIn(note.orEmpty())
 }
 

@@ -226,3 +226,12 @@ fun TransactionRowItem(
 /** Internal transfer rows: shown in the feed but never counted in spending or income totals. */
 fun isTransferItem(tx: TransactionItem): Boolean =
     tx.type == TransactionType.TRANSFER || tx.categoryKey == "INTERNAL_TRANSFER"
+
+/**
+ * The receiving leg of a transfer pair (stored on the destination account). The feed lists only the
+ * sending leg, so a transfer between two of the user's accounts appears once, not twice.
+ */
+fun isTransferDestinationLeg(tx: TransactionItem): Boolean =
+    tx.type == TransactionType.TRANSFER &&
+        tx.destinationAccountId != null &&
+        tx.accountId == tx.destinationAccountId

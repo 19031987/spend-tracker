@@ -134,14 +134,13 @@ fun ComparisonContent(
                     )
                 }
             }
-        } else if (state.breakdownItems.isEmpty() ||
-            state.breakdownItems.all { it.currentValue == 0.0 && it.previousValue == 0.0 }
-        ) {
-            // No real data for either period: say so instead of showing an all-zero comparison.
+        } else if (!state.hasData || state.breakdownItems.isEmpty()) {
+            // No real data for either period (the ViewModel sets hasData): say so instead of
+            // showing an all-zero comparison.
             item(key = "empty") {
                 EmptyState(
                     title = "Not enough data to compare yet",
-                    body = "Comparisons appear once you have spending in this period and the one before it.",
+                    body = state.emptyMessage,
                     icon = Icons.Outlined.CompareArrows
                 )
             }

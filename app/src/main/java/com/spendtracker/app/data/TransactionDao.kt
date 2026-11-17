@@ -86,6 +86,13 @@ fun isMerchantDuplicate(existingMerchant: String?, newMerchant: String?, sourceN
 const val DEDUP_WINDOW_MILLIS = 180_000L
 
 /**
+ * Same bank and the same known merchant on both alerts: a real duplicate arrives within seconds, so
+ * two genuine identical purchases ("Pret £3.20" twice a couple of minutes apart) stay separate.
+ * Generic-vs-known pairs (e.g. HSBC app + Premier SMS) keep [DEDUP_WINDOW_MILLIS].
+ */
+const val SAME_MERCHANT_DEDUP_WINDOW_MILLIS = 60_000L
+
+/**
  * A wallet/aggregator alert (PayPal, Google Pay, ...) and the alert of the bank card that funded it.
  * PayPal's push and the card issuer's alert can be a few minutes apart (PayPal charges the funding
  * card after its own confirmation). 5 minutes covers that lag while keeping the chance of pairing
@@ -144,6 +151,10 @@ fun isWalletMerchantCompatible(bankMerchant: String?, bankSource: String?, walle
     return bFirst.length >= 3 && bFirst == wFirst
 }
 
+/** True for rows captured from a bank/wallet notification (the listener writes "Captured from ... alert"). */
+fun isAutoCapturedNote(note: String?): Boolean =
+    note?.trimStart()?.startsWith("Captured from", ignoreCase = true) == true
+
 /** The facts the duplicate rules look at, for a stored row, a list item or a new alert. */
 data class DedupKey(
     val amountMinor: Long,
@@ -153,7 +164,9 @@ data class DedupKey(
     val merchant: String?,
     val timestamp: Long,
     /** TRANSFER rows, INTERNAL_TRANSFER category or a paired leg: never deduplicated. */
-    val isTransfer: Boolean = false
+    val isTransfer: Boolean = false,
+    /** Entered by the user (not captured from an alert): saved as-is, never merged with another row. */
+    val isManual: Boolean = false
 )
 
 fun TransactionEntity.toDedupKey(): DedupKey = DedupKey(
@@ -163,7 +176,8 @@ fun TransactionEntity.toDedupKey(): DedupKey = DedupKey(
     accountId = accountId,
     merchant = merchant,
     timestamp = timestamp,
-    isTransfer = type == TransactionType.TRANSFER || category == "INTERNAL_TRANSFER" || pairedTransactionId != null
+    isTransfer = type == TransactionType.TRANSFER || category == "INTERNAL_TRANSFER" || pairedTransactionId != null,
+    isManual = !isAutoCapturedNote(note)
 )
 
 enum class DedupKind { SAME_BANK, WALLET_BANK }
@@ -174,16 +188,18 @@ data class DedupDecision(val kind: DedupKind, val survivor: DedupSurvivor)
 
 /**
  * The single duplicate rule:
- *  - never for transfers; type must match (an expense never merges with income, so no sign flip);
+ *  - never for transfers or manual entries; type must match (an expense never merges with income, so no sign flip);
  *  - same absolute amount (non-zero);
  *  - SAME_BANK: equivalent bank (HSBC == Premier) or same account, within [DEDUP_WINDOW_MILLIS],
- *    merchants equal or one generic. The existing row survives.
+ *    merchants equal or one generic; when both merchants are known (and equal) only within
+ *    [SAME_MERCHANT_DEDUP_WINDOW_MILLIS]. The existing row survives.
  *  - WALLET_BANK: one side a wallet (PayPal/Google Pay/...), the other a bank, within
  *    [WALLET_DEDUP_WINDOW_MILLIS], compatible merchants. The bank row survives.
  *  - two different wallets, or a wallet and an unknown ("Others") source: never.
  */
 fun dedupDecision(existing: DedupKey, incoming: DedupKey): DedupDecision? {
     if (existing.isTransfer || incoming.isTransfer) return null
+    if (existing.isManual || incoming.isManual) return null
     if (existing.type == TransactionType.TRANSFER || incoming.type == TransactionType.TRANSFER) return null
     if (existing.type != incoming.type) return null
     val amount = kotlin.math.abs(existing.amountMinor)
@@ -205,7 +221,10 @@ fun dedupDecision(existing: DedupKey, incoming: DedupKey): DedupDecision? {
     if (dt > DEDUP_WINDOW_MILLIS) return null
     val sameAccount = existing.accountId != null && existing.accountId == incoming.accountId
     if (!sameAccount && !isSameOrEquivalentBank(existing.source, incoming.source)) return null
-    if (!isMerchantDuplicate(existing.merchant, incoming.merchant, resolvePreferredBankSource(existing.source, incoming.source))) return null
+    val bank = resolvePreferredBankSource(existing.source, incoming.source)
+    if (!isMerchantDuplicate(existing.merchant, incoming.merchant, bank)) return null
+    val bothKnown = !isUnknownOrGenericMerchant(existing.merchant, bank) && !isUnknownOrGenericMerchant(incoming.merchant, bank)
+    if (bothKnown && dt > SAME_MERCHANT_DEDUP_WINDOW_MILLIS) return null
     return DedupDecision(DedupKind.SAME_BANK, DedupSurvivor.EXISTING)
 }
 
@@ -362,6 +381,10 @@ abstract class TransactionDao {
     /** Deleting either leg of a transfer removes both, in one statement. */
     @Query("DELETE FROM transactions WHERE id = :id OR pairedTransactionId = :id")
     abstract suspend fun deleteWithPair(id: Long): Int
+
+    /** Deletes exactly one row (e.g. the other leg when a transfer is re-filed as a payment). */
+    @Query("DELETE FROM transactions WHERE id = :id")
+    abstract suspend fun deleteById(id: Long): Int
 
     /**
      * Atomically writes both legs of an internal transfer and cross-links them.

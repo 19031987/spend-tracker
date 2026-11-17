@@ -83,7 +83,7 @@ data class ComparisonUiState(
     val onboardingMessage: String = "Building your baseline: comparisons will appear after your first week/month",
     /** False when neither period has any spending: show [emptyMessage] instead of the chart/list. */
     val hasData: Boolean = true,
-    val emptyMessage: String = "Not enough data yet"
+    val emptyMessage: String = "Comparisons appear once you have spending in this period or the one before it."
 )
 
 /** Result of one comparison: the breakdown plus like-for-like totals (see [ComparisonViewModel.computeComparison]). */

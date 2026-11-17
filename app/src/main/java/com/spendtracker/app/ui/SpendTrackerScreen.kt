@@ -126,6 +126,9 @@ import androidx.compose.ui.semantics.stateDescription
 import com.spendtracker.app.domain.cashflow.BreakdownDimension
 import com.spendtracker.app.domain.cashflow.BreakdownRow
 import com.spendtracker.app.ui.components.isTransferItem
+import com.spendtracker.app.ui.components.isTransferDestinationLeg
+import com.spendtracker.app.domain.isIncome
+import com.spendtracker.app.domain.netSpendMinor
 import java.time.YearMonth
 import java.util.Locale
 
@@ -566,7 +569,8 @@ private fun TransactionsFeed(
 ) {
     // Every row is listed (transfers too, so mis-filed payments can be found and fixed), but
     // transfers and excludeFromSpending rows never count towards spending/income totals.
-    val visibleTransactions = transactions
+    // A transfer pair has two rows (one per account); list it once, by its sending leg.
+    val visibleTransactions = remember(transactions) { transactions.filterNot { isTransferDestinationLeg(it) } }
     val nonTransferTxs = remember(transactions) {
         transactions.filter { !it.excludeFromSpending && !isTransferItem(it) }
     }
@@ -579,11 +583,12 @@ private fun TransactionsFeed(
     val currentMonthTxs = remember(nonTransferTxs, startOfMonth) {
         nonTransferTxs.filter { it.timestamp >= startOfMonth }
     }
+    // Same refund rule as Home/Insights: a refund is negative spending, not income (net is unchanged).
     val monthSpent = remember(currentMonthTxs) {
-        currentMonthTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
+        currentMonthTxs.sumOf { it.netSpendMinor() }
     }
     val monthIncome = remember(currentMonthTxs) {
-        currentMonthTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
+        currentMonthTxs.filter { it.isIncome() }.sumOf { it.amountMinor }
     }
 
     // Carry Over Salary & Balance: unspent salary/funds from previous months
@@ -591,10 +596,10 @@ private fun TransactionsFeed(
         nonTransferTxs.filter { it.timestamp < startOfMonth }
     }
     val priorIncome = remember(priorTxs) {
-        priorTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
+        priorTxs.filter { it.isIncome() }.sumOf { it.amountMinor }
     }
     val priorSpent = remember(priorTxs) {
-        priorTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
+        priorTxs.sumOf { it.netSpendMinor() }
     }
     val carriedOverSalary = priorIncome - priorSpent
 
@@ -650,10 +655,10 @@ private fun TransactionsFeed(
                                 normalizeBankName(it.accountName).equals(cleanName, ignoreCase = true)
                         }
                         val accCurrentTxs = accTxs.filter { it.timestamp >= startOfMonth }
-                        val accSpent = accCurrentTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
-                        val accIncome = accCurrentTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
-                        val accPriorIncome = accTxs.filter { it.timestamp < startOfMonth && it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
-                        val accPriorSpent = accTxs.filter { it.timestamp < startOfMonth && it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
+                        val accSpent = accCurrentTxs.sumOf { it.netSpendMinor() }
+                        val accIncome = accCurrentTxs.filter { it.isIncome() }.sumOf { it.amountMinor }
+                        val accPriorIncome = accTxs.filter { it.timestamp < startOfMonth && it.isIncome() }.sumOf { it.amountMinor }
+                        val accPriorSpent = accTxs.filter { it.timestamp < startOfMonth }.sumOf { it.netSpendMinor() }
                         val accRemaining = (accPriorIncome - accPriorSpent) + accIncome - accSpent
 
                         val bankKey = bankFilterKey(cleanName)

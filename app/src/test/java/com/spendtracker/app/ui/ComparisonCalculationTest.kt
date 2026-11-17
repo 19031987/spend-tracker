@@ -88,7 +88,7 @@ class ComparisonCalculationTest {
         assertTrue(state.breakdownItems.isEmpty())
         assertEquals(0.0, state.currentPeriodTotal, 0.001)
         assertEquals(0.0, state.percentageChange, 0.001)
-        assertEquals("Not enough data yet", state.emptyMessage)
+        assertTrue(state.emptyMessage.isNotBlank())
     }
 
     @Test

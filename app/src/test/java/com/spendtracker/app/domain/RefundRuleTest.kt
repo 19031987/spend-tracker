@@ -63,6 +63,24 @@ class RefundRuleTest {
     }
 
     @Test
+    fun `tax and government refunds stay income`() {
+        val cases = listOf(
+            item(TransactionType.INCOME, 45000L, "OTHER_INCOME", merchant = "HMRC", note = "Captured from HSBC alert: Refund from HMRC"),
+            item(TransactionType.INCOME, 12000L, null, merchant = null, note = "Tax refund of £120.00"),
+            item(TransactionType.INCOME, 8000L, "OTHER_INCOME", merchant = "Leeds City Council", note = "Council tax refund"),
+            item(TransactionType.INCOME, 9000L, "OTHER_INCOME", merchant = "DWP", note = "Payment reversed"),
+            item(TransactionType.INCOME, 3000L, "OTHER_INCOME", merchant = "Student Loans Company", note = "Refund of overpayment")
+        )
+        cases.forEach { tx ->
+            assertFalse(tx.note, tx.isRefund())
+            assertTrue(tx.note, tx.isIncome())
+            assertEquals(0L, tx.netSpendMinor())
+        }
+        // An ordinary shop refund is still a refund.
+        assertTrue(item(TransactionType.INCOME, 2000L, "OTHER_INCOME", merchant = "Amazon", note = "Refund of £20.00").isRefund())
+    }
+
+    @Test
     fun `expenses and excluded rows are never refunds`() {
         assertFalse(item(TransactionType.EXPENSE, 1000L, "SHOPPING", note = "refund").isRefund())
         val excluded = item(TransactionType.INCOME, 1000L, null, note = "refund").copy(excludeFromSpending = true)

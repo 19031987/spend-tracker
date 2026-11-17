@@ -265,6 +265,8 @@ def cleanup_and_consolidate_accounts_db(conn):
 DEDUP_WINDOW_MILLIS = 180_000
 WALLET_DEDUP_WINDOW_MILLIS = 300_000
 MAX_DEDUP_WINDOW_MILLIS = 300_000
+# Same bank and the same known merchant on both alerts (mirror of SAME_MERCHANT_DEDUP_WINDOW_MILLIS).
+SAME_MERCHANT_DEDUP_WINDOW_MILLIS = 60_000
 WALLET_SOURCES = {"PayPal", "Google Pay", "Apple Pay", "Samsung Pay"}
 
 _GENERIC_MERCHANTS = {
@@ -356,15 +358,22 @@ def is_wallet_merchant_compatible(bank_merchant, bank_source, wallet_merchant, w
     return len(b_first) >= 3 and b_first == w_first
 
 
-def dedup_key(amount, type_, source, merchant, timestamp, account_id=None, is_transfer=False):
+def is_auto_captured_note(note):
+    """Mirror of isAutoCapturedNote: rows captured from an alert carry a "Captured from ..." note."""
+    return note is not None and note.lstrip().lower().startswith("captured from")
+
+
+def dedup_key(amount, type_, source, merchant, timestamp, account_id=None, is_transfer=False, is_manual=False):
     """Mirror of DedupKey (type_ is 'EXPENSE' / 'INCOME' / 'TRANSFER')."""
     return {"amount": amount, "type": type_, "source": source, "account_id": account_id,
-            "merchant": merchant, "timestamp": timestamp, "is_transfer": is_transfer}
+            "merchant": merchant, "timestamp": timestamp, "is_transfer": is_transfer, "is_manual": is_manual}
 
 
 def dedup_decision(existing, incoming):
     """Returns (kind, survivor) with kind 'SAME_BANK' / 'WALLET_BANK' and survivor 'EXISTING' / 'INCOMING', or None."""
     if existing["is_transfer"] or incoming["is_transfer"]:
+        return None
+    if existing.get("is_manual") or incoming.get("is_manual"):
         return None
     if existing["type"] == "TRANSFER" or incoming["type"] == "TRANSFER":
         return None
@@ -393,8 +402,12 @@ def dedup_decision(existing, incoming):
     same_account = existing["account_id"] is not None and existing["account_id"] == incoming["account_id"]
     if not same_account and not is_same_or_equivalent_bank(existing["source"], incoming["source"]):
         return None
-    if not is_merchant_duplicate(existing["merchant"], incoming["merchant"],
-                                 resolve_preferred_bank_source(existing["source"], incoming["source"])):
+    bank = resolve_preferred_bank_source(existing["source"], incoming["source"])
+    if not is_merchant_duplicate(existing["merchant"], incoming["merchant"], bank):
+        return None
+    both_known = (not is_unknown_or_generic_merchant(existing["merchant"], bank)
+                  and not is_unknown_or_generic_merchant(incoming["merchant"], bank))
+    if both_known and dt > SAME_MERCHANT_DEDUP_WINDOW_MILLIS:
         return None
     return ("SAME_BANK", "EXISTING")
 
@@ -897,8 +910,29 @@ class TestDedupRules(unittest.TestCase):
     """Mirror of app/src/test/java/com/spendtracker/app/data/DedupRulesTest.kt."""
     T0 = 1_700_000_000_000
 
-    def k(self, amount, source, merchant, at=None, type_="EXPENSE", account_id=None, is_transfer=False):
-        return dedup_key(amount, type_, source, merchant, self.T0 if at is None else at, account_id, is_transfer)
+    def k(self, amount, source, merchant, at=None, type_="EXPENSE", account_id=None, is_transfer=False, is_manual=False):
+        return dedup_key(amount, type_, source, merchant, self.T0 if at is None else at, account_id, is_transfer, is_manual)
+
+    def test_identical_known_purchases_minutes_apart_stay_separate(self):
+        first = self.k(320, "Monzo", "Pret")
+        self.assertEqual(dedup_decision(first, self.k(320, "Monzo", "Pret", at=self.T0 + SAME_MERCHANT_DEDUP_WINDOW_MILLIS))[0], "SAME_BANK")
+        self.assertIsNone(dedup_decision(first, self.k(320, "Monzo", "Pret", at=self.T0 + SAME_MERCHANT_DEDUP_WINDOW_MILLIS + 1)))
+        self.assertIsNone(dedup_decision(first, self.k(320, "Monzo", "Pret", at=self.T0 + 120_000)))
+        # Generic vs known keeps the wider window.
+        self.assertEqual(dedup_decision(self.k(320, "Monzo", None), self.k(320, "Monzo", "Pret", at=self.T0 + 120_000))[0], "SAME_BANK")
+        self.assertEqual(dedup_decision(self.k(320, "Monzo", "Card Payment"),
+                                        self.k(320, "Monzo", "Pret", at=self.T0 + DEDUP_WINDOW_MILLIS))[0], "SAME_BANK")
+
+    def test_manual_entries_never_merged(self):
+        manual = self.k(1000, "HSBC", "Tesco", is_manual=True)
+        captured = self.k(1000, "HSBC", "Tesco", at=self.T0 + 1_000)
+        self.assertIsNone(dedup_decision(manual, captured))
+        self.assertIsNone(dedup_decision(captured, manual))
+        self.assertIsNone(dedup_decision(self.k(1000, "Chase", None, is_manual=True), self.k(1000, "PayPal", "Tesco", at=self.T0 + 1_000)))
+        self.assertTrue(is_auto_captured_note("Captured from HSBC alert: You paid \u00a310.00 to Tesco"))
+        self.assertFalse(is_auto_captured_note("Weekly shop"))
+        self.assertFalse(is_auto_captured_note(None))
+        self.assertEqual(len(dedupe_rows([manual, captured], key=lambda r: r, merge=lambda a, b, kind: a)), 2)
 
     def test_paypal_and_chase_same_purchase_bank_kept(self):
         paypal = self.k(3000, "PayPal", "Amazon")

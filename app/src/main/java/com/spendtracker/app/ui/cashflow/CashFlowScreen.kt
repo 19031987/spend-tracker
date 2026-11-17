@@ -146,6 +146,7 @@ fun CashFlowScreen(
                     selectedMonth = state.selectedMonth,
                     averageIncomeMinor = report.averageMonthlyIncomeMinor,
                     averageExpenseMinor = report.averageMonthlyExpenseMinor,
+                    hasAverages = state.hasAverages,
                     onSelectMonth = onSelectMonth
                 )
             }
@@ -285,6 +286,7 @@ private fun ChartCard(
     selectedMonth: YearMonth,
     averageIncomeMinor: Long,
     averageExpenseMinor: Long,
+    hasAverages: Boolean,
     onSelectMonth: (YearMonth) -> Unit
 ) {
     AppCard(verticalSpacing = Spacing.md) {
@@ -309,8 +311,13 @@ private fun ChartCard(
                 .height(210.dp)
         )
         Text(
-            text = "Monthly average: ${CurrencyUtils.formatMinor(averageIncomeMinor)} in · " +
-                "${CurrencyUtils.formatMinor(averageExpenseMinor)} out",
+            // Averages cover finished months only, so there are none during the first month.
+            text = if (hasAverages) {
+                "Monthly average: ${CurrencyUtils.formatMinor(averageIncomeMinor)} in · " +
+                    "${CurrencyUtils.formatMinor(averageExpenseMinor)} out"
+            } else {
+                "Averages appear after your first full month"
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

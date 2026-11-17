@@ -151,8 +151,14 @@ private fun SummaryCard(state: AnalyticsUiState) {
                     overflow = TextOverflow.Ellipsis
                 )
                 if (!state.isInitialPeriod) {
+                    // Mid-period, the previous total is like-for-like (same number of days elapsed).
+                    val previousLabel: String = if (state.isPartialPeriod) {
+                        "Same point last ${state.period.label.lowercase()}"
+                    } else {
+                        "Previous"
+                    }
                     Text(
-                        "Previous: ${formatMoney(state.previousTotalMinor)}",
+                        "$previousLabel: ${formatMoney(state.previousTotalMinor)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

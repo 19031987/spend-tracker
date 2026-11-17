@@ -408,6 +408,14 @@ class SpendParserTest {
     }
 
     @Test
+    fun `money moved from your account to someone else is still a payment`() {
+        // Regression: "from your" alone must not mark a payment to another person as an internal move.
+        assertTx(SpendParser.parse(chasePkg, "Payment sent", "You've moved £50.00 from your Current account to Tom Smith"),
+            SpendParser.TYPE_OUT, 50.00, "Tom Smith")
+        assertEquals(SpendParser.TYPE_OUT, SpendParser.parse(chasePkg, "Payment sent", "Money moved to Tom's account: £20.00")?.type)
+    }
+
+    @Test
     fun `from name stops at into`() {
         assertTx(
             SpendParser.parse(hsbcPkg, "HSBC UK", "You've received £2,450.00 from ACME LTD SALARY into your account ending 4321."),

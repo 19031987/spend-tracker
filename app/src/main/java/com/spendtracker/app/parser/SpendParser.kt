@@ -197,7 +197,7 @@ object SpendParser {
     private val OUT_YOU_SENT_TO = Regex("\\byou(?:'ve|’ve| have)?\\s+(?:sent|paid)\\s+(?:(?:$CUR_ALT)\\s?)?$NUM(?:\\s?(?:GBP|EUR|USD))?\\s+to\\b", IC)
     // Moves between the user's own accounts (Chase round-ups, "moved from your Current account to your Saver
     // account") are neither spending nor income: the notification is ignored.
-    private val INTERNAL_MOVE = Regex("\\bmoved\\b[^!?\\n]{0,60}?\\b(?:to|into|from)\\s+your\\b", IC)
+    private val INTERNAL_MOVE = Regex("\\bmoved\\b[^!?\\n]{0,60}?\\b(?:to|into)\\s+your\\b", IC)
     // Card-processor prefixes ("PAYPAL *NETFLIX", "SQ *THE COFFEE HOUSE", "SumUp *Cafe Nero", "ZETTLE_*Shop").
     private val PROCESSOR_PREFIX = Regex("\\b(?:paypal|sq|sumup|zettle|iz|sp)\\s?[*_]+\\s*", IC)
     private val LEADING_PROCESSOR = Regex("^(?:paypal|sq|sumup|zettle|iz|sp)\\s?[*_]+\\s*", IC)

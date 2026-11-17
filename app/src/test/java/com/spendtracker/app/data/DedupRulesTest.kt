@@ -116,6 +116,39 @@ class DedupRulesTest {
     }
 
     @Test
+    fun `two identical known purchases a couple of minutes apart stay separate`() {
+        val first = key(320, "Monzo", "Pret")
+        // A real repeat alert arrives within seconds; a second genuine purchase minutes later.
+        assertEquals(DedupKind.SAME_BANK, dedupDecision(first, key(320, "Monzo", "Pret", at = t0 + SAME_MERCHANT_DEDUP_WINDOW_MILLIS))?.kind)
+        assertNull(dedupDecision(first, key(320, "Monzo", "Pret", at = t0 + SAME_MERCHANT_DEDUP_WINDOW_MILLIS + 1)))
+        assertNull(dedupDecision(first, key(320, "Monzo", "Pret", at = t0 + 120_000L)))
+        // Generic vs known keeps the wider window.
+        assertEquals(DedupKind.SAME_BANK, dedupDecision(key(320, "Monzo", null), key(320, "Monzo", "Pret", at = t0 + 120_000L))?.kind)
+        assertEquals(DedupKind.SAME_BANK, dedupDecision(key(320, "Monzo", "Card Payment"), key(320, "Monzo", "Pret", at = t0 + DEDUP_WINDOW_MILLIS))?.kind)
+    }
+
+    @Test
+    fun `manual entries are never merged with or into another row`() {
+        val manual = key(1000, "HSBC", "Tesco").copy(isManual = true)
+        val captured = key(1000, "HSBC", "Tesco", at = t0 + 1_000L)
+        assertNull(dedupDecision(manual, captured))
+        assertNull(dedupDecision(captured, manual))
+        assertNull(dedupDecision(manual, manual.copy(timestamp = t0 + 1_000L)))
+        assertNull(dedupDecision(key(1000, "Chase", null).copy(isManual = true), key(1000, "PayPal", "Tesco", at = t0 + 1_000L)))
+        // Stored rows: only alert-captured notes are eligible.
+        fun entity(note: String?) = TransactionEntity(
+            accountId = 1L, amount = -1000L, category = "GROCERIES", note = note, timestamp = t0,
+            type = TransactionType.EXPENSE, merchant = "Tesco", source = "HSBC"
+        )
+        assertTrue(entity("Weekly shop").toDedupKey().isManual)
+        assertTrue(entity(null).toDedupKey().isManual)
+        assertFalse(entity("Captured from HSBC alert: You paid £10.00 to Tesco").toDedupKey().isManual)
+        // View dedup leaves a manual row and a captured row of the same purchase as two rows.
+        val rows = listOf(manual, captured)
+        assertEquals(2, dedupeRows(rows, key = { it }, merge = { a, _, _ -> a }).size)
+    }
+
+    @Test
     fun `same bank different known merchants are not merged`() {
         assertNull(dedupDecision(key(1000, "HSBC", "John Smith", type = TransactionType.INCOME),
             key(1000, "HSBC", "Sarah Jones", at = t0 + 15_000L, type = TransactionType.INCOME)))

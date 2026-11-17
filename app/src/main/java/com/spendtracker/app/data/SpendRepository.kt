@@ -119,7 +119,8 @@ class SpendRepository(
                     accountId = item.accountId,
                     merchant = item.merchant,
                     timestamp = item.timestamp,
-                    isTransfer = item.type == TransactionType.TRANSFER || item.categoryKey == "INTERNAL_TRANSFER"
+                    isTransfer = item.type == TransactionType.TRANSFER || item.categoryKey == "INTERNAL_TRANSFER",
+                    isManual = !isAutoCapturedNote(item.note)
                 )
             },
             merge = { survivor, other, kind ->
@@ -164,53 +165,21 @@ class SpendRepository(
                     it.isNotEmpty() && !isUnknownOrGenericMerchant(it, accName)
                 }
 
-                val existingDup = if (!isInternalTransfer) {
-                    transactionDao.findDedupMatch(
-                        DedupKey(
-                            amountMinor = transaction.amountMinor,
-                            type = txType,
-                            source = accName,
-                            accountId = targetAccountId,
-                            merchant = cleanMerchant,
-                            timestamp = transaction.timestamp
-                        )
-                    )?.first
-                } else null
-
-                if (existingDup != null) {
-                    val preferredBank = resolvePreferredBankSource(existingDup.source, accName)
-                    val preferredAccount = if (preferredBank.equals(accName, ignoreCase = true)) {
-                        canonicalAccount
-                    } else {
-                        accountDao.getOrCreate(preferredBank)
-                    }
-                    val enrichedMerchant = cleanMerchant ?: existingDup.merchant?.takeIf {
-                        !isUnknownOrGenericMerchant(it, preferredBank)
-                    }
-                    transactionDao.update(
-                        existingDup.copy(
-                            accountId = preferredAccount.id,
-                            source = preferredAccount.name,
-                            merchant = enrichedMerchant,
-                            category = if (existingDup.category.isNullOrBlank() || existingDup.category == "OTHER_EXPENSE" || existingDup.category == "OTHER_INCOME") chosenCategory else existingDup.category,
-                            note = transaction.note?.trim()?.takeIf { it.isNotEmpty() } ?: existingDup.note
-                        )
+                // Entries added by hand (Add sheet, Undo) are saved as-is: never merged with another
+                // row. Duplicate detection applies only to notification-captured rows (listener service).
+                transactionDao.insert(
+                    TransactionEntity(
+                        accountId = targetAccountId,
+                        amount = signed,
+                        category = chosenCategory,
+                        note = transaction.note?.trim()?.takeIf { it.isNotEmpty() },
+                        timestamp = transaction.timestamp,
+                        type = txType,
+                        excludeFromSpending = isInternalTransfer,
+                        merchant = cleanMerchant,
+                        source = canonicalAccount.name
                     )
-                } else {
-                    transactionDao.insert(
-                        TransactionEntity(
-                            accountId = targetAccountId,
-                            amount = signed,
-                            category = chosenCategory,
-                            note = transaction.note?.trim()?.takeIf { it.isNotEmpty() },
-                            timestamp = transaction.timestamp,
-                            type = txType,
-                            excludeFromSpending = isInternalTransfer,
-                            merchant = cleanMerchant,
-                            source = canonicalAccount.name
-                        )
-                    )
-                }
+                )
             }
             is NewTransaction.Transfer -> {
                 val rawAccounts = accountDao.getAllRaw().associateBy { it.id }
@@ -271,7 +240,9 @@ class SpendRepository(
         } else {
             val existing = transactionDao.getById(id) ?: return
             if (existing.pairedTransactionId != null) {
-                transactionDao.deleteWithPair(existing.pairedTransactionId)
+                // Only the other leg: deleteWithPair(pairId) would also match this row
+                // (its pairedTransactionId == pairId) and the update below would then be lost.
+                transactionDao.deleteById(existing.pairedTransactionId)
             }
             val signed = if (type == TransactionType.EXPENSE) -amountMinor else amountMinor
             transactionDao.update(

@@ -107,6 +107,18 @@ class TransactionsUiLogicTest {
     }
 
     @Test
+    fun `a transfer pair is listed once, by its sending leg`() {
+        val sending = tx(10, type = TransactionType.TRANSFER, categoryKey = "INTERNAL_TRANSFER", exclude = true)
+            .copy(accountId = 1L, destinationAccountId = 2L)
+        val receiving = sending.copy(id = 11L, accountId = 2L, destinationAccountId = 2L)
+        val captured = tx(12, type = TransactionType.TRANSFER, categoryKey = "INTERNAL_TRANSFER", exclude = true)
+        assertFalse(com.spendtracker.app.ui.components.isTransferDestinationLeg(sending))
+        assertTrue(com.spendtracker.app.ui.components.isTransferDestinationLeg(receiving))
+        assertFalse(com.spendtracker.app.ui.components.isTransferDestinationLeg(captured))
+        assertFalse(com.spendtracker.app.ui.components.isTransferDestinationLeg(tx(13)))
+    }
+
+    @Test
     fun `filters are active when searching or not on All`() {
         assertFalse(isFeedFilterActive("ALL", "  "))
         assertTrue(isFeedFilterActive("ALL", "tesco"))
