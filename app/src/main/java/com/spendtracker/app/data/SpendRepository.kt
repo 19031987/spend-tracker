@@ -238,7 +238,9 @@ class SpendRepository(
         categoryKey: String?,
         merchant: String?,
         note: String?,
-        excludeFromSpending: Boolean
+        excludeFromSpending: Boolean,
+        /** New epoch-ms timestamp, or null to keep the current one. */
+        timestamp: Long? = null
     ) {
         val rawAccounts = accountDao.getAllRaw().associateBy { it.id }
         val srcName = normalizeBankName(rawAccounts[accountId]?.name ?: "Chase")
@@ -257,6 +259,15 @@ class SpendRepository(
                 sourceName = canonicalSrc.name,
                 destinationName = dstName
             )
+            if (timestamp != null) {
+                val source = transactionDao.getById(id)
+                if (source != null) {
+                    transactionDao.update(source.copy(timestamp = timestamp))
+                    source.pairedTransactionId?.let { pairId ->
+                        transactionDao.getById(pairId)?.let { transactionDao.update(it.copy(timestamp = timestamp)) }
+                    }
+                }
+            }
         } else {
             val existing = transactionDao.getById(id) ?: return
             if (existing.pairedTransactionId != null) {
@@ -274,7 +285,8 @@ class SpendRepository(
                     pairedTransactionId = null,
                     excludeFromSpending = excludeFromSpending,
                     merchant = merchant?.trim()?.takeIf { it.isNotEmpty() },
-                    source = canonicalSrc.name
+                    source = canonicalSrc.name,
+                    timestamp = timestamp ?: existing.timestamp
                 )
             )
         }

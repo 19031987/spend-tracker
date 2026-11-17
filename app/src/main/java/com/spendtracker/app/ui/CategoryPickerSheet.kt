@@ -56,6 +56,7 @@ import com.spendtracker.app.data.CategoryEntity
 import com.spendtracker.app.data.CategoryGroupEntity
 import com.spendtracker.app.data.TransactionType
 import com.spendtracker.app.ui.components.CategoryEmojiBox
+import com.spendtracker.app.ui.components.ColorSwatch
 import com.spendtracker.app.ui.components.SectionHeader
 import com.spendtracker.app.ui.components.SheetActions
 import com.spendtracker.app.ui.components.SheetHeader
@@ -450,20 +451,10 @@ fun CategoryPickerContent(
                             verticalArrangement = Arrangement.spacedBy(Spacing.md)
                         ) {
                             DEFAULT_PASTEL_COLORS.forEach { hex ->
-                                val color = parseColorHex(hex)
-                                val isSelected = hex == selectedColorHex
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(color)
-                                        .border(
-                                            width = if (isSelected) 3.dp else 1.dp,
-                                            color = if (isSelected) MaterialTheme.colorScheme.onSurface
-                                            else MaterialTheme.colorScheme.outlineVariant,
-                                            shape = CircleShape
-                                        )
-                                        .clickable { selectedColorHex = hex }
+                                ColorSwatch(
+                                    hex = hex,
+                                    selected = hex.equals(selectedColorHex, ignoreCase = true),
+                                    onClick = { selectedColorHex = hex }
                                 )
                             }
                         }

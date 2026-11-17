@@ -1,10 +1,8 @@
 package com.spendtracker.app.ui.goals
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -70,6 +68,7 @@ import com.spendtracker.app.data.GoalContributionEntity
 import com.spendtracker.app.domain.goals.GoalProgress
 import com.spendtracker.app.domain.goals.GoalStatus
 import com.spendtracker.app.ui.components.AppCard
+import com.spendtracker.app.ui.components.ColorSwatch
 import com.spendtracker.app.ui.components.DestructiveButton
 import com.spendtracker.app.ui.components.DestructiveTextButton
 import com.spendtracker.app.ui.components.EmptyState
@@ -108,6 +107,14 @@ private val GoalColors: List<String> = listOf(
 
 private val MonthYearFormatter: DateTimeFormatter =
     DateTimeFormatter.ofPattern("MMM yyyy", Locale.getDefault())
+
+/** "Already saved" input: blank or zero mean 0; otherwise a positive amount, or null if invalid. */
+internal fun parseAlreadySaved(text: String): Long? {
+    if (text.isBlank()) return 0L
+    CurrencyUtils.parseDecimalToMinor(text)?.let { return it }
+    val value = CurrencyUtils.normaliseAmount(text)?.toBigDecimalOrNull() ?: return null
+    return if (value.signum() == 0) 0L else null
+}
 
 private fun formatMonthYear(date: LocalDate): String = date.format(MonthYearFormatter)
 
@@ -415,6 +422,7 @@ private fun GoalDetailContent(
     var showEdit by rememberSaveable { mutableStateOf(false) }
     var showDelete by rememberSaveable { mutableStateOf(false) }
     var moneySheet by rememberSaveable { mutableStateOf<String?>(null) } // "add" | "withdraw"
+    var deleteContributionId by rememberSaveable { mutableStateOf<Long?>(null) }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -546,7 +554,7 @@ private fun GoalDetailContent(
             }
         } else {
             items(contributions, key = { "c${it.id}" }) { c ->
-                ContributionRow(contribution = c, onDelete = { onDeleteContribution(c.id) })
+                ContributionRow(contribution = c, onDelete = { deleteContributionId = c.id })
             }
         }
     }
@@ -559,6 +567,34 @@ private fun GoalDetailContent(
             onSave = { r ->
                 onEdit(r)
                 showEdit = false
+            }
+        )
+    }
+
+    val pendingContribution: GoalContributionEntity? =
+        deleteContributionId?.let { id -> contributions.firstOrNull { it.id == id } }
+    if (pendingContribution != null) {
+        val kind = if (pendingContribution.amountMinor < 0L) "withdrawal" else "deposit"
+        AlertDialog(
+            onDismissRequest = { deleteContributionId = null },
+            title = { Text("Delete this $kind?") },
+            text = {
+                Text(
+                    "${CurrencyUtils.formatSignedMinor(pendingContribution.amountMinor)} will be removed " +
+                        "and the goal's saved amount updated."
+                )
+            },
+            confirmButton = {
+                DestructiveButton(
+                    text = "Delete",
+                    onClick = {
+                        deleteContributionId = null
+                        onDeleteContribution(pendingContribution.id)
+                    }
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteContributionId = null }) { Text("Cancel") }
             }
         )
     }
@@ -801,19 +837,11 @@ private fun GoalFormSheet(
             Text(text = "Colour", style = MaterialTheme.typography.labelLarge)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
                 items(GoalColors) { hex ->
-                    val chosen: Boolean = hex.equals(colorHex, ignoreCase = true)
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(ColorUtils.parseColorHex(hex))
-                            .then(
-                                if (chosen) Modifier.border(
-                                    BorderStroke(3.dp, MaterialTheme.colorScheme.onSurface),
-                                    CircleShape
-                                ) else Modifier
-                            )
-                            .clickable { colorHex = hex }
+                    ColorSwatch(
+                        hex = hex,
+                        selected = hex.equals(colorHex, ignoreCase = true),
+                        onClick = { colorHex = hex },
+                        size = 40.dp
                     )
                 }
             }
@@ -877,13 +905,7 @@ private fun GoalFormSheet(
                 onDismiss = onDismiss,
                 onConfirm = {
                     val target: Long? = CurrencyUtils.parseDecimalToMinor(targetText)
-                    val starting: Long? = if (isEdit) {
-                        editingStartingMinor
-                    } else if (startingText.isBlank()) {
-                        0L
-                    } else {
-                        CurrencyUtils.parseDecimalToMinor(startingText)
-                    }
+                    val starting: Long? = if (isEdit) editingStartingMinor else parseAlreadySaved(startingText)
                     when {
                         name.isBlank() -> error = "Give your goal a name"
                         target == null -> error = "Enter a valid target amount"

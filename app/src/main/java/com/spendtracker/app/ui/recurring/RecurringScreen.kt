@@ -112,7 +112,12 @@ import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 
 @Composable
-fun RecurringRoute(viewModel: RecurringViewModel, modifier: Modifier = Modifier) {
+fun RecurringRoute(
+    viewModel: RecurringViewModel,
+    modifier: Modifier = Modifier,
+    initialEditItemId: Long? = null,
+    onInitialEditConsumed: () -> Unit = {}
+) {
     val state: RecurringUiState by viewModel.uiState.collectAsStateWithLifecycle()
     RecurringScreen(
         uiState = state,
@@ -127,7 +132,9 @@ fun RecurringRoute(viewModel: RecurringViewModel, modifier: Modifier = Modifier)
         onUpdateItem = viewModel::updateItem,
         onRestore = viewModel::restore,
         onDelete = viewModel::delete,
-        modifier = modifier
+        modifier = modifier,
+        initialEditItemId = initialEditItemId,
+        onInitialEditConsumed = onInitialEditConsumed
     )
 }
 
@@ -149,10 +156,21 @@ fun RecurringScreen(
     onUpdateItem: (Long, RecurringDraft) -> String?,
     onRestore: (Long) -> Unit,
     onDelete: (Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    initialEditItemId: Long? = null,
+    onInitialEditConsumed: () -> Unit = {}
 ) {
     var showAdd: Boolean by rememberSaveable { mutableStateOf(false) }
     var editingId: Long? by rememberSaveable { mutableStateOf<Long?>(null) }
+    var removeIgnoredId: Long? by rememberSaveable { mutableStateOf<Long?>(null) }
+
+    // Opened from a Home "Upcoming" row: show that item's edit sheet once.
+    LaunchedEffect(initialEditItemId) {
+        if (initialEditItemId != null) {
+            editingId = initialEditItemId
+            onInitialEditConsumed()
+        }
+    }
     var ignoredExpanded: Boolean by rememberSaveable { mutableStateOf(false) }
     var stopTarget: RecurringItemRow? by remember { mutableStateOf<RecurringItemRow?>(null) }
 
@@ -200,7 +218,7 @@ fun RecurringScreen(
                     onEdit = { editingId = it.item.id },
                     onStopTracking = { stopTarget = it },
                     onRestore = onRestore,
-                    onRemoveIgnored = onDelete
+                    onRemoveIgnored = { id: Long -> removeIgnoredId = id }
                 )
             }
         }
@@ -247,6 +265,27 @@ fun RecurringScreen(
             onDelete = {
                 onDelete(editingRow.item.id)
                 editingId = null
+            }
+        )
+    }
+
+    val removing: RecurringItemEntity? = removeIgnoredId?.let { id: Long -> uiState.ignored.firstOrNull { it.id == id } }
+    if (removing != null) {
+        AlertDialog(
+            onDismissRequest = { removeIgnoredId = null },
+            title = { Text("Remove ${removing.displayName}?") },
+            text = { Text("It will be deleted from Ignored and may be suggested again later.") },
+            confirmButton = {
+                DestructiveButton(
+                    text = "Remove",
+                    onClick = {
+                        onDelete(removing.id)
+                        removeIgnoredId = null
+                    }
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { removeIgnoredId = null }) { Text("Cancel") }
             }
         )
     }

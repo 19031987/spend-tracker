@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -95,6 +96,7 @@ class AddTransactionViewModel(private val repository: SpendRepository) : ViewMod
     ) {
         viewModelScope.launch {
             try {
+                val before = repository.observeCategories().first().map { it.key }.toSet()
                 repository.createCategoryWithRule(
                     name = name,
                     groupId = groupId,
@@ -104,20 +106,10 @@ class AddTransactionViewModel(private val repository: SpendRepository) : ViewMod
                     type = type,
                     alwaysMatchMerchant = ruleMerchant
                 )
-                // Retrieve updated category
-                val updatedCats = repository.observeCategories()
-                // Wait briefly for insertion or synthesize CategoryEntity
-                val fallbackCat = CategoryEntity(
-                    key = "c_new",
-                    groupId = groupId ?: 1L,
-                    name = name,
-                    emoji = emoji,
-                    colorHex = colorHex,
-                    type = type,
-                    isBuiltIn = false,
-                    isHidden = false
-                )
-                onComplete(fallbackCat)
+                // The repository doesn't return the new key: find the stored row so the caller
+                // can select it (never a synthetic key that doesn't exist in the database).
+                findCreatedCategory(repository.observeCategories().first(), before, name, type)
+                    ?.let(onComplete)
             } catch (e: Exception) {
                 _state.value = AddTransactionUiState(error = "Could not create category")
             }

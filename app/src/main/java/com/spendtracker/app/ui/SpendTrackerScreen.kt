@@ -116,6 +116,17 @@ import com.spendtracker.app.ui.theme.SpendTrackerTheme
 import com.spendtracker.app.ui.util.ColorUtils
 import com.spendtracker.app.ui.util.CurrencyUtils
 import com.spendtracker.app.ui.util.DateUtils
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import com.spendtracker.app.domain.cashflow.BreakdownDimension
+import com.spendtracker.app.domain.cashflow.BreakdownRow
+import com.spendtracker.app.ui.components.isTransferItem
+import java.time.YearMonth
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -150,7 +161,13 @@ fun SpendTrackerScreen(container: AppContainer) {
     var showSheet by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showCategoryCreateSheet by rememberSaveable { mutableStateOf(false) }
-    var editingTransaction by remember { mutableStateOf<TransactionItem?>(null) }
+    // Ids (not objects) so open sheets survive rotation; the item is looked up from state.
+    var editingTransactionId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var editingFallback by remember { mutableStateOf<TransactionItem?>(null) }
+    fun openEdit(tx: TransactionItem) {
+        editingFallback = tx
+        editingTransactionId = tx.id
+    }
     var filterType by rememberSaveable { mutableStateOf("ALL") }
 
     // Check Notification Listener Permission
@@ -168,7 +185,48 @@ fun SpendTrackerScreen(container: AppContainer) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    var quickCategoryTx by remember { mutableStateOf<TransactionItem?>(null) }
+    var quickCategoryTxId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var quickCategoryFallback by remember { mutableStateOf<TransactionItem?>(null) }
+    fun openQuickCategory(tx: TransactionItem) {
+        quickCategoryFallback = tx
+        quickCategoryTxId = tx.id
+    }
+    val editingTransaction: TransactionItem? = editingTransactionId?.let { id ->
+        transactionsList.firstOrNull { it.id == id } ?: editingFallback?.takeIf { it.id == id }
+    }
+    val quickCategoryTx: TransactionItem? = quickCategoryTxId?.let { id ->
+        transactionsList.firstOrNull { it.id == id } ?: quickCategoryFallback?.takeIf { it.id == id }
+    }
+    // Recurring item to open in its edit sheet when Recurring is opened from a Home "Upcoming" row.
+    var recurringEditId by rememberSaveable { mutableStateOf<Long?>(null) }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(transactionsVm) {
+        transactionsVm.events.collect { event ->
+            when (event) {
+                is TransactionEvent.Deleted -> {
+                    val result = snackbarHostState.showSnackbar(
+                        message = event.message,
+                        actionLabel = if (event.restorable) "Undo" else null,
+                        duration = SnackbarDuration.Short
+                    )
+                    if (result == SnackbarResult.ActionPerformed) transactionsVm.undoDelete(event.item)
+                }
+                is TransactionEvent.CategoryChanged -> {
+                    val result = snackbarHostState.showSnackbar(
+                        message = event.message,
+                        actionLabel = "Always",
+                        withDismissAction = true,
+                        duration = SnackbarDuration.Long
+                    )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        transactionsVm.alwaysCategorise(event.merchant, event.categoryKey, event.categoryName)
+                    }
+                }
+                else -> snackbarHostState.showSnackbar(event.message, duration = SnackbarDuration.Short)
+            }
+        }
+    }
 
     val deduplicatedAccounts = remember(accounts) {
         accounts
@@ -201,6 +259,7 @@ fun SpendTrackerScreen(container: AppContainer) {
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = MaterialTheme.colorScheme.surface,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             HeaderBar(
                 title = destination?.title ?: currentTab.title,
@@ -282,12 +341,17 @@ fun SpendTrackerScreen(container: AppContainer) {
             val contentModifier = Modifier.weight(1f)
             if (destination != null) {
                 when (destination) {
-                    MoreDestination.RECURRING -> RecurringRoute(viewModel = recurringVm, modifier = contentModifier)
+                    MoreDestination.RECURRING -> RecurringRoute(
+                        viewModel = recurringVm,
+                        modifier = contentModifier,
+                        initialEditItemId = recurringEditId,
+                        onInitialEditConsumed = { recurringEditId = null }
+                    )
                     MoreDestination.GOALS -> GoalsRoute(viewModel = goalsVm, modifier = contentModifier)
                     MoreDestination.REVIEW -> ReviewRoute(
                         viewModel = reviewVm,
-                        onChangeCategory = { quickCategoryTx = it },
-                        onOpenTransaction = { editingTransaction = it },
+                        onChangeCategory = { openQuickCategory(it) },
+                        onOpenTransaction = { openEdit(it) },
                         modifier = contentModifier
                     )
                     MoreDestination.INSIGHTS -> AnalyticsScreen(
@@ -311,9 +375,35 @@ fun SpendTrackerScreen(container: AppContainer) {
                         onOpenGoals = { open(MoreDestination.GOALS) },
                         onOpenCashFlow = { openTab(MainTab.CASH_FLOW) },
                         onOpenTransactions = { openTab(MainTab.TRANSACTIONS) },
-                        onOpenTransaction = { editingTransaction = it },
-                        onCategoryClick = { quickCategoryTx = it },
-                        modifier = contentModifier
+                        onOpenTransaction = { openEdit(it) },
+                        onCategoryClick = { openQuickCategory(it) },
+                        modifier = contentModifier,
+                        onOpenRecurringItem = { itemId ->
+                            recurringEditId = itemId
+                            open(MoreDestination.RECURRING)
+                        },
+                        onOpenGoal = { goalId ->
+                            goalsVm.openGoal(goalId)
+                            open(MoreDestination.GOALS)
+                        },
+                        onOpenTopCategory = { category ->
+                            // Cash flow drill-down for this category in the current month.
+                            cashFlowVm.selectMonth(YearMonth.now())
+                            cashFlowVm.setDimension(BreakdownDimension.CATEGORY)
+                            cashFlowVm.setShowIncome(false)
+                            cashFlowVm.openBreakdown(
+                                BreakdownRow(
+                                    key = category.categoryKey,
+                                    label = category.name,
+                                    emoji = category.emoji,
+                                    colorHex = category.colorHex,
+                                    amountMinor = category.amountMinor,
+                                    share = category.share,
+                                    transactionCount = 0
+                                )
+                            )
+                            openTab(MainTab.CASH_FLOW)
+                        }
                     )
                     MainTab.TRANSACTIONS -> TransactionsFeed(
                         transactions = transactionsList,
@@ -322,8 +412,12 @@ fun SpendTrackerScreen(container: AppContainer) {
                         onFilterChange = { filterType = it },
                         searchQuery = searchQuery,
                         onSearchChange = { searchQuery = it },
-                        onTransactionClick = { editingTransaction = it },
-                        onCategoryPillClick = { quickCategoryTx = it },
+                        onClearFilters = {
+                            searchQuery = ""
+                            filterType = "ALL"
+                        },
+                        onTransactionClick = { openEdit(it) },
+                        onCategoryPillClick = { openQuickCategory(it) },
                         // No horizontal padding: TransactionRowItem insets itself by 16dp, so the
                         // other items add ScreenPadding.horizontal themselves. Bottom leaves FAB room.
                         contentPadding = PaddingValues(top = ScreenPadding.top, bottom = ScreenPadding.bottom),
@@ -332,8 +426,8 @@ fun SpendTrackerScreen(container: AppContainer) {
                     MainTab.CASH_FLOW -> CashFlowRoute(
                         viewModel = cashFlowVm,
                         modifier = contentModifier,
-                        onOpenTransaction = { editingTransaction = it },
-                        onOpenCategory = { quickCategoryTx = it }
+                        onOpenTransaction = { openEdit(it) },
+                        onOpenCategory = { openQuickCategory(it) }
                     )
                     MainTab.BUDGET -> BudgetRoute(viewModel = budgetVm, modifier = contentModifier)
                     MainTab.MORE -> MoreScreen(
@@ -360,8 +454,8 @@ fun SpendTrackerScreen(container: AppContainer) {
                 showSheet = false
             },
             onEvaluateCategory = { merchant -> addVm.evaluateCategory(merchant) },
-            onCreateCategory = { name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant ->
-                addVm.createCategory(name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant) { }
+            onCreateCategory = { name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant, onCreated ->
+                addVm.createCategory(name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant, onCreated)
             },
             onSubmit = { tx -> addVm.submit(tx) { showSheet = false } }
         )
@@ -373,8 +467,8 @@ fun SpendTrackerScreen(container: AppContainer) {
             accounts = accounts,
             groups = groups,
             categories = categories,
-            onDismiss = { editingTransaction = null },
-            onSave = { id, type, accountId, destinationAccountId, amountMinor, categoryKey, merchant, note, excludeFromSpending, ruleMerchant ->
+            onDismiss = { editingTransactionId = null },
+            onSave = { id, type, accountId, destinationAccountId, amountMinor, categoryKey, merchant, note, excludeFromSpending, ruleMerchant, timestamp ->
                 transactionsVm.updateTransaction(
                     id = id,
                     type = type,
@@ -385,15 +479,19 @@ fun SpendTrackerScreen(container: AppContainer) {
                     merchant = merchant,
                     note = note,
                     excludeFromSpending = excludeFromSpending,
-                    ruleMerchant = ruleMerchant
+                    ruleMerchant = ruleMerchant,
+                    timestamp = timestamp
                 ) {
-                    editingTransaction = null
+                    editingTransactionId = null
                 }
             },
             onDelete = { id ->
                 transactionsVm.deleteTransaction(id) {
-                    editingTransaction = null
+                    editingTransactionId = null
                 }
+            },
+            onCreateCategory = { name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant, onCreated ->
+                transactionsVm.createCategory(name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant, onCreated)
             }
         )
     }
@@ -404,15 +502,21 @@ fun SpendTrackerScreen(container: AppContainer) {
             categories = categories,
             selectedCategoryKey = tx.categoryKey,
             currentMerchant = tx.merchant?.takeIf { it.isNotEmpty() },
-            transactionType = tx.type,
-            onDismiss = { quickCategoryTx = null },
+            // Transfers have no pickable categories of their own: offer spending ones to re-file it.
+            transactionType = if (tx.type == TransactionType.TRANSFER) TransactionType.EXPENSE else tx.type,
+            onDismiss = { quickCategoryTxId = null },
             onCategorySelected = { cat ->
-                transactionsVm.quickSetCategory(tx.id, cat.key, tx.merchant?.takeIf { it.isNotEmpty() })
-                quickCategoryTx = null
+                // Only this transaction; a merchant rule is offered in a snackbar, never created silently.
+                transactionsVm.quickSetCategory(tx.id, cat.key)
+                quickCategoryTxId = null
             },
             onCreateCategory = { name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant ->
-                settingsVm.addCategory(name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant)
-                quickCategoryTx = null
+                val txId = tx.id
+                transactionsVm.createCategory(name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant) { created ->
+                    // Apply the new category to the transaction the picker was opened for.
+                    transactionsVm.quickSetCategory(txId, created.key, offerRule = ruleMerchant == null)
+                }
+                quickCategoryTxId = null
             }
         )
     }
@@ -454,16 +558,18 @@ private fun TransactionsFeed(
     onFilterChange: (String) -> Unit,
     searchQuery: String,
     onSearchChange: (String) -> Unit,
+    onClearFilters: () -> Unit,
     onTransactionClick: (TransactionItem) -> Unit,
     onCategoryPillClick: (TransactionItem) -> Unit,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier
 ) {
-    // Exclude internal transfers and excludeFromSpending rows from spending/income totals
-    val visibleTransactions = remember(transactions) {
-        transactions.filter { it.type != TransactionType.TRANSFER && it.categoryKey != "INTERNAL_TRANSFER" }
+    // Every row is listed (transfers too, so mis-filed payments can be found and fixed), but
+    // transfers and excludeFromSpending rows never count towards spending/income totals.
+    val visibleTransactions = transactions
+    val nonTransferTxs = remember(transactions) {
+        transactions.filter { !it.excludeFromSpending && !isTransferItem(it) }
     }
-    val nonTransferTxs = visibleTransactions.filter { !it.excludeFromSpending }
 
     // Start of Current Month: spending resets every month, while salary & balance carry over
     val startOfMonth = remember { DateUtils.getStartOfMonthTimestamp() }
@@ -497,25 +603,8 @@ private fun TransactionsFeed(
 
     val deduplicatedAccounts = accounts
 
-    val byFilter = when {
-        filterType == "REVIEW" -> visibleTransactions.filter { it.needsReview }
-        filterType == "EXPENSE" -> visibleTransactions.filter { it.type == TransactionType.EXPENSE && !it.excludeFromSpending }
-        filterType == "INCOME" -> visibleTransactions.filter { it.type == TransactionType.INCOME && !it.excludeFromSpending }
-        filterType.startsWith("BANK_") -> {
-            val bankKey = filterType.removePrefix("BANK_").trim().lowercase(Locale.ROOT)
-            visibleTransactions.filter {
-                normalizeBankName(it.accountName).lowercase(Locale.ROOT) == bankKey ||
-                normalizeBankName(it.source).lowercase(Locale.ROOT) == bankKey
-            }
-        }
-        else -> visibleTransactions
-    }
-    val query = searchQuery.trim()
-    val filtered = if (query.isEmpty()) byFilter else byFilter.filter { tx ->
-        listOfNotNull(tx.merchant, tx.categoryName, tx.note, tx.source, tx.accountName)
-            .any { it.contains(query, ignoreCase = true) } ||
-            CurrencyUtils.minorToDecimalString(tx.amountMinor).contains(query)
-    }
+    val filtered = filterFeed(visibleTransactions, filterType, searchQuery)
+    val filtersActive = isFeedFilterActive(filterType, searchQuery)
 
     val dayGroups = remember(filtered) { groupTransactionsByDay(filtered) }
 
@@ -567,11 +656,15 @@ private fun TransactionsFeed(
                         val accPriorSpent = accTxs.filter { it.timestamp < startOfMonth && it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
                         val accRemaining = (accPriorIncome - accPriorSpent) + accIncome - accSpent
 
+                        val bankKey = bankFilterKey(cleanName)
                         AccountCard(
                             name = cleanName,
                             spent = accSpent,
                             income = accIncome,
-                            remaining = accRemaining
+                            remaining = accRemaining,
+                            selected = filterType == bankKey,
+                            // Tap to show only this bank's transactions; tap again to show all.
+                            onClick = { onFilterChange(if (filterType == bankKey) "ALL" else bankKey) }
                         )
                     }
                 }
@@ -601,19 +694,20 @@ private fun TransactionsFeed(
 
         item(key = "filters") {
             val reviewPending = visibleTransactions.count { it.needsReview }
+            val transferCount = visibleTransactions.count { isTransferItem(it) }
             val baseFilters = listOf(
                 "ALL" to "All · ${visibleTransactions.size}"
             ) + (if (reviewPending > 0 || filterType == "REVIEW") listOf("REVIEW" to "Needs review · $reviewPending") else emptyList()) + listOf(
                 "EXPENSE" to "Money out",
                 "INCOME" to "Money in"
-            )
+            ) + (if (transferCount > 0 || filterType == "TRANSFERS") listOf("TRANSFERS" to "Transfers · $transferCount") else emptyList())
             val bankFilters = deduplicatedAccounts.map { acc ->
                 val cleanName = normalizeBankName(acc.name)
                 val count = visibleTransactions.count {
                     normalizeBankName(it.accountName).equals(cleanName, ignoreCase = true) ||
                         normalizeBankName(it.source).equals(cleanName, ignoreCase = true)
                 }
-                "BANK_${cleanName.lowercase(Locale.ROOT)}" to "$cleanName · $count"
+                bankFilterKey(cleanName) to "$cleanName · $count"
             }
             LazyRow(
                 modifier = Modifier
@@ -638,16 +732,29 @@ private fun TransactionsFeed(
 
         if (dayGroups.isEmpty()) {
             item(key = "empty") {
-                EmptyState(
-                    icon = Icons.Outlined.ReceiptLong,
-                    title = "No transactions yet",
-                    body = "Spend alerts from your bank will appear here, or tap Add to log one.",
-                    modifier = Modifier.padding(
-                        start = ScreenPadding.horizontal,
-                        end = ScreenPadding.horizontal,
-                        top = Spacing.md
-                    )
+                val emptyModifier = Modifier.padding(
+                    start = ScreenPadding.horizontal,
+                    end = ScreenPadding.horizontal,
+                    top = Spacing.md
                 )
+                if (filtersActive && visibleTransactions.isNotEmpty()) {
+                    EmptyState(
+                        icon = Icons.Default.Search,
+                        title = "No matches",
+                        body = "No transactions match your search or filter.",
+                        actionLabel = "Clear filters",
+                        actionIcon = Icons.Default.Close,
+                        onAction = onClearFilters,
+                        modifier = emptyModifier
+                    )
+                } else {
+                    EmptyState(
+                        icon = Icons.Outlined.ReceiptLong,
+                        title = "No transactions yet",
+                        body = "Spend alerts from your bank will appear here, or tap Add to log one.",
+                        modifier = emptyModifier
+                    )
+                }
             }
         } else {
             dayGroups.forEach { group ->
@@ -739,12 +846,19 @@ private fun AccountCard(
     name: String,
     spent: Long,
     income: Long,
-    remaining: Long
+    remaining: Long,
+    selected: Boolean,
+    onClick: () -> Unit
 ) {
     val (_, brand) = ColorUtils.getBankBrandColors(name)
     val finance = SpendTrackerTheme.finance
     AppCard(
-        modifier = Modifier.width(184.dp),
+        modifier = Modifier
+            .width(184.dp)
+            .semantics { stateDescription = if (selected) "Filter on" else "Filter off" },
+        onClick = onClick,
+        containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerLow,
         verticalSpacing = Spacing.xs
     ) {
         Row(
@@ -788,5 +902,49 @@ private fun AccountCard(
                 softWrap = false
             )
         }
+    }
+}
+
+/** Filter-chip key for a bank, e.g. "BANK_monzo". */
+internal fun bankFilterKey(bankName: String): String =
+    "BANK_${normalizeBankName(bankName).trim().lowercase(Locale.ROOT)}"
+
+/** True when the feed is narrowed by a search query or a filter other than "ALL". */
+internal fun isFeedFilterActive(filterType: String, searchQuery: String): Boolean =
+    filterType != "ALL" || searchQuery.isNotBlank()
+
+/**
+ * Rows shown in the Activity feed for [filterType] ("ALL", "REVIEW", "EXPENSE", "INCOME",
+ * "TRANSFERS", "BANK_<name>") and [searchQuery]. Transfers are listed under ALL, TRANSFERS,
+ * REVIEW and bank filters but not under Money out / Money in.
+ */
+internal fun filterFeed(
+    transactions: List<TransactionItem>,
+    filterType: String,
+    searchQuery: String
+): List<TransactionItem> {
+    val byFilter = when {
+        filterType == "REVIEW" -> transactions.filter { it.needsReview }
+        filterType == "EXPENSE" -> transactions.filter {
+            it.type == TransactionType.EXPENSE && !it.excludeFromSpending && !isTransferItem(it)
+        }
+        filterType == "INCOME" -> transactions.filter {
+            it.type == TransactionType.INCOME && !it.excludeFromSpending && !isTransferItem(it)
+        }
+        filterType == "TRANSFERS" -> transactions.filter { isTransferItem(it) }
+        filterType.startsWith("BANK_") -> {
+            val bankKey = filterType.removePrefix("BANK_").trim().lowercase(Locale.ROOT)
+            transactions.filter {
+                normalizeBankName(it.accountName).lowercase(Locale.ROOT) == bankKey ||
+                    normalizeBankName(it.source).lowercase(Locale.ROOT) == bankKey
+            }
+        }
+        else -> transactions
+    }
+    val query = searchQuery.trim()
+    return if (query.isEmpty()) byFilter else byFilter.filter { tx ->
+        listOfNotNull(tx.merchant, tx.categoryName, tx.note, tx.source, tx.accountName)
+            .any { it.contains(query, ignoreCase = true) } ||
+            CurrencyUtils.minorToDecimalString(tx.amountMinor).contains(query)
     }
 }
