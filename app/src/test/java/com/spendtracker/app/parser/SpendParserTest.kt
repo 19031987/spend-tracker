@@ -345,4 +345,22 @@ class SpendParserTest {
             SpendParser.parse(hsbcPkg, null, "netflix.com £8.99 with HSBC Premier Credit Card \u2022\u20221737")!!.merchant
         )
     }
+
+    @Test
+    fun `PayPal purchase from company name uses the cleaned merchant`() {
+        // Regression: "Your purchase from UBER PAYMENTS UK LIMITED ..." showed Unknown Vendor.
+        val paypalPkg = "com.paypal.android.p2pmobile"
+        val text = "Your purchase from UBER PAYMENTS UK LIMITED You authorised a payment of £4.99. Tap for more details."
+        for (title in listOf(null, "PayPal")) {
+            val parsed = SpendParser.parse(paypalPkg, title, text)
+            assertNotNull(parsed)
+            assertEquals(SpendParser.TYPE_OUT, parsed!!.type)
+            assertEquals(4.99, parsed.amount, 0.001)
+            assertEquals("Uber", parsed.merchant)
+            assertEquals("Transport & Fuel", parsed.category)
+            assertFalse(parsed.merchantIsFallback)
+        }
+        assertEquals("Uber", SpendParser.parse("", "", text)!!.merchant)
+        assertEquals("Etsy", SpendParser.parse(paypalPkg, null, "Your order from Etsy Ltd. You paid £12.00.")!!.merchant)
+    }
 }
