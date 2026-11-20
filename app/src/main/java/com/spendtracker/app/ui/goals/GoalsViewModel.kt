@@ -7,6 +7,7 @@ import com.spendtracker.app.data.GoalEntity
 import com.spendtracker.app.data.PlanningRepository
 import com.spendtracker.app.domain.goals.GoalCalculator
 import com.spendtracker.app.domain.goals.GoalProgress
+import com.spendtracker.app.domain.todayFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -27,8 +28,27 @@ data class GoalsUiState(
     val totalSavedMinor: Long = 0L,
     val totalTargetMinor: Long = 0L,
     /** Raw (non-archived) entities, used by the edit sheet for starting amounts. */
-    val goalEntities: List<GoalEntity> = emptyList()
+    val goalEntities: List<GoalEntity> = emptyList(),
+    /** Archived goals, most recently created first (see [archivedGoalProgress]). */
+    val archivedGoals: List<GoalProgress> = emptyList()
 )
+
+/**
+ * Progress of the archived goals only (GoalCalculator.summary skips them), newest first,
+ * so they can be listed under "Archived" and restored.
+ */
+internal fun archivedGoalProgress(
+    goals: List<GoalEntity>,
+    contributions: List<GoalContributionEntity>,
+    today: LocalDate,
+    zone: ZoneId
+): List<GoalProgress> {
+    val byGoal: Map<Long, List<GoalContributionEntity>> = contributions.groupBy { it.goalId }
+    return goals
+        .filter { it.archived }
+        .sortedWith(compareByDescending<GoalEntity> { it.createdAt }.thenByDescending { it.id })
+        .map { goal -> GoalCalculator.progress(goal, byGoal[goal.id].orEmpty(), today, zone) }
+}
 
 class GoalsViewModel(private val planningRepository: PlanningRepository) : ViewModel() {
 
@@ -37,11 +57,12 @@ class GoalsViewModel(private val planningRepository: PlanningRepository) : ViewM
     val uiState: StateFlow<GoalsUiState> = combine(
         planningRepository.observeGoals(),
         planningRepository.observeContributions(),
-        selectedId
-    ) { goals: List<GoalEntity>, contributions: List<GoalContributionEntity>, selected: Long? ->
+        selectedId,
+        todayFlow()
+    ) { goals: List<GoalEntity>, contributions: List<GoalContributionEntity>, selected: Long?, today: LocalDate ->
         val zone: ZoneId = ZoneId.systemDefault()
         val progress: List<GoalProgress> =
-            GoalCalculator.summary(goals, contributions, LocalDate.now(zone), zone)
+            GoalCalculator.summary(goals, contributions, today, zone)
         val selectedGoal: GoalProgress? = progress.firstOrNull { it.goalId == selected }
         GoalsUiState(
             goals = progress,
@@ -56,7 +77,8 @@ class GoalsViewModel(private val planningRepository: PlanningRepository) : ViewM
             },
             totalSavedMinor = progress.sumOf { it.savedMinor },
             totalTargetMinor = progress.sumOf { it.targetMinor },
-            goalEntities = goals.filter { !it.archived }
+            goalEntities = goals.filter { !it.archived },
+            archivedGoals = archivedGoalProgress(goals, contributions, today, zone)
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GoalsUiState())
 
@@ -102,6 +124,15 @@ class GoalsViewModel(private val planningRepository: PlanningRepository) : ViewM
                 .firstOrNull { it.id == id } ?: return@launch
             planningRepository.updateGoal(existing.copy(archived = true))
             selectedId.update { current -> if (current == id) null else current }
+        }
+    }
+
+    /** Moves an archived goal back to the active list (sets archived = false). */
+    fun unarchiveGoal(id: Long) {
+        viewModelScope.launch {
+            val existing: GoalEntity = planningRepository.observeGoals().first()
+                .firstOrNull { it.id == id } ?: return@launch
+            planningRepository.updateGoal(existing.copy(archived = false))
         }
     }
 

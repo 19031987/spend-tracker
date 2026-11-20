@@ -77,6 +77,7 @@ abstract class CatalogDao {
     @Insert abstract suspend fun insertCategory(category: CategoryEntity)
     @Insert abstract suspend fun insertCategories(categories: List<CategoryEntity>)
     @Insert abstract suspend fun insertRule(rule: MerchantRuleEntity): Long
+    @Insert abstract suspend fun insertRules(rules: List<MerchantRuleEntity>)
     @Update abstract suspend fun updateGroup(group: CategoryGroupEntity)
     @Update abstract suspend fun updateCategory(category: CategoryEntity)
     @Update abstract suspend fun updateRule(rule: MerchantRuleEntity)

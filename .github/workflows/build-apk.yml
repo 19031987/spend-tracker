@@ -1,4 +1,4 @@
-name: Build SpendTracker Android APK & Play Store Bundle
+name: Build SpendTracker Android APK
 
 on:
   push:
@@ -13,8 +13,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      HAS_PLAY_KEY: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
 
     steps:
     - name: Checkout Code
@@ -49,25 +47,49 @@ jobs:
     - name: Prepare Release Signing Key
       env:
         RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        SECRET_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+        SECRET_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+        SECRET_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        # Commit that still contains the original (already public) keystore and its passwords.
+        LEGACY_KEY_COMMIT: f6ecb6058e327312deeed8c42f9fa01b2b7ff68d
       run: |
+        KEYSTORE="$RUNNER_TEMP/release.jks"
         if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
-          echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
-          echo "RELEASE_STORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-          echo "HAS_RELEASE_KEY=true" >> "$GITHUB_ENV"
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          STORE_PASSWORD="$SECRET_STORE_PASSWORD"
+          KEY_ALIAS="$SECRET_KEY_ALIAS"
+          KEY_PASSWORD="$SECRET_KEY_PASSWORD"
           echo "Release signing key loaded from secrets."
         else
-          echo "HAS_RELEASE_KEY=false" >> "$GITHUB_ENV"
-          echo "::warning::RELEASE_KEYSTORE_BASE64 secret is not set; the release build will be signed with the debug key (installable, but not accepted by Google Play). See docs/play-release-setup.md"
+          # No signing secrets: fall back to the original key, which is public in this repo's history,
+          # so releases keep installing over existing copies. Replace it with a private key via the
+          # RELEASE_* secrets (docs/release-setup.md).
+          git fetch --quiet --depth=1 origin "$LEGACY_KEY_COMMIT"
+          git show "$LEGACY_KEY_COMMIT:release-keystore.jks" > "$KEYSTORE"
+          OLD_GRADLE=$(git show "$LEGACY_KEY_COMMIT:app/build.gradle.kts")
+          STORE_PASSWORD=$(printf '%s\n' "$OLD_GRADLE" | sed -n 's/.*storePassword = "\(.*\)".*/\1/p' | head -n1)
+          KEY_ALIAS=$(printf '%s\n' "$OLD_GRADLE" | sed -n 's/.*keyAlias = "\(.*\)".*/\1/p' | head -n1)
+          KEY_PASSWORD=$(printf '%s\n' "$OLD_GRADLE" | sed -n 's/.*keyPassword = "\(.*\)".*/\1/p' | head -n1)
+          echo "::warning::RELEASE_* secrets not set; signing with the original key from git history (it is public). See docs/release-setup.md"
         fi
+        if [ ! -s "$KEYSTORE" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+          echo "::error::Signing key or passwords are empty; refusing to publish an unsigned release. See docs/release-setup.md"
+          exit 1
+        fi
+        echo "::add-mask::$STORE_PASSWORD"
+        echo "::add-mask::$KEY_PASSWORD"
+        {
+          echo "RELEASE_STORE_FILE=$KEYSTORE"
+          echo "RELEASE_STORE_PASSWORD=$STORE_PASSWORD"
+          echo "RELEASE_KEY_ALIAS=$KEY_ALIAS"
+          echo "RELEASE_KEY_PASSWORD=$KEY_PASSWORD"
+        } >> "$GITHUB_ENV"
 
-    - name: Build Signed APK & Play Store App Bundle (AAB)
+    - name: Build Signed APK
       env:
         ANDROID_HOME: /usr/local/lib/android/sdk
-        RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
-        RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-        RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
       run: |
-        if ! ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace > build.log 2>&1; then
+        if ! ./gradlew :app:assembleRelease --no-daemon --stacktrace > build.log 2>&1; then
           echo "=== GRADLE BUILD FAILED ==="
           grep -E "(e: |error:|FAILURE:|BUILD FAILED|Caused by:)" build.log | head -n 30 | while read -r line; do
             echo "::error::$line"
@@ -79,25 +101,56 @@ jobs:
         fi
         mkdir -p dist
         find app/build/outputs/ -name "*.apk" -exec cp -v {} dist/ \;
-        find app/build/outputs/ -name "*.aab" -exec cp -v {} dist/ \;
         ls -la dist/
 
-    - name: Upload Signed Release Files (APK and AAB)
+    - name: Upload Signed APK
       uses: actions/upload-artifact@v4
       with:
         name: SpendTracker-Release-Files
         path: dist/
         if-no-files-found: error
 
-    - name: Publish GitHub Release with APK & AAB
+    - name: Read app version
+      id: version
+      run: |
+        VERSION=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts | head -n1)
+        if [ -z "$VERSION" ]; then echo "::error::versionName not found in app/build.gradle.kts"; exit 1; fi
+        echo "name=$VERSION" >> "$GITHUB_OUTPUT"
+
+    - name: Publish GitHub Release with APK
       uses: softprops/action-gh-release@v2
       if: github.ref == 'refs/heads/main'
       with:
-        tag_name: v2.1.1
-        name: "SpendTracker Release v2.1.1 (Month-over-month comparison)"
-        # Marked as a pre-release when no signing secrets are configured (debug-signed build).
-        prerelease: ${{ env.HAS_RELEASE_KEY != 'true' }}
+        tag_name: v${{ steps.version.outputs.name }}
+        name: "SpendTracker Release v${{ steps.version.outputs.name }}"
         body: |
+          ### SpendTracker v2.3.0 - Accuracy and usability fixes
+          - 💷 **No more double counting** when PayPal or Google Wallet and your bank both report the same payment; an expense can no longer be merged into an unrelated incoming payment.
+          - ↔️ PayPal "You sent £x to …" is money out; Chase round-ups and moves to your own savers are no longer counted as spending.
+          - 🏷️ Better vendor names: card merchants like PAYPAL *NETFLIX, AMZN Mktp UK*…, UBER *TRIP, SumUp *Cafe Nero; HSBC salary credits; TfL; "Plc"/"Ltd" removed.
+          - 📊 Comparisons are like-for-like (this month so far vs the same days last month); no more sample figures when there is no data; one week start everywhere.
+          - 🔁 Refunds reduce spending instead of counting as income (tax refunds stay income); budget rollover, goal pace, cash-flow averages and "overdue" timing fixed.
+          - 👆 Tapping a category no longer silently creates a rule (you're asked); transfers are visible and editable; you can change a transaction's date; save/delete messages with Undo; Home rows and account cards are tappable; deletes ask for confirmation; open sheets survive rotation.
+
+          ### SpendTracker v2.2.3 - PayPal vendors
+          - 🏷️ PayPal alerts like "Your purchase from UBER PAYMENTS UK LIMITED" now record **Uber** as the vendor instead of Unknown Vendor; existing ones are fixed when the app opens.
+
+          ### SpendTracker v2.2.2 - Web-shop vendors
+          - 🏷️ Alerts like "your-saving.com £45.50 with HSBC Premier Credit Card" now record **your-saving.com** as the vendor instead of Unknown Vendor.
+          - 🔧 Existing transactions saved as Unknown Vendor from such alerts are fixed automatically when the app opens.
+
+          ### SpendTracker v2.2.1 - Edit recurring payments from any tab
+          - ✏️ Tap any payment in the **Upcoming** or **Calendar** tab of More → Recurring to edit or delete it (before, only the All tab opened the editor).
+
+          ### SpendTracker v2.2.0 - Recurring payments you add yourself, account & category management, backups
+          - 🔁 **Add recurring payments by hand** (More → Recurring → Add recurring): name, amount, how often, date, category, money in or out. Tap any tracked payment to edit it; ignored payments can be restored.
+          - 🎯 **Archived goals** are now visible and can be unarchived.
+          - 🏦 **Accounts** tab in Settings: add, rename and delete accounts. "Add transaction" remembers the account you last used.
+          - 🏷️ **Categories**: edit name, emoji, colour and group, restore hidden categories, rename or delete groups; merchant rules can be edited (Contains / Starts with / Equals).
+          - 💾 **Backup & restore**: save a full backup file (and CSV), then import it with Merge or Replace.
+          - 🎨 **Consistent look**: one style for cards, headers, empty states and buttons on every screen and sheet; dark mode fixes.
+          - 🐛 Amounts like "1,000" are now read as one thousand.
+
           ### SpendTracker v2.1.1 - Month-over-month comparison
           - 📈 **Compared with last month** card on Home: spending, income and savings this month-to-date against the same days of last month, plus the categories you're spending more and less on (green = better, red = worse).
           - 🏠 The month summary now says how much more or less you've spent than this time last month.
@@ -240,13 +293,3 @@ jobs:
         files: dist/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Upload to Google Play (Internal testing)
-      uses: r0adkll/upload-google-play@v1.1.3
-      if: github.ref == 'refs/heads/main' && env.HAS_PLAY_KEY == 'true' && env.HAS_RELEASE_KEY == 'true'
-      with:
-        serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-        packageName: com.spendtracker.app
-        releaseFiles: app/build/outputs/bundle/release/app-release.aab
-        track: internal
-        status: completed

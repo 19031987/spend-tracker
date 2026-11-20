@@ -27,8 +27,8 @@ android {
         applicationId = "com.spendtracker.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 29
-        versionName = "2.1.1"
+        versionCode = 34
+        versionName = "2.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -55,12 +55,8 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Release signing is optional. Without signing secrets (pull-request builds, or a main
-            // build before the RELEASE_* secrets exist) the release output is signed with the
-            // standard debug key so the APK still installs. Google Play rejects debug-signed bundles,
-            // so CI skips the Play upload in that case.
-            signingConfig = if (releaseStoreFile != null) signingConfigs.getByName("release")
-                            else signingConfigs.getByName("debug")
+            // Without signing secrets (e.g. pull-request builds) the release output is unsigned.
+            signingConfig = if (releaseStoreFile != null) signingConfigs.getByName("release") else null
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

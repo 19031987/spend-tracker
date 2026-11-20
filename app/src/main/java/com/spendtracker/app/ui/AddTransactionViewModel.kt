@@ -18,6 +18,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -43,6 +46,19 @@ class AddTransactionViewModel(private val repository: SpendRepository) : ViewMod
 
     val history: StateFlow<List<HistoryEntry>> = repository.observeHistory()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Account of the transaction added in this session, if any. */
+    private val lastSubmittedAccountId = MutableStateFlow<Long?>(null)
+
+    /**
+     * Account the Add sheet preselects: the one last used in this session, otherwise the
+     * account of the most recent transaction, otherwise null (sheet falls back to the first).
+     */
+    val defaultAccountId: StateFlow<Long?> = combine(
+        lastSubmittedAccountId,
+        repository.observeTransactions().map { txs -> txs.firstOrNull()?.accountId }
+    ) { submitted, mostRecent -> submitted ?: mostRecent }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     private val _state = MutableStateFlow(AddTransactionUiState())
     val state: StateFlow<AddTransactionUiState> = _state.asStateFlow()
@@ -80,6 +96,7 @@ class AddTransactionViewModel(private val repository: SpendRepository) : ViewMod
     ) {
         viewModelScope.launch {
             try {
+                val before = repository.observeCategories().first().map { it.key }.toSet()
                 repository.createCategoryWithRule(
                     name = name,
                     groupId = groupId,
@@ -89,20 +106,10 @@ class AddTransactionViewModel(private val repository: SpendRepository) : ViewMod
                     type = type,
                     alwaysMatchMerchant = ruleMerchant
                 )
-                // Retrieve updated category
-                val updatedCats = repository.observeCategories()
-                // Wait briefly for insertion or synthesize CategoryEntity
-                val fallbackCat = CategoryEntity(
-                    key = "c_new",
-                    groupId = groupId ?: 1L,
-                    name = name,
-                    emoji = emoji,
-                    colorHex = colorHex,
-                    type = type,
-                    isBuiltIn = false,
-                    isHidden = false
-                )
-                onComplete(fallbackCat)
+                // The repository doesn't return the new key: find the stored row so the caller
+                // can select it (never a synthetic key that doesn't exist in the database).
+                findCreatedCategory(repository.observeCategories().first(), before, name, type)
+                    ?.let(onComplete)
             } catch (e: Exception) {
                 _state.value = AddTransactionUiState(error = "Could not create category")
             }
@@ -115,6 +122,7 @@ class AddTransactionViewModel(private val repository: SpendRepository) : ViewMod
         viewModelScope.launch {
             try {
                 repository.add(transaction)
+                (transaction as? NewTransaction.Entry)?.let { lastSubmittedAccountId.value = it.accountId }
                 _state.value = AddTransactionUiState()
                 onSuccess()
             } catch (e: IllegalArgumentException) {

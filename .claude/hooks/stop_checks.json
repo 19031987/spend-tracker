@@ -1,0 +1,5 @@
+{
+  "checks": [
+    {"name": "python mirror tests", "when": "^test_.*\\.py$|SpendParser\\.kt$|CategorizationEngine\\.kt$|AccountEntity\\.kt$|SpendRepository\\.kt$|^generate_simulator\\.py$", "run": "python -m pytest -q -x -p no:cacheprovider test_spend_parser.py test_bank_deduplication.py test_categorization_engine.py", "timeout": 60}
+  ]
+}

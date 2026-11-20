@@ -7,11 +7,14 @@ import com.spendtracker.app.data.PlanningRepository
 import com.spendtracker.app.data.RecurringItemEntity
 import com.spendtracker.app.data.SpendRepository
 import com.spendtracker.app.domain.TransactionItem
+import com.spendtracker.app.domain.recurring.ManualRecurring
 import com.spendtracker.app.domain.recurring.OccurrenceStatus
 import com.spendtracker.app.domain.recurring.RecurringCandidate
 import com.spendtracker.app.domain.recurring.RecurringDetector
+import com.spendtracker.app.domain.recurring.RecurringDraft
 import com.spendtracker.app.domain.recurring.RecurringFrequency
 import com.spendtracker.app.domain.recurring.RecurringOccurrence
+import com.spendtracker.app.domain.recurring.RecurringSaveDecision
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -59,6 +62,8 @@ data class RecurringUiState(
     val upcoming: List<RecurringOccurrence> = emptyList(),
     val summary: RecurringMonthSummary = RecurringMonthSummary(YearMonth.now()),
     val suggestions: List<RecurringCandidate> = emptyList(),
+    /** Items the user ignored or stopped tracking, sorted by name. */
+    val ignored: List<RecurringItemEntity> = emptyList(),
     val categories: Map<String, CategoryEntity> = emptyMap()
 )
 
@@ -158,6 +163,9 @@ class RecurringViewModel(
             upcoming = upcoming,
             summary = summary,
             suggestions = suggestions,
+            ignored = stored
+                .filter { it.status == STATUS_IGNORED }
+                .sortedBy { it.displayName.lowercase() },
             categories = categories.associateBy { it.key }
         )
     }
@@ -186,20 +194,74 @@ class RecurringViewModel(
         persistCandidate(candidate, STATUS_IGNORED)
     }
 
+    /** Moves an approved item to the Ignored list (it can be restored from there). */
     fun stopTracking(id: Long) {
         viewModelScope.launch {
             planningRepository.setRecurringStatus(id, STATUS_IGNORED)
         }
     }
 
-    fun updateItem(id: Long, amountMinor: Long, frequency: RecurringFrequency) {
-        val existing: RecurringItemEntity = uiState.value.items
-            .firstOrNull { it.item.id == id }?.item ?: return
+    /** Ignored item back to tracked. */
+    fun restore(id: Long) {
         viewModelScope.launch {
-            planningRepository.saveRecurring(
-                existing.copy(amountMinor = amountMinor, frequency = frequency.name)
-            )
+            planningRepository.setRecurringStatus(id, STATUS_APPROVED)
         }
+    }
+
+    /** Deletes the row, so the payment can be detected and suggested again. */
+    fun delete(id: Long) {
+        viewModelScope.launch {
+            planningRepository.deleteRecurring(id)
+        }
+    }
+
+    /**
+     * Adds a recurring payment entered by hand. Returns an error message to show (nothing saved),
+     * or null when the item is being saved.
+     */
+    fun addManual(draft: RecurringDraft): String? {
+        val zone: ZoneId = ZoneId.systemDefault()
+        val decision: RecurringSaveDecision = ManualRecurring.decideAdd(
+            draft = draft,
+            existing = storedItems(),
+            zone = zone,
+            today = LocalDate.now(zone),
+            nowMillis = System.currentTimeMillis()
+        )
+        return persist(decision)
+    }
+
+    /**
+     * Saves an edit of item [id] (name, amount, in/out, frequency, date, category). Returns an
+     * error message to show (nothing saved), or null when the item is being saved.
+     */
+    fun updateItem(id: Long, draft: RecurringDraft): String? {
+        val decision: RecurringSaveDecision = ManualRecurring.decideEdit(
+            id = id,
+            draft = draft,
+            existing = storedItems(),
+            zone = ZoneId.systemDefault()
+        )
+        return persist(decision)
+    }
+
+    private fun storedItems(): List<RecurringItemEntity> {
+        val state: RecurringUiState = uiState.value
+        return state.items.map { it.item } + state.ignored
+    }
+
+    private fun persist(decision: RecurringSaveDecision): String? {
+        when (decision) {
+            is RecurringSaveDecision.Reject -> return decision.message
+            // decideAdd guarantees no other row owns the key, so the REPLACE insert never clobbers one.
+            is RecurringSaveDecision.Insert -> viewModelScope.launch {
+                planningRepository.saveRecurring(decision.entity)
+            }
+            is RecurringSaveDecision.Update -> viewModelScope.launch {
+                planningRepository.updateRecurring(decision.entity)
+            }
+        }
+        return null
     }
 
     private fun persistCandidate(candidate: RecurringCandidate, status: String) {
@@ -221,7 +283,7 @@ class RecurringViewModel(
     }
 
     private companion object {
-        const val STATUS_APPROVED: String = "APPROVED"
-        const val STATUS_IGNORED: String = "IGNORED"
+        const val STATUS_APPROVED: String = ManualRecurring.STATUS_APPROVED
+        const val STATUS_IGNORED: String = ManualRecurring.STATUS_IGNORED
     }
 }

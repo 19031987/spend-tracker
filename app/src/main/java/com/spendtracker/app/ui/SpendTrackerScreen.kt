@@ -56,8 +56,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CompareArrows
 import androidx.compose.material.icons.filled.Insights
@@ -68,23 +66,17 @@ import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -100,8 +92,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
@@ -113,13 +103,33 @@ import com.spendtracker.app.AppContainer
 import com.spendtracker.app.data.TransactionType
 import com.spendtracker.app.data.normalizeBankName
 import com.spendtracker.app.domain.TransactionItem
-import com.spendtracker.app.ui.components.StatusPill
+import com.spendtracker.app.ui.components.AppCard
+import com.spendtracker.app.ui.components.EmptyState
+import com.spendtracker.app.ui.components.PrimaryButton
+import com.spendtracker.app.ui.components.SectionHeader
 import com.spendtracker.app.ui.components.TransactionRowItem
 import com.spendtracker.app.ui.components.groupTransactionsByDay
+import com.spendtracker.app.ui.dashboard.MonthSummaryHeroCard
+import com.spendtracker.app.ui.theme.ScreenPadding
+import com.spendtracker.app.ui.theme.Spacing
 import com.spendtracker.app.ui.theme.SpendTrackerTheme
 import com.spendtracker.app.ui.util.ColorUtils
 import com.spendtracker.app.ui.util.CurrencyUtils
 import com.spendtracker.app.ui.util.DateUtils
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import com.spendtracker.app.domain.cashflow.BreakdownDimension
+import com.spendtracker.app.domain.cashflow.BreakdownRow
+import com.spendtracker.app.ui.components.isTransferItem
+import com.spendtracker.app.ui.components.isTransferDestinationLeg
+import com.spendtracker.app.domain.isIncome
+import com.spendtracker.app.domain.netSpendMinor
+import java.time.YearMonth
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -143,6 +153,7 @@ fun SpendTrackerScreen(container: AppContainer) {
     val accounts by transactionsVm.accounts.collectAsStateWithLifecycle()
     val groups by transactionsVm.groups.collectAsStateWithLifecycle()
     val categories by transactionsVm.categories.collectAsStateWithLifecycle()
+    val defaultAccountId by addVm.defaultAccountId.collectAsStateWithLifecycle()
     val transactionsList by transactionsVm.transactions.collectAsStateWithLifecycle()
     val addState by addVm.state.collectAsStateWithLifecycle()
 
@@ -153,7 +164,13 @@ fun SpendTrackerScreen(container: AppContainer) {
     var showSheet by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showCategoryCreateSheet by rememberSaveable { mutableStateOf(false) }
-    var editingTransaction by remember { mutableStateOf<TransactionItem?>(null) }
+    // Ids (not objects) so open sheets survive rotation; the item is looked up from state.
+    var editingTransactionId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var editingFallback by remember { mutableStateOf<TransactionItem?>(null) }
+    fun openEdit(tx: TransactionItem) {
+        editingFallback = tx
+        editingTransactionId = tx.id
+    }
     var filterType by rememberSaveable { mutableStateOf("ALL") }
 
     // Check Notification Listener Permission
@@ -171,7 +188,48 @@ fun SpendTrackerScreen(container: AppContainer) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    var quickCategoryTx by remember { mutableStateOf<TransactionItem?>(null) }
+    var quickCategoryTxId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var quickCategoryFallback by remember { mutableStateOf<TransactionItem?>(null) }
+    fun openQuickCategory(tx: TransactionItem) {
+        quickCategoryFallback = tx
+        quickCategoryTxId = tx.id
+    }
+    val editingTransaction: TransactionItem? = editingTransactionId?.let { id ->
+        transactionsList.firstOrNull { it.id == id } ?: editingFallback?.takeIf { it.id == id }
+    }
+    val quickCategoryTx: TransactionItem? = quickCategoryTxId?.let { id ->
+        transactionsList.firstOrNull { it.id == id } ?: quickCategoryFallback?.takeIf { it.id == id }
+    }
+    // Recurring item to open in its edit sheet when Recurring is opened from a Home "Upcoming" row.
+    var recurringEditId by rememberSaveable { mutableStateOf<Long?>(null) }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(transactionsVm) {
+        transactionsVm.events.collect { event ->
+            when (event) {
+                is TransactionEvent.Deleted -> {
+                    val result = snackbarHostState.showSnackbar(
+                        message = event.message,
+                        actionLabel = if (event.restorable) "Undo" else null,
+                        duration = SnackbarDuration.Short
+                    )
+                    if (result == SnackbarResult.ActionPerformed) transactionsVm.undoDelete(event.item)
+                }
+                is TransactionEvent.CategoryChanged -> {
+                    val result = snackbarHostState.showSnackbar(
+                        message = event.message,
+                        actionLabel = "Always",
+                        withDismissAction = true,
+                        duration = SnackbarDuration.Long
+                    )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        transactionsVm.alwaysCategorise(event.merchant, event.categoryKey, event.categoryName)
+                    }
+                }
+                else -> snackbarHostState.showSnackbar(event.message, duration = SnackbarDuration.Short)
+            }
+        }
+    }
 
     val deduplicatedAccounts = remember(accounts) {
         accounts
@@ -204,6 +262,7 @@ fun SpendTrackerScreen(container: AppContainer) {
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = MaterialTheme.colorScheme.surface,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             HeaderBar(
                 title = destination?.title ?: currentTab.title,
@@ -285,12 +344,17 @@ fun SpendTrackerScreen(container: AppContainer) {
             val contentModifier = Modifier.weight(1f)
             if (destination != null) {
                 when (destination) {
-                    MoreDestination.RECURRING -> RecurringRoute(viewModel = recurringVm, modifier = contentModifier)
+                    MoreDestination.RECURRING -> RecurringRoute(
+                        viewModel = recurringVm,
+                        modifier = contentModifier,
+                        initialEditItemId = recurringEditId,
+                        onInitialEditConsumed = { recurringEditId = null }
+                    )
                     MoreDestination.GOALS -> GoalsRoute(viewModel = goalsVm, modifier = contentModifier)
                     MoreDestination.REVIEW -> ReviewRoute(
                         viewModel = reviewVm,
-                        onChangeCategory = { quickCategoryTx = it },
-                        onOpenTransaction = { editingTransaction = it },
+                        onChangeCategory = { openQuickCategory(it) },
+                        onOpenTransaction = { openEdit(it) },
                         modifier = contentModifier
                     )
                     MoreDestination.INSIGHTS -> AnalyticsScreen(
@@ -314,9 +378,35 @@ fun SpendTrackerScreen(container: AppContainer) {
                         onOpenGoals = { open(MoreDestination.GOALS) },
                         onOpenCashFlow = { openTab(MainTab.CASH_FLOW) },
                         onOpenTransactions = { openTab(MainTab.TRANSACTIONS) },
-                        onOpenTransaction = { editingTransaction = it },
-                        onCategoryClick = { quickCategoryTx = it },
-                        modifier = contentModifier
+                        onOpenTransaction = { openEdit(it) },
+                        onCategoryClick = { openQuickCategory(it) },
+                        modifier = contentModifier,
+                        onOpenRecurringItem = { itemId ->
+                            recurringEditId = itemId
+                            open(MoreDestination.RECURRING)
+                        },
+                        onOpenGoal = { goalId ->
+                            goalsVm.openGoal(goalId)
+                            open(MoreDestination.GOALS)
+                        },
+                        onOpenTopCategory = { category ->
+                            // Cash flow drill-down for this category in the current month.
+                            cashFlowVm.selectMonth(YearMonth.now())
+                            cashFlowVm.setDimension(BreakdownDimension.CATEGORY)
+                            cashFlowVm.setShowIncome(false)
+                            cashFlowVm.openBreakdown(
+                                BreakdownRow(
+                                    key = category.categoryKey,
+                                    label = category.name,
+                                    emoji = category.emoji,
+                                    colorHex = category.colorHex,
+                                    amountMinor = category.amountMinor,
+                                    share = category.share,
+                                    transactionCount = 0
+                                )
+                            )
+                            openTab(MainTab.CASH_FLOW)
+                        }
                     )
                     MainTab.TRANSACTIONS -> TransactionsFeed(
                         transactions = transactionsList,
@@ -325,13 +415,23 @@ fun SpendTrackerScreen(container: AppContainer) {
                         onFilterChange = { filterType = it },
                         searchQuery = searchQuery,
                         onSearchChange = { searchQuery = it },
-                        onTransactionClick = { editingTransaction = it },
-                        onCategoryPillClick = { quickCategoryTx = it },
-                        // Leave room for the FAB so it never covers the last row.
-                        contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp),
+                        onClearFilters = {
+                            searchQuery = ""
+                            filterType = "ALL"
+                        },
+                        onTransactionClick = { openEdit(it) },
+                        onCategoryPillClick = { openQuickCategory(it) },
+                        // No horizontal padding: TransactionRowItem insets itself by 16dp, so the
+                        // other items add ScreenPadding.horizontal themselves. Bottom leaves FAB room.
+                        contentPadding = PaddingValues(top = ScreenPadding.top, bottom = ScreenPadding.bottom),
                         modifier = contentModifier
                     )
-                    MainTab.CASH_FLOW -> CashFlowRoute(viewModel = cashFlowVm, modifier = contentModifier)
+                    MainTab.CASH_FLOW -> CashFlowRoute(
+                        viewModel = cashFlowVm,
+                        modifier = contentModifier,
+                        onOpenTransaction = { openEdit(it) },
+                        onOpenCategory = { openQuickCategory(it) }
+                    )
                     MainTab.BUDGET -> BudgetRoute(viewModel = budgetVm, modifier = contentModifier)
                     MainTab.MORE -> MoreScreen(
                         reviewCount = reviewCount,
@@ -347,6 +447,7 @@ fun SpendTrackerScreen(container: AppContainer) {
     if (showSheet) {
         AddTransactionSheet(
             accounts = accounts,
+            defaultAccountId = defaultAccountId,
             groups = groups,
             categories = categories,
             isSaving = addState.isSaving,
@@ -356,8 +457,8 @@ fun SpendTrackerScreen(container: AppContainer) {
                 showSheet = false
             },
             onEvaluateCategory = { merchant -> addVm.evaluateCategory(merchant) },
-            onCreateCategory = { name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant ->
-                addVm.createCategory(name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant) { }
+            onCreateCategory = { name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant, onCreated ->
+                addVm.createCategory(name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant, onCreated)
             },
             onSubmit = { tx -> addVm.submit(tx) { showSheet = false } }
         )
@@ -369,8 +470,8 @@ fun SpendTrackerScreen(container: AppContainer) {
             accounts = accounts,
             groups = groups,
             categories = categories,
-            onDismiss = { editingTransaction = null },
-            onSave = { id, type, accountId, destinationAccountId, amountMinor, categoryKey, merchant, note, excludeFromSpending, ruleMerchant ->
+            onDismiss = { editingTransactionId = null },
+            onSave = { id, type, accountId, destinationAccountId, amountMinor, categoryKey, merchant, note, excludeFromSpending, ruleMerchant, timestamp ->
                 transactionsVm.updateTransaction(
                     id = id,
                     type = type,
@@ -381,15 +482,19 @@ fun SpendTrackerScreen(container: AppContainer) {
                     merchant = merchant,
                     note = note,
                     excludeFromSpending = excludeFromSpending,
-                    ruleMerchant = ruleMerchant
+                    ruleMerchant = ruleMerchant,
+                    timestamp = timestamp
                 ) {
-                    editingTransaction = null
+                    editingTransactionId = null
                 }
             },
             onDelete = { id ->
                 transactionsVm.deleteTransaction(id) {
-                    editingTransaction = null
+                    editingTransactionId = null
                 }
+            },
+            onCreateCategory = { name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant, onCreated ->
+                transactionsVm.createCategory(name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant, onCreated)
             }
         )
     }
@@ -400,15 +505,21 @@ fun SpendTrackerScreen(container: AppContainer) {
             categories = categories,
             selectedCategoryKey = tx.categoryKey,
             currentMerchant = tx.merchant?.takeIf { it.isNotEmpty() },
-            transactionType = tx.type,
-            onDismiss = { quickCategoryTx = null },
+            // Transfers have no pickable categories of their own: offer spending ones to re-file it.
+            transactionType = if (tx.type == TransactionType.TRANSFER) TransactionType.EXPENSE else tx.type,
+            onDismiss = { quickCategoryTxId = null },
             onCategorySelected = { cat ->
-                transactionsVm.quickSetCategory(tx.id, cat.key, tx.merchant?.takeIf { it.isNotEmpty() })
-                quickCategoryTx = null
+                // Only this transaction; a merchant rule is offered in a snackbar, never created silently.
+                transactionsVm.quickSetCategory(tx.id, cat.key)
+                quickCategoryTxId = null
             },
             onCreateCategory = { name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant ->
-                settingsVm.addCategory(name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant)
-                quickCategoryTx = null
+                val txId = tx.id
+                transactionsVm.createCategory(name, groupId, newGroupName, emoji, colorHex, type, ruleMerchant) { created ->
+                    // Apply the new category to the transaction the picker was opened for.
+                    transactionsVm.quickSetCategory(txId, created.key, offerRule = ruleMerchant == null)
+                }
+                quickCategoryTxId = null
             }
         )
     }
@@ -450,16 +561,19 @@ private fun TransactionsFeed(
     onFilterChange: (String) -> Unit,
     searchQuery: String,
     onSearchChange: (String) -> Unit,
+    onClearFilters: () -> Unit,
     onTransactionClick: (TransactionItem) -> Unit,
     onCategoryPillClick: (TransactionItem) -> Unit,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier
 ) {
-    // Exclude internal transfers and excludeFromSpending rows from spending/income totals
-    val visibleTransactions = remember(transactions) {
-        transactions.filter { it.type != TransactionType.TRANSFER && it.categoryKey != "INTERNAL_TRANSFER" }
+    // Every row is listed (transfers too, so mis-filed payments can be found and fixed), but
+    // transfers and excludeFromSpending rows never count towards spending/income totals.
+    // A transfer pair has two rows (one per account); list it once, by its sending leg.
+    val visibleTransactions = remember(transactions) { transactions.filterNot { isTransferDestinationLeg(it) } }
+    val nonTransferTxs = remember(transactions) {
+        transactions.filter { !it.excludeFromSpending && !isTransferItem(it) }
     }
-    val nonTransferTxs = visibleTransactions.filter { !it.excludeFromSpending }
 
     // Start of Current Month: spending resets every month, while salary & balance carry over
     val startOfMonth = remember { DateUtils.getStartOfMonthTimestamp() }
@@ -469,11 +583,12 @@ private fun TransactionsFeed(
     val currentMonthTxs = remember(nonTransferTxs, startOfMonth) {
         nonTransferTxs.filter { it.timestamp >= startOfMonth }
     }
+    // Same refund rule as Home/Insights: a refund is negative spending, not income (net is unchanged).
     val monthSpent = remember(currentMonthTxs) {
-        currentMonthTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
+        currentMonthTxs.sumOf { it.netSpendMinor() }
     }
     val monthIncome = remember(currentMonthTxs) {
-        currentMonthTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
+        currentMonthTxs.filter { it.isIncome() }.sumOf { it.amountMinor }
     }
 
     // Carry Over Salary & Balance: unspent salary/funds from previous months
@@ -481,10 +596,10 @@ private fun TransactionsFeed(
         nonTransferTxs.filter { it.timestamp < startOfMonth }
     }
     val priorIncome = remember(priorTxs) {
-        priorTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
+        priorTxs.filter { it.isIncome() }.sumOf { it.amountMinor }
     }
     val priorSpent = remember(priorTxs) {
-        priorTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
+        priorTxs.sumOf { it.netSpendMinor() }
     }
     val carriedOverSalary = priorIncome - priorSpent
 
@@ -493,51 +608,45 @@ private fun TransactionsFeed(
 
     val deduplicatedAccounts = accounts
 
-    val byFilter = when {
-        filterType == "REVIEW" -> visibleTransactions.filter { it.needsReview }
-        filterType == "EXPENSE" -> visibleTransactions.filter { it.type == TransactionType.EXPENSE && !it.excludeFromSpending }
-        filterType == "INCOME" -> visibleTransactions.filter { it.type == TransactionType.INCOME && !it.excludeFromSpending }
-        filterType.startsWith("BANK_") -> {
-            val bankKey = filterType.removePrefix("BANK_").trim().lowercase(Locale.ROOT)
-            visibleTransactions.filter {
-                normalizeBankName(it.accountName).lowercase(Locale.ROOT) == bankKey ||
-                normalizeBankName(it.source).lowercase(Locale.ROOT) == bankKey
-            }
-        }
-        else -> visibleTransactions
-    }
-    val query = searchQuery.trim()
-    val filtered = if (query.isEmpty()) byFilter else byFilter.filter { tx ->
-        listOfNotNull(tx.merchant, tx.categoryName, tx.note, tx.source, tx.accountName)
-            .any { it.contains(query, ignoreCase = true) } ||
-            CurrencyUtils.minorToDecimalString(tx.amountMinor).contains(query)
-    }
+    val filtered = filterFeed(visibleTransactions, filterType, searchQuery)
+    val filtersActive = isFeedFilterActive(filterType, searchQuery)
 
     val dayGroups = remember(filtered) { groupTransactionsByDay(filtered) }
 
     LazyColumn(
         modifier = modifier.fillMaxWidth(),
         contentPadding = contentPadding,
+        // spacedBy(0): rows of one day form a single grouped block; sections space themselves.
         verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
         item(key = "hero") {
-            MonthSummaryCard(
+            MonthSummaryHeroCard(
                 monthName = currentMonthName,
-                monthSpent = monthSpent,
-                monthIncome = monthIncome,
-                carriedOver = carriedOverSalary,
-                netRemaining = netRemaining,
-                modifier = Modifier.padding(horizontal = 16.dp)
+                spentMinor = monthSpent,
+                incomeMinor = monthIncome,
+                netMinor = netRemaining,
+                carriedOverMinor = carriedOverSalary,
+                modifier = Modifier.padding(horizontal = ScreenPadding.horizontal)
             )
         }
 
         if (deduplicatedAccounts.isNotEmpty()) {
-            item(key = "accounts_header") { SectionHeader("Accounts") }
+            item(key = "accounts_header") {
+                SectionHeader(
+                    title = "Accounts",
+                    modifier = Modifier.padding(
+                        start = ScreenPadding.horizontal,
+                        end = ScreenPadding.horizontal,
+                        top = Spacing.xl,
+                        bottom = Spacing.md
+                    )
+                )
+            }
             item(key = "accounts") {
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    contentPadding = PaddingValues(horizontal = ScreenPadding.horizontal),
+                    horizontalArrangement = Arrangement.spacedBy(ScreenPadding.listItemSpacing)
                 ) {
                     items(deduplicatedAccounts, key = { it.id }) { acc ->
                         val cleanName = normalizeBankName(acc.name)
@@ -546,17 +655,21 @@ private fun TransactionsFeed(
                                 normalizeBankName(it.accountName).equals(cleanName, ignoreCase = true)
                         }
                         val accCurrentTxs = accTxs.filter { it.timestamp >= startOfMonth }
-                        val accSpent = accCurrentTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
-                        val accIncome = accCurrentTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
-                        val accPriorIncome = accTxs.filter { it.timestamp < startOfMonth && it.type == TransactionType.INCOME }.sumOf { it.amountMinor }
-                        val accPriorSpent = accTxs.filter { it.timestamp < startOfMonth && it.type == TransactionType.EXPENSE }.sumOf { it.amountMinor }
+                        val accSpent = accCurrentTxs.sumOf { it.netSpendMinor() }
+                        val accIncome = accCurrentTxs.filter { it.isIncome() }.sumOf { it.amountMinor }
+                        val accPriorIncome = accTxs.filter { it.timestamp < startOfMonth && it.isIncome() }.sumOf { it.amountMinor }
+                        val accPriorSpent = accTxs.filter { it.timestamp < startOfMonth }.sumOf { it.netSpendMinor() }
                         val accRemaining = (accPriorIncome - accPriorSpent) + accIncome - accSpent
 
+                        val bankKey = bankFilterKey(cleanName)
                         AccountCard(
                             name = cleanName,
                             spent = accSpent,
                             income = accIncome,
-                            remaining = accRemaining
+                            remaining = accRemaining,
+                            selected = filterType == bankKey,
+                            // Tap to show only this bank's transactions; tap again to show all.
+                            onClick = { onFilterChange(if (filterType == bankKey) "ALL" else bankKey) }
                         )
                     }
                 }
@@ -569,7 +682,7 @@ private fun TransactionsFeed(
                 onValueChange = onSearchChange,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, top = 20.dp),
+                    .padding(start = ScreenPadding.horizontal, end = ScreenPadding.horizontal, top = Spacing.xl),
                 placeholder = { Text("Search merchant, category, note or amount") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
@@ -586,26 +699,27 @@ private fun TransactionsFeed(
 
         item(key = "filters") {
             val reviewPending = visibleTransactions.count { it.needsReview }
+            val transferCount = visibleTransactions.count { isTransferItem(it) }
             val baseFilters = listOf(
                 "ALL" to "All · ${visibleTransactions.size}"
             ) + (if (reviewPending > 0 || filterType == "REVIEW") listOf("REVIEW" to "Needs review · $reviewPending") else emptyList()) + listOf(
                 "EXPENSE" to "Money out",
                 "INCOME" to "Money in"
-            )
+            ) + (if (transferCount > 0 || filterType == "TRANSFERS") listOf("TRANSFERS" to "Transfers · $transferCount") else emptyList())
             val bankFilters = deduplicatedAccounts.map { acc ->
                 val cleanName = normalizeBankName(acc.name)
                 val count = visibleTransactions.count {
                     normalizeBankName(it.accountName).equals(cleanName, ignoreCase = true) ||
                         normalizeBankName(it.source).equals(cleanName, ignoreCase = true)
                 }
-                "BANK_${cleanName.lowercase(Locale.ROOT)}" to "$cleanName · $count"
+                bankFilterKey(cleanName) to "$cleanName · $count"
             }
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 20.dp, bottom = 4.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(top = Spacing.md, bottom = Spacing.xs),
+                contentPadding = PaddingValues(horizontal = ScreenPadding.horizontal),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
             ) {
                 items(baseFilters + bankFilters, key = { it.first }) { (key, label) ->
                     val selected = filterType == key
@@ -622,14 +736,44 @@ private fun TransactionsFeed(
         }
 
         if (dayGroups.isEmpty()) {
-            item(key = "empty") { EmptyTransactions() }
+            item(key = "empty") {
+                val emptyModifier = Modifier.padding(
+                    start = ScreenPadding.horizontal,
+                    end = ScreenPadding.horizontal,
+                    top = Spacing.md
+                )
+                if (filtersActive && visibleTransactions.isNotEmpty()) {
+                    EmptyState(
+                        icon = Icons.Default.Search,
+                        title = "No matches",
+                        body = "No transactions match your search or filter.",
+                        actionLabel = "Clear filters",
+                        actionIcon = Icons.Default.Close,
+                        onAction = onClearFilters,
+                        modifier = emptyModifier
+                    )
+                } else {
+                    EmptyState(
+                        icon = Icons.Outlined.ReceiptLong,
+                        title = "No transactions yet",
+                        body = "Spend alerts from your bank will appear here, or tap Add to log one.",
+                        modifier = emptyModifier
+                    )
+                }
+            }
         } else {
             dayGroups.forEach { group ->
                 item(key = "day_header_${group.dayKey}") {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp),
+                            // 16dp list grid + 4dp text indent, matching SectionHeader.
+                            .padding(
+                                start = ScreenPadding.horizontal + Spacing.xs,
+                                end = ScreenPadding.horizontal + Spacing.xs,
+                                top = Spacing.xl,
+                                bottom = Spacing.sm
+                            ),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -677,33 +821,17 @@ private enum class MainTab(
 }
 
 @Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 12.dp)
-    )
-}
-
-@Composable
 private fun NotificationAccessBanner(onEnable: () -> Unit) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-        )
+    AppCard(
+        modifier = Modifier.padding(horizontal = ScreenPadding.horizontal, vertical = Spacing.sm),
+        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        contentPadding = Spacing.md
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
             Icon(Icons.Outlined.NotificationsActive, contentDescription = null)
             Column(modifier = Modifier.weight(1f)) {
@@ -713,152 +841,9 @@ private fun NotificationAccessBanner(onEnable: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            TextButton(onClick = onEnable) { Text("Enable") }
+            PrimaryButton(text = "Enable", onClick = onEnable)
         }
     }
-}
-
-/**
- * Hero card: this month's spend as the headline figure, with money in / out and
- * the running balance (prior months' carry-over + this month's net) beneath it.
- */
-@Composable
-private fun MonthSummaryCard(
-    monthName: String,
-    monthSpent: Long,
-    monthIncome: Long,
-    carriedOver: Long,
-    netRemaining: Long,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        )
-    ) {
-        Column(modifier = Modifier.padding(24.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Spent in $monthName",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                )
-                StatusPill(isPositive = netRemaining >= 0, amountMinor = kotlin.math.abs(netRemaining))
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // Full-width, single line, auto-shrinking so large amounts never truncate.
-            AutoSizeAmount(
-                text = CurrencyUtils.formatMinor(monthSpent),
-                style = MaterialTheme.typography.displaySmall
-            )
-
-            Spacer(Modifier.height(20.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                SummaryStat(
-                    icon = Icons.Default.ArrowDownward,
-                    label = "Money in",
-                    value = CurrencyUtils.formatMinor(monthIncome),
-                    modifier = Modifier.weight(1f)
-                )
-                SummaryStat(
-                    icon = Icons.Default.ArrowUpward,
-                    label = "Money out",
-                    value = CurrencyUtils.formatMinor(monthSpent),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            if (carriedOver != 0L) {
-                Spacer(Modifier.height(16.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.12f))
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "Carried over from earlier months",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    Text(
-                        CurrencyUtils.formatSignedMinor(carriedOver),
-                        style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
-                        softWrap = false
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SummaryStat(
-    icon: ImageVector,
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier,
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
-        contentColor = MaterialTheme.colorScheme.onSurface
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-            }
-            Column {
-                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(value, style = MaterialTheme.typography.titleSmall, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-            }
-        }
-    }
-}
-
-/** Single-line text that steps its font size down until it fits the available width. */
-@Composable
-private fun AutoSizeAmount(text: String, style: TextStyle) {
-    var scaledStyle by remember(text, style) { mutableStateOf(style) }
-    Text(
-        text = text,
-        style = scaledStyle,
-        maxLines = 1,
-        softWrap = false,
-        modifier = Modifier.fillMaxWidth(),
-        onTextLayout = { result ->
-            if (result.didOverflowWidth && scaledStyle.fontSize.value > 18f) {
-                scaledStyle = scaledStyle.copy(fontSize = scaledStyle.fontSize * 0.9f)
-            }
-        }
-    )
 }
 
 @Composable
@@ -866,94 +851,105 @@ private fun AccountCard(
     name: String,
     spent: Long,
     income: Long,
-    remaining: Long
+    remaining: Long,
+    selected: Boolean,
+    onClick: () -> Unit
 ) {
     val (_, brand) = ColorUtils.getBankBrandColors(name)
     val finance = SpendTrackerTheme.finance
-    OutlinedCard(
-        modifier = Modifier.width(184.dp),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+    AppCard(
+        modifier = Modifier
+            .width(184.dp)
+            .semantics { stateDescription = if (selected) "Filter on" else "Filter off" },
+        onClick = onClick,
+        containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerLow,
+        verticalSpacing = Spacing.xs
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(brand.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(brand.copy(alpha = 0.14f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Outlined.AccountBalance, contentDescription = null, tint = brand, modifier = Modifier.size(18.dp))
-                }
-                Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Icon(Icons.Outlined.AccountBalance, contentDescription = null, tint = brand, modifier = Modifier.size(18.dp))
             }
-            Spacer(Modifier.height(8.dp))
-            Text("Balance", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.height(Spacing.xs))
+        Text("Balance", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            text = CurrencyUtils.formatSignedMinor(remaining),
+            style = MaterialTheme.typography.titleLarge,
+            color = if (remaining >= 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
             Text(
-                text = CurrencyUtils.formatSignedMinor(remaining),
-                style = MaterialTheme.typography.titleLarge,
-                color = if (remaining >= 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+                "+${CurrencyUtils.formatMinor(income)}",
+                style = MaterialTheme.typography.labelMedium,
+                color = finance.income,
                 maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis
+                softWrap = false
             )
-            Spacer(Modifier.height(4.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "+${CurrencyUtils.formatMinor(income)}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = finance.income,
-                    maxLines = 1,
-                    softWrap = false
-                )
-                Text(
-                    "−${CurrencyUtils.formatMinor(spent)}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    softWrap = false
-                )
-            }
+            Text(
+                "−${CurrencyUtils.formatMinor(spent)}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false
+            )
         }
     }
 }
 
-@Composable
-private fun EmptyTransactions() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 32.dp, vertical = 48.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(64.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Outlined.ReceiptLong,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(28.dp)
-            )
+/** Filter-chip key for a bank, e.g. "BANK_monzo". */
+internal fun bankFilterKey(bankName: String): String =
+    "BANK_${normalizeBankName(bankName).trim().lowercase(Locale.ROOT)}"
+
+/** True when the feed is narrowed by a search query or a filter other than "ALL". */
+internal fun isFeedFilterActive(filterType: String, searchQuery: String): Boolean =
+    filterType != "ALL" || searchQuery.isNotBlank()
+
+/**
+ * Rows shown in the Activity feed for [filterType] ("ALL", "REVIEW", "EXPENSE", "INCOME",
+ * "TRANSFERS", "BANK_<name>") and [searchQuery]. Transfers are listed under ALL, TRANSFERS,
+ * REVIEW and bank filters but not under Money out / Money in.
+ */
+internal fun filterFeed(
+    transactions: List<TransactionItem>,
+    filterType: String,
+    searchQuery: String
+): List<TransactionItem> {
+    val byFilter = when {
+        filterType == "REVIEW" -> transactions.filter { it.needsReview }
+        filterType == "EXPENSE" -> transactions.filter {
+            it.type == TransactionType.EXPENSE && !it.excludeFromSpending && !isTransferItem(it)
         }
-        Text("No transactions yet", style = MaterialTheme.typography.titleMedium)
-        Text(
-            "Spend alerts from your bank will appear here, or tap Add to log one.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
+        filterType == "INCOME" -> transactions.filter {
+            it.type == TransactionType.INCOME && !it.excludeFromSpending && !isTransferItem(it)
+        }
+        filterType == "TRANSFERS" -> transactions.filter { isTransferItem(it) }
+        filterType.startsWith("BANK_") -> {
+            val bankKey = filterType.removePrefix("BANK_").trim().lowercase(Locale.ROOT)
+            transactions.filter {
+                normalizeBankName(it.accountName).lowercase(Locale.ROOT) == bankKey ||
+                    normalizeBankName(it.source).lowercase(Locale.ROOT) == bankKey
+            }
+        }
+        else -> transactions
+    }
+    val query = searchQuery.trim()
+    return if (query.isEmpty()) byFilter else byFilter.filter { tx ->
+        listOfNotNull(tx.merchant, tx.categoryName, tx.note, tx.source, tx.accountName)
+            .any { it.contains(query, ignoreCase = true) } ||
+            CurrencyUtils.minorToDecimalString(tx.amountMinor).contains(query)
     }
 }

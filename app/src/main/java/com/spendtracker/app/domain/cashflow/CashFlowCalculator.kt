@@ -2,10 +2,13 @@ package com.spendtracker.app.domain.cashflow
 
 import com.spendtracker.app.data.CategoryEntity
 import com.spendtracker.app.data.CategoryGroupEntity
+import com.spendtracker.app.domain.RefundAttribution
 import com.spendtracker.app.domain.TransactionItem
 import com.spendtracker.app.domain.isIncome
+import com.spendtracker.app.domain.isRefund
 import com.spendtracker.app.domain.isSpending
 import com.spendtracker.app.domain.monthOf
+import com.spendtracker.app.domain.netSpendMinor
 import java.time.YearMonth
 import java.time.ZoneId
 import java.util.Locale
@@ -33,7 +36,9 @@ data class CashFlowReport(
     val expenseBreakdown: List<BreakdownRow>,
     val incomeBreakdown: List<BreakdownRow>,
     val averageMonthlyExpenseMinor: Long,
-    val averageMonthlyIncomeMinor: Long
+    val averageMonthlyIncomeMinor: Long,
+    /** Number of completed months with activity behind the averages; 0 means no average yet. */
+    val averageMonthCount: Int = 0
 )
 
 object CashFlowCalculator {
@@ -54,17 +59,18 @@ object CashFlowCalculator {
         val income = HashMap<YearMonth, Long>()
         val expense = HashMap<YearMonth, Long>()
         for (tx in transactions) {
-            val spending = tx.isSpending()
+            // Refunds are negative spending (netSpendMinor), never income.
+            val net = tx.netSpendMinor()
             val inc = tx.isIncome()
-            if (!spending && !inc) continue
+            if (net == 0L && !inc) continue
             val m = monthOf(tx.timestamp, zone)
             if (m.isBefore(start) || m.isAfter(endMonth)) continue
-            if (spending) expense[m] = (expense[m] ?: 0L) + tx.amountMinor
-            else income[m] = (income[m] ?: 0L) + tx.amountMinor
+            if (inc) income[m] = (income[m] ?: 0L) + tx.amountMinor
+            else expense[m] = (expense[m] ?: 0L) + net
         }
         return (0 until count).map { i ->
             val m = start.plusMonths(i.toLong())
-            CashFlowMonth(m, income[m] ?: 0L, expense[m] ?: 0L)
+            CashFlowMonth(m, income[m] ?: 0L, maxOf(0L, expense[m] ?: 0L))
         }
     }
 
@@ -80,7 +86,12 @@ object CashFlowCalculator {
         val categoryByKey = categories.associateBy { it.key }
         val groupById = groups.associateBy { it.id }
         val acc = LinkedHashMap<String, Acc>()
+        val refunds = ArrayList<TransactionItem>()
         for (tx in matching(transactions, month, income, zone)) {
+            if (tx.isRefund()) {
+                refunds += tx
+                continue
+            }
             val descriptor = describe(tx, dimension, categoryByKey, groupById)
             val a = acc.getOrPut(descriptor.key) {
                 Acc(descriptor.key, descriptor.label, descriptor.emoji, descriptor.colorHex)
@@ -88,8 +99,19 @@ object CashFlowCalculator {
             a.amount += tx.amountMinor
             a.count += 1
         }
+        // A refund lowers the row of the spending it was attributed to (only rows that exist).
+        if (refunds.isNotEmpty()) {
+            val attribution = RefundAttribution.of(transactions)
+            for (tx in refunds) {
+                val descriptor = describe(attributed(tx, attribution) ?: continue, dimension, categoryByKey, groupById)
+                val a = acc[descriptor.key] ?: continue
+                a.amount = maxOf(0L, a.amount - tx.amountMinor)
+                a.count += 1
+            }
+        }
         val total = acc.values.sumOf { it.amount }
         return acc.values
+            .filter { it.amount > 0L }
             .sortedWith(compareByDescending<Acc> { it.amount }.thenBy { it.label })
             .map {
                 BreakdownRow(
@@ -107,6 +129,8 @@ object CashFlowCalculator {
     /**
      * [endMonth] is the last month of the chart window and defaults to [selectedMonth];
      * pass it to keep the window stable while the selection moves.
+     * [inProgressMonth] (the current calendar month) and later months are shown in the chart but
+     * left out of the averages, so a partial month does not drag them down.
      */
     fun report(
         transactions: List<TransactionItem>,
@@ -116,12 +140,16 @@ object CashFlowCalculator {
         categories: List<CategoryEntity>,
         groups: List<CategoryGroupEntity>,
         zone: ZoneId,
-        endMonth: YearMonth = selectedMonth
+        endMonth: YearMonth = selectedMonth,
+        inProgressMonth: YearMonth? = null
     ): CashFlowReport {
         val months = monthly(transactions, endMonth, monthsBack, zone)
         val selected = months.firstOrNull { it.month == selectedMonth }
             ?: monthly(transactions, selectedMonth, 1, zone).first()
-        val active = months.filter { it.incomeMinor > 0 || it.expenseMinor > 0 }
+        val active = months.filter {
+            (it.incomeMinor > 0 || it.expenseMinor > 0) &&
+                (inProgressMonth == null || it.month.isBefore(inProgressMonth))
+        }
         val avgExpense = if (active.isEmpty()) 0L else active.sumOf { it.expenseMinor } / active.size
         val avgIncome = if (active.isEmpty()) 0L else active.sumOf { it.incomeMinor } / active.size
         return CashFlowReport(
@@ -130,7 +158,8 @@ object CashFlowCalculator {
             expenseBreakdown = breakdown(transactions, selectedMonth, dimension, false, categories, groups, zone),
             incomeBreakdown = breakdown(transactions, selectedMonth, dimension, true, categories, groups, zone),
             averageMonthlyExpenseMinor = avgExpense,
-            averageMonthlyIncomeMinor = avgIncome
+            averageMonthlyIncomeMinor = avgIncome,
+            averageMonthCount = active.size
         )
     }
 
@@ -145,8 +174,14 @@ object CashFlowCalculator {
         zone: ZoneId
     ): List<TransactionItem> {
         val categoryByKey = categories.associateBy { it.key }
+        val attribution = RefundAttribution.of(transactions)
         return matching(transactions, month, income, zone)
-            .filter { tx ->
+            .mapNotNull { tx ->
+                // A refund is listed under the spending row it was attributed to.
+                if (tx.isRefund()) attributed(tx, attribution)?.let { tx to it } else tx to tx
+            }
+            .filter { (_, asSpending) ->
+                val tx = asSpending
                 when (dimension) {
                     BreakdownDimension.CATEGORY -> (tx.categoryKey ?: OTHER_KEY) == key
                     BreakdownDimension.GROUP -> {
@@ -156,6 +191,7 @@ object CashFlowCalculator {
                     BreakdownDimension.MERCHANT -> merchantKey(tx) == key
                 }
             }
+            .map { it.first }
             .sortedByDescending { it.timestamp }
     }
 
@@ -172,7 +208,13 @@ object CashFlowCalculator {
         income: Boolean,
         zone: ZoneId
     ): List<TransactionItem> = transactions.filter {
-        (if (income) it.isIncome() else it.isSpending()) && monthOf(it.timestamp, zone) == month
+        (if (income) it.isIncome() else (it.isSpending() || it.isRefund())) && monthOf(it.timestamp, zone) == month
+    }
+
+    /** [tx] (a refund) re-labelled with the spending category it was attributed to, or null if unknown. */
+    private fun attributed(tx: TransactionItem, attribution: RefundAttribution): TransactionItem? {
+        val key = attribution.categoryFor(tx.merchant, tx.timestamp) ?: return null
+        return tx.copy(categoryKey = key)
     }
 
     private fun merchantKey(tx: TransactionItem): String {

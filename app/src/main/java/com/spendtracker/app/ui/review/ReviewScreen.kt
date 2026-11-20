@@ -2,24 +2,17 @@ package com.spendtracker.app.ui.review
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,15 +30,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spendtracker.app.data.TransactionType
 import com.spendtracker.app.domain.TransactionItem
+import com.spendtracker.app.ui.components.AppCard
 import com.spendtracker.app.ui.components.CategoryEmojiBox
 import com.spendtracker.app.ui.components.CategoryPill
+import com.spendtracker.app.ui.components.EmptyState
+import com.spendtracker.app.ui.components.TonalButton
+import com.spendtracker.app.ui.theme.ScreenPadding
+import com.spendtracker.app.ui.theme.Spacing
 import com.spendtracker.app.ui.theme.SpendTrackerTheme
+import com.spendtracker.app.ui.theme.screenContentPadding
 import com.spendtracker.app.ui.util.CurrencyUtils
 import com.spendtracker.app.ui.util.DateUtils
 
@@ -83,8 +81,8 @@ fun ReviewScreen(
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = screenContentPadding(),
+        verticalArrangement = Arrangement.spacedBy(ScreenPadding.listItemSpacing)
     ) {
         if (showUndo) {
             item(key = "undo") {
@@ -93,7 +91,12 @@ fun ReviewScreen(
         }
         if (state.items.isEmpty()) {
             item(key = "empty") {
-                EmptyState(modifier = Modifier.animateItemPlacement())
+                EmptyState(
+                    title = "All caught up",
+                    body = "New transactions captured from bank notifications will show up here for a quick check.",
+                    icon = Icons.Default.Check,
+                    modifier = Modifier.animateItemPlacement()
+                )
             }
         } else {
             item(key = "header") {
@@ -119,29 +122,28 @@ fun ReviewScreen(
 @Composable
 private fun HeaderCard(count: Int, onMarkAll: () -> Unit, modifier: Modifier = Modifier) {
     var confirm by remember { mutableStateOf(false) }
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-    ) {
-        Column(
-            modifier = Modifier.padding(start = 20.dp, end = 12.dp, top = 16.dp, bottom = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+    AppCard(modifier = modifier, verticalSpacing = Spacing.xs) {
+        Text(
+            text = "$count to review",
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            text = "Transactions captured from bank notifications. Check the merchant and category, then mark them reviewed.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = Spacing.sm),
+            horizontalArrangement = Arrangement.End
         ) {
-            Text(
-                text = "$count to review",
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurface
+            TonalButton(
+                text = "Mark all reviewed",
+                onClick = { confirm = true },
+                leadingIcon = Icons.Default.Check
             )
-            Text(
-                text = "Transactions captured from bank notifications. Check the merchant and category, then mark them reviewed.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(end = 8.dp)
-            )
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { confirm = true }) { Text("Mark all reviewed") }
-            }
         }
     }
     if (confirm) {
@@ -162,15 +164,16 @@ private fun HeaderCard(count: Int, onMarkAll: () -> Unit, modifier: Modifier = M
 
 @Composable
 private fun UndoCard(onUndo: () -> Unit, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+    // Intentionally highlighted: transient confirmation with an Undo action.
+    AppCard(
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        contentPadding = 0.dp
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                .padding(start = Spacing.lg, end = Spacing.sm, top = Spacing.xs, bottom = Spacing.xs),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
@@ -213,9 +216,9 @@ private fun ReviewCard(
                     .fillMaxSize()
                     .clip(MaterialTheme.shapes.large)
                     .background(MaterialTheme.colorScheme.primaryContainer)
-                    .padding(horizontal = 20.dp),
+                    .padding(horizontal = Spacing.xl),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
             ) {
                 Icon(
                     Icons.Default.Check,
@@ -232,29 +235,22 @@ private fun ReviewCard(
     ) {
         val isIncome = tx.type == TransactionType.INCOME
         val isUnknown = tx.merchant.isNullOrBlank()
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(MaterialTheme.shapes.large)
-                .clickable(onClick = onOpen),
-            shape = MaterialTheme.shapes.large,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-        ) {
+        AppCard(onClick = onOpen, contentPadding = 0.dp) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+                    .padding(start = Spacing.lg, end = Spacing.xs, top = Spacing.md, bottom = Spacing.md),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                horizontalArrangement = Arrangement.spacedBy(Spacing.md)
             ) {
                 CategoryEmojiBox(emoji = tx.categoryEmoji, colorHex = tx.categoryColorHex)
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalArrangement = Arrangement.spacedBy(Spacing.xs)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
                         Text(
                             text = if (isUnknown) "Unknown vendor" else tx.merchant.orEmpty(),
@@ -299,42 +295,5 @@ private fun ReviewCard(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun EmptyState(modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(top = 64.dp, start = 24.dp, end = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(88.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Default.Check,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.size(48.dp)
-            )
-        }
-        Text(
-            text = "All caught up",
-            style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Text(
-            text = "New transactions captured from bank notifications will show up here for a quick check.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
     }
 }

@@ -1,8 +1,11 @@
 package com.spendtracker.app.domain.dashboard
 
+import com.spendtracker.app.domain.RefundAttribution
 import com.spendtracker.app.domain.TransactionItem
 import com.spendtracker.app.domain.isIncome
 import com.spendtracker.app.domain.isSpending
+import com.spendtracker.app.domain.netSpendMinor
+import com.spendtracker.app.domain.spendCategoryKey
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
@@ -53,8 +56,6 @@ data class MonthComparison(
 
 object MonthComparisonCalculator {
 
-    private const val UNCATEGORISED_KEY: String = "OTHER_EXPENSE"
-
     /** Category moves smaller than this (in minor units, i.e. £1) are treated as unchanged. */
     const val MIN_CHANGE_MINOR: Long = 100L
 
@@ -85,6 +86,7 @@ object MonthComparisonCalculator {
         val current = LinkedHashMap<String, Long>()
         val previous = LinkedHashMap<String, Long>()
         val labels = HashMap<String, TransactionItem>()
+        val attribution: RefundAttribution = RefundAttribution.of(transactions)
 
         for (tx in transactions) {
             val date: LocalDate = Instant.ofEpochMilli(tx.timestamp).atZone(zone).toLocalDate()
@@ -96,17 +98,17 @@ object MonthComparisonCalculator {
             if (tx.isIncome()) {
                 if (inCurrent) income += tx.amountMinor else previousIncome += tx.amountMinor
             }
-            if (tx.isSpending()) {
-                val key: String = tx.categoryKey ?: UNCATEGORISED_KEY
-                if (inCurrent) {
-                    spent += tx.amountMinor
-                    current[key] = (current[key] ?: 0L) + tx.amountMinor
-                    labels[key] = tx
-                } else {
-                    previousSpent += tx.amountMinor
-                    previous[key] = (previous[key] ?: 0L) + tx.amountMinor
-                    if (key !in labels) labels[key] = tx
-                }
+            // Refunds are negative spending: they lower the total, and their category when known.
+            val net: Long = tx.netSpendMinor()
+            if (net == 0L) continue
+            if (inCurrent) spent += net else previousSpent += net
+            val key: String = tx.spendCategoryKey(attribution) ?: continue
+            if (inCurrent) {
+                current[key] = (current[key] ?: 0L) + net
+                if (tx.isSpending()) labels[key] = tx
+            } else {
+                previous[key] = (previous[key] ?: 0L) + net
+                if (tx.isSpending() && key !in labels) labels[key] = tx
             }
         }
 
@@ -117,8 +119,8 @@ object MonthComparisonCalculator {
                 name = label.categoryName,
                 emoji = label.categoryEmoji,
                 colorHex = label.categoryColorHex,
-                currentMinor = current[key] ?: 0L,
-                previousMinor = previous[key] ?: 0L
+                currentMinor = maxOf(0L, current[key] ?: 0L),
+                previousMinor = maxOf(0L, previous[key] ?: 0L)
             )
         }
 
@@ -126,8 +128,8 @@ object MonthComparisonCalculator {
             month = month,
             previousMonth = previousMonth,
             dayOfMonth = day,
-            spentMinor = spent,
-            previousSpentMinor = previousSpent,
+            spentMinor = maxOf(0L, spent),
+            previousSpentMinor = maxOf(0L, previousSpent),
             incomeMinor = income,
             previousIncomeMinor = previousIncome,
             increased = changes

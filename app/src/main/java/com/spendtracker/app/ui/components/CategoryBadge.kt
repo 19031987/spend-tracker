@@ -13,9 +13,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +58,7 @@ fun CategoryEmojiBox(
 /**
  * Compact, tappable category chip shown under a transaction's merchant name.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CategoryPill(
     categoryName: String,
@@ -71,6 +74,8 @@ fun CategoryPill(
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         shape = CircleShape,
         modifier = modifier
+            // 48dp touch target when tappable; the visible pill stays 24dp tall.
+            .then(if (onClick != null) Modifier.minimumInteractiveComponentSize() else Modifier)
             .height(24.dp)
             .clip(CircleShape)
             .then(clickableModifier)

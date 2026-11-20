@@ -12,6 +12,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.DayOfWeek
 import java.time.LocalDate
 
 class AnalyticsCalculationTest {
@@ -20,16 +21,16 @@ class AnalyticsCalculationTest {
     fun `calculateDaysElapsed and calculateTotalDaysInPeriod compute accurate horizons`() {
         // Monday Nov 2, 2026 (day 1 of week)
         val monday = LocalDate.of(2026, 11, 2)
-        assertEquals(1L, AnalyticsViewModel.calculateDaysElapsed(Period.WEEK, monday))
+        assertEquals(1L, AnalyticsViewModel.calculateDaysElapsed(Period.WEEK, monday, DayOfWeek.MONDAY))
         assertEquals(7L, AnalyticsViewModel.calculateTotalDaysInPeriod(Period.WEEK, monday))
 
         // Thursday Nov 5, 2026 (day 4 of week)
         val thursday = LocalDate.of(2026, 11, 5)
-        assertEquals(4L, AnalyticsViewModel.calculateDaysElapsed(Period.WEEK, thursday))
+        assertEquals(4L, AnalyticsViewModel.calculateDaysElapsed(Period.WEEK, thursday, DayOfWeek.MONDAY))
 
         // Sunday Nov 8, 2026 (day 7 of week)
         val sunday = LocalDate.of(2026, 11, 8)
-        assertEquals(7L, AnalyticsViewModel.calculateDaysElapsed(Period.WEEK, sunday))
+        assertEquals(7L, AnalyticsViewModel.calculateDaysElapsed(Period.WEEK, sunday, DayOfWeek.MONDAY))
 
         // Month of November 2026 (30 days)
         val nov15 = LocalDate.of(2026, 11, 15)
@@ -198,5 +199,41 @@ class AnalyticsCalculationTest {
         )
         assertEquals("🏋️ Fitness & Gym", customShare.displayLabel)
         assertEquals("c_fitness", customShare.categoryKey)
+    }
+
+    // A6: like-for-like delta; D22: refunds reduce spend and are not income.
+    @Test
+    fun `buildState compares month to date with the same days of last month`() {
+        val zone = java.time.ZoneId.of("UTC")
+        fun ts(y: Int, m: Int, d: Int) = LocalDate.of(y, m, d).atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
+        fun spend(id: Long, amount: Long, t: Long, merchant: String = "Shop") = TransactionEntity(
+            id = id, accountId = 1L, amount = -amount, category = "SHOPPING", timestamp = t,
+            type = TransactionType.EXPENSE, merchant = merchant
+        )
+        val today = LocalDate.of(2026, 11, 3)
+        val txs = listOf(
+            spend(1, 10_000, ts(2026, 6, 1)), // old history so the baseline is established
+            spend(2, 2_000, ts(2026, 10, 2)), // 1-3 Oct: like-for-like window
+            spend(3, 50_000, ts(2026, 10, 20)), // later in October: must not be compared yet
+            spend(4, 3_000, ts(2026, 11, 2), merchant = "Zara"),
+            TransactionEntity(
+                id = 5, accountId = 1L, amount = 1_000L, category = "OTHER_INCOME", note = "Refund from Zara",
+                timestamp = ts(2026, 11, 3), type = TransactionType.INCOME, merchant = "Zara"
+            ),
+            TransactionEntity(
+                id = 6, accountId = 1L, amount = 100_000L, category = "SALARY",
+                timestamp = ts(2026, 11, 1), type = TransactionType.INCOME
+            )
+        )
+        val snapshot = AnalyticsSnapshot(Period.MONTH, 3_000L, 52_000L, emptyList(), emptyList())
+        val state = AnalyticsViewModel.buildState(
+            Period.MONTH, today, snapshot, txs, zone, DayOfWeek.MONDAY, nowMillis = ts(2026, 11, 3)
+        )
+        assertEquals(2_000L, state.currentTotalMinor) // 3000 spend - 1000 refund
+        assertEquals(2_000L, state.previousTotalMinor) // 1-3 Oct only
+        assertEquals(52_000L, state.previousFullPeriodTotalMinor)
+        assertTrue(state.isPartialPeriod)
+        assertEquals(0.0, state.deltaPercent!!, 0.001) // not "96% lower than last month"
+        assertEquals(100_000L, state.totalIncomeMinor) // refund is not income
     }
 }

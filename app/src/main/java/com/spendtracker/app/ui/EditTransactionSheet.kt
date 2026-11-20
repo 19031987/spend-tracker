@@ -2,42 +2,23 @@
 
 package com.spendtracker.app.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import android.app.DatePickerDialog
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
-import com.spendtracker.app.ui.components.AccountDropdownSelector
-import com.spendtracker.app.ui.util.CurrencyUtils
-import com.spendtracker.app.ui.util.DateUtils
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -55,22 +36,24 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.spendtracker.app.data.AccountEntity
 import com.spendtracker.app.data.CategoryEntity
 import com.spendtracker.app.data.CategoryGroupEntity
 import com.spendtracker.app.data.TransactionType
 import com.spendtracker.app.data.normalizeBankName
 import com.spendtracker.app.domain.TransactionItem
-import java.math.BigDecimal
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import com.spendtracker.app.ui.components.AccountDropdownSelector
+import com.spendtracker.app.ui.components.DestructiveButton
+import com.spendtracker.app.ui.components.DestructiveTextButton
+import com.spendtracker.app.ui.components.PrimaryButton
+import com.spendtracker.app.ui.components.SheetContainer
+import com.spendtracker.app.ui.components.SheetHeader
+import com.spendtracker.app.ui.theme.Spacing
+import com.spendtracker.app.ui.util.CurrencyUtils
+import com.spendtracker.app.ui.util.DateUtils
+import java.util.Calendar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -90,9 +73,20 @@ fun EditTransactionSheet(
         merchant: String?,
         note: String?,
         excludeFromSpending: Boolean,
-        ruleMerchant: String?
+        ruleMerchant: String?,
+        timestamp: Long
     ) -> Unit,
-    onDelete: (Long) -> Unit
+    onDelete: (Long) -> Unit,
+    onCreateCategory: (
+        name: String,
+        groupId: Long?,
+        newGroupName: String?,
+        emoji: String,
+        colorHex: String,
+        type: TransactionType,
+        ruleMerchant: String?,
+        onCreated: (CategoryEntity) -> Unit
+    ) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -118,45 +112,42 @@ fun EditTransactionSheet(
     var localError by rememberSaveable { mutableStateOf<String?>(null) }
     var autoRuleChecked by rememberSaveable { mutableStateOf(false) }
     var showCategoryPicker by rememberSaveable { mutableStateOf(false) }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showDeleteConfirm by rememberSaveable { mutableStateOf(false) }
+    // Date can be changed; the original time of day is kept.
+    var timestamp by rememberSaveable { mutableStateOf(transaction.timestamp) }
+    val context = LocalContext.current
+    val currencySymbol = remember { localCurrencySymbol() }
+    val wasTransfer = transaction.type == TransactionType.TRANSFER || transaction.categoryKey == "INTERNAL_TRANSFER"
 
-    val deduplicatedAccounts = remember(accounts) {
-        accounts
-            .map { it.copy(name = normalizeBankName(it.name)) }
-            .distinctBy { it.name.lowercase(Locale.ROOT) }
-            .sortedBy { it.name }
-    }
+    val deduplicatedAccounts = remember(accounts) { deduplicateAccounts(accounts) }
 
     val effectiveSource = deduplicatedAccounts.firstOrNull { it.id == sourceId }
         ?: deduplicatedAccounts.firstOrNull { it.name.trim().equals(normalizeBankName(transaction.source), ignoreCase = true) }
         ?: deduplicatedAccounts.firstOrNull { it.name.trim().equals(normalizeBankName(transaction.accountName), ignoreCase = true) }
-        ?: deduplicatedAccounts.firstOrNull { it.name.trim().equals("Chase", ignoreCase = true) }
         ?: deduplicatedAccounts.firstOrNull()
 
     val activeCategory = categories.firstOrNull { it.key == selectedCategoryKey && it.type == type }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .imePadding()
-                .navigationBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text("Edit Transaction", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    val dateStr = DateUtils.formatDateTime(transaction.timestamp)
-                    Text(dateStr, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                IconButton(onClick = { showDeleteConfirm = true }) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+        SheetContainer {
+            SheetHeader(
+                title = "Edit transaction",
+                subtitle = DateUtils.formatDateTime(timestamp)
+            )
+
+            if (wasTransfer) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                ) {
+                    Text(
+                        "Filed as a transfer between your accounts, so it's left out of totals. " +
+                            "If it's really a payment, pick Money out or Money in and save.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm)
+                    )
                 }
             }
 
@@ -179,13 +170,7 @@ fun EditTransactionSheet(
                         },
                         shape = SegmentedButtonDefaults.itemShape(index, types.size)
                     ) {
-                        Text(
-                            text = label,
-                            maxLines = 1,
-                            softWrap = false,
-                            fontSize = 12.sp,
-                            fontWeight = if (type == t) FontWeight.Bold else FontWeight.Medium
-                        )
+                        Text(text = label, maxLines = 1, softWrap = false)
                     }
                 }
             }
@@ -196,116 +181,70 @@ fun EditTransactionSheet(
                 onValueChange = { merchantText = it },
                 label = { Text("Payee / Merchant Name") },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
+                modifier = Modifier.fillMaxWidth()
             )
 
             // Amount
             OutlinedTextField(
                 value = amountText,
                 onValueChange = { amountText = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
-                label = { Text("Amount (£)") },
+                label = { Text("Amount ($currencySymbol)") },
                 placeholder = { Text("0.00") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
+                modifier = Modifier.fillMaxWidth()
             )
+
+            // Date (keeps the original time of day)
+            OutlinedButton(
+                onClick = {
+                    val cal = Calendar.getInstance().apply {
+                        if (timestamp > 0) timeInMillis = timestamp
+                    }
+                    DatePickerDialog(
+                        context,
+                        { _, year, month, dayOfMonth ->
+                            timestamp = withDate(timestamp, year, month, dayOfMonth)
+                        },
+                        cal.get(Calendar.YEAR),
+                        cal.get(Calendar.MONTH),
+                        cal.get(Calendar.DAY_OF_MONTH)
+                    ).show()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Outlined.CalendarToday, contentDescription = null)
+                Text(
+                    text = "Date: " + if (timestamp > 0) DateUtils.formatDateYear(timestamp) else "Not set",
+                    modifier = Modifier.padding(start = Spacing.sm).weight(1f)
+                )
+            }
 
             // Account Picker
             AccountDropdownSelector(
-                label = "Account (Source)",
+                label = "Account",
                 accounts = deduplicatedAccounts,
                 selected = effectiveSource,
                 onAccountSelected = { sourceId = it.id }
             )
 
-            // Category Display / Picker (uniform 32dp icon box)
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Category", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable { showCategoryPicker = true },
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        if (activeCategory != null) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(parseColorHex(activeCategory.colorHex)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(activeCategory.emoji, fontSize = 16.sp)
-                                }
-                                Text(
-                                    activeCategory.name,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                            }
-                        } else {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFFFEF3C7)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("❓", fontSize = 16.sp)
-                                }
-                                Text(
-                                    "Uncategorized",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = Color(0xFFB45309),
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                        TextButton(onClick = { showCategoryPicker = true }) {
-                            Text("Change", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
+            // Category Display / Picker
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                CategoryField(
+                    category = activeCategory,
+                    onClick = { showCategoryPicker = true }
+                )
 
                 if (merchantText.isNotBlank() && activeCategory != null) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
                     ) {
                         Checkbox(
                             checked = autoRuleChecked,
                             onCheckedChange = { autoRuleChecked = it }
                         )
-                        Spacer(Modifier.width(6.dp))
                         Text(
                             "Always categorize \"${merchantText.trim()}\" as ${activeCategory.name}",
                             style = MaterialTheme.typography.bodySmall
@@ -315,94 +254,97 @@ fun EditTransactionSheet(
             }
 
             // Nullify / Exclude toggle
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "Nullify from spend calculations",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        "Exclude this transaction from total spending and analytics",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp
+                Row(
+                    modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Nullify from spend calculations",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            "Exclude this transaction from total spending and analytics",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = excludeFromSpending,
+                        onCheckedChange = { excludeFromSpending = it }
                     )
                 }
-                Switch(
-                    checked = excludeFromSpending,
-                    onCheckedChange = { excludeFromSpending = it }
-                )
             }
 
             OutlinedTextField(
                 value = note,
                 onValueChange = { note = it },
                 label = { Text("Note (optional)") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
+                modifier = Modifier.fillMaxWidth()
             )
 
             if (localError != null) {
-                Text(localError.orEmpty(), color = MaterialTheme.colorScheme.error)
+                Text(
+                    localError.orEmpty(),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium
+                )
             }
 
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
+            PrimaryButton(
+                text = "Save changes",
+                fullWidth = true,
                 onClick = {
                     val amount = parseMinorUnits(amountText)
                     val source = effectiveSource
-                    if (amount == null) {
-                        localError = "Enter a valid amount"
-                        return@Button
+                    when {
+                        amount == null -> localError = "Enter a valid amount"
+                        source == null -> localError = "Select an account"
+                        else -> onSave(
+                            transaction.id,
+                            type,
+                            source.id,
+                            null,
+                            amount,
+                            selectedCategoryKey ?: if (type == TransactionType.INCOME) "OTHER_INCOME" else "OTHER_EXPENSE",
+                            merchantText.trim().takeIf { it.isNotEmpty() },
+                            note.trim().takeIf { it.isNotEmpty() },
+                            excludeFromSpending,
+                            if (autoRuleChecked && merchantText.isNotBlank()) merchantText.trim() else null,
+                            timestamp
+                        )
                     }
-                    if (source == null) {
-                        localError = "Select an account"
-                        return@Button
-                    }
-                    onSave(
-                        transaction.id,
-                        type,
-                        source.id,
-                        null,
-                        amount,
-                        selectedCategoryKey ?: if (type == TransactionType.INCOME) "OTHER_INCOME" else "OTHER_EXPENSE",
-                        merchantText.trim().takeIf { it.isNotEmpty() },
-                        note.trim().takeIf { it.isNotEmpty() },
-                        excludeFromSpending,
-                        if (autoRuleChecked && merchantText.isNotBlank()) merchantText.trim() else null
-                    )
                 }
-            ) {
-                Text("Save Changes", fontWeight = FontWeight.Bold)
-            }
+            )
+
+            DestructiveTextButton(
+                text = "Delete transaction",
+                onClick = { showDeleteConfirm = true },
+                leadingIcon = Icons.Outlined.Delete,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
         }
     }
 
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Delete Transaction") },
+            title = { Text("Delete transaction?") },
             text = { Text("Are you sure you want to delete this transaction? If it is a transfer, both legs will be deleted.") },
             confirmButton = {
-                Button(
+                DestructiveButton(
+                    text = "Delete",
                     onClick = {
                         showDeleteConfirm = false
                         onDelete(transaction.id)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("Delete", fontWeight = FontWeight.Bold)
-                }
+                    }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) {
@@ -427,9 +369,24 @@ fun EditTransactionSheet(
                 }
                 showCategoryPicker = false
             },
-            onCreateCategory = { _, _, _, _, _, _, _ ->
+            onCreateCategory = { name, groupId, newGroupName, emoji, colorHex, cType, ruleMerchant ->
+                onCreateCategory(name, groupId, newGroupName, emoji, colorHex, cType, ruleMerchant) { created ->
+                    // Apply the category the user just made.
+                    selectedCategoryKey = created.key
+                    if (created.key == "INTERNAL_TRANSFER") excludeFromSpending = true
+                }
                 showCategoryPicker = false
             }
         )
     }
+}
+
+/** [original] moved to the given calendar date, keeping its time of day (now if [original] is unset). */
+internal fun withDate(original: Long, year: Int, month: Int, dayOfMonth: Int): Long {
+    val cal = Calendar.getInstance()
+    if (original > 0) cal.timeInMillis = original
+    cal.set(Calendar.YEAR, year)
+    cal.set(Calendar.MONTH, month)
+    cal.set(Calendar.DAY_OF_MONTH, dayOfMonth)
+    return cal.timeInMillis
 }

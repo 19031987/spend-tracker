@@ -173,15 +173,47 @@ object SpendParser {
     // ---------------------------------------------------------------------------------------
     private const val NAME = "([A-Za-z0-9&'][^.,;:!?\\n•*()|]{0,48}?)"
     private const val TERM =
-        "(?=\\s+(?:on|via|using|with|ref|reference|card|was|has|is|have|and|for)\\b|\\s+at\\s+[0-9]|\\s+-\\s|[.,;:!?\\n•*()|]|\\s*$)"
+        "(?=\\s+(?:on|via|using|with|ref|reference|card|was|has|is|have|and|for|into)\\b|\\s+at\\s+[0-9]|\\s+-\\s|[.,;:!?\\n•*()|]|\\s*$)"
 
     private val IN_SENT_YOU = Regex("$NAME\\s+(?:has\\s+)?sent you\\b", IC)
     private val IN_PAID_YOU = Regex("$NAME\\s+(?:has\\s+)?paid you\\b", IC)
     private val IN_FROM = Regex("\\bfrom\\s+$NAME$TERM", IC)
     private val OUT_DD = Regex("\\b(?:direct debit|standing order|payment|transfer)\\s+to\\s+$NAME(?=\\s+(?:of|for)\\b)", IC)
     private val OUT_PAID_VENDOR = Regex("\\bpaid\\s+$NAME(?=\\s+(?:$CUR_ALT)?\\s*$NUM)", IC)
-    private val OUT_VENDOR_AMOUNT = Regex("^(?:(?:Chase|HSBC|Premier|Monzo|Revolut|Barclays|Amex)\\s+)?$NAME(?=\\s+(?:$CUR_ALT)\\s*$NUM)", IC)
+    // PayPal: "Your purchase from UBER PAYMENTS UK LIMITED You authorised a payment of £4.99."
+    private val OUT_PURCHASE_FROM = Regex("\\b(?:purchase|order)\\s+(?:from|with)\\s+$NAME(?:(?=\\s+(?:you|your)\\b)|$TERM)", IC)
+    // MULTILINE: title and body are separate lines, so "^" also anchors at the start of the body.
+    private val OUT_VENDOR_AMOUNT = Regex("^(?:(?:Chase|HSBC|Premier|Monzo|Revolut|Barclays|Amex)\\s+)?$NAME(?=\\s+(?:$CUR_ALT)\\s*$NUM)", setOf(IC, RegexOption.MULTILINE))
+
+    // Web-shop merchants written as a domain before the amount: "your-saving.com £45.50 with HSBC ...".
+    // NAME stops at '.', so domains need their own pattern.
+    private const val DOMAIN = "(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,24}"
+    private val DOMAIN_FULL = Regex("^$DOMAIN$", IC)
+    private val OUT_DOMAIN_AMOUNT = Regex("^(?:(?:Chase|HSBC|Premier|Monzo|Revolut|Barclays|Amex)\\s+)?($DOMAIN)(?=\\s+(?:$CUR_ALT)\\s*$NUM)", setOf(IC, RegexOption.MULTILINE))
     private val OUT_AT_TO = Regex("\\b(?:at|to)\\s+$NAME$TERM", IC)
+
+    // "You sent £30.00 GBP to Tom Jones." / "You paid £11.99 GBP to Spotify AB." is always an outflow,
+    // even when another part of the notification says "sent you" / "received".
+    private val OUT_YOU_SENT_TO = Regex("\\byou(?:'ve|’ve| have)?\\s+(?:sent|paid)\\s+(?:(?:$CUR_ALT)\\s?)?$NUM(?:\\s?(?:GBP|EUR|USD))?\\s+to\\b", IC)
+    // Moves between the user's own accounts (Chase round-ups, "moved from your Current account to your Saver
+    // account") are neither spending nor income: the notification is ignored.
+    private val INTERNAL_MOVE = Regex("\\bmoved\\b[^!?\\n]{0,60}?\\b(?:to|into)\\s+your\\b", IC)
+    // Card-processor prefixes ("PAYPAL *NETFLIX", "SQ *THE COFFEE HOUSE", "SumUp *Cafe Nero", "ZETTLE_*Shop").
+    private val PROCESSOR_PREFIX = Regex("\\b(?:paypal|sq|sumup|zettle|iz|sp)\\s?[*_]+\\s*", IC)
+    private val LEADING_PROCESSOR = Regex("^(?:paypal|sq|sumup|zettle|iz|sp)\\s?[*_]+\\s*", IC)
+    // Reference codes after '*' ("AMZN Mktp UK*AB12CD3E4"): 6+ capitals/digits including a digit.
+    private val STAR_REFERENCE = Regex("(?<=[A-Za-z0-9])\\s?\\*(?=[A-Z0-9]*[0-9])[A-Z0-9]{6,}\\b")
+    // Any other '*' between words ("UBER *TRIP") becomes a space; masked card digits ("****1234") are kept.
+    private val STAR_BETWEEN_WORDS = Regex("(?<=[A-Za-z0-9])\\s*\\*+\\s*(?=[A-Za-z])")
+    private val TRAILING_CHARGE = Regex("\\s+charges?$", IC)
+    private val COMPANY_SUFFIX = Regex("(?i)[\\s,]+(?:plc|ab|uab|inc|llc|gmbh|sa)\\.?$")
+    private val PRONOUN_NAME = Regex("^(?:we|we've|we’ve|we have|they|it)$", IC)
+
+    private fun normalizeCardMerchants(text: String): String {
+        var t = PROCESSOR_PREFIX.replace(text, "")
+        t = STAR_REFERENCE.replace(t, "")
+        return STAR_BETWEEN_WORDS.replace(t, " ")
+    }
 
     private val GENERIC_TITLE = Regex(
         "\\b(?:alert|alerts|notification|payment|payments|purchase|transaction|activity|account|card|" +
@@ -192,7 +224,7 @@ object SpendParser {
 
     private val CATEGORY_RULES_OUT = mapOf(
         "Groceries" to listOf("tesco", "sainsbury", "asda", "morrison", "aldi", "lidl", "waitrose", "m&s", "marks & spencer", "co-op", "grocery", "supermarket", "costco", "iceland", "ocado"),
-        "Dining & Drinks" to listOf("costa", "starbucks", "mcdonald", "kfc", "subway", "greggs", "nando", "deliveroo", "uber eats", "just eat", "caffe", "coffee", "restaurant", "pub", "bar", "pizza", "burger", "pret", "five guys"),
+        "Dining & Drinks" to listOf("costa", "cafe", "café", "nero", "starbucks", "mcdonald", "kfc", "subway", "greggs", "nando", "deliveroo", "uber eats", "just eat", "caffe", "coffee", "restaurant", "pub", "bar", "pizza", "burger", "pret", "five guys"),
         "Transport & Fuel" to listOf("uber", "tfl", "transport for london", "trainline", "national rail", "shell", "bp", "esso", "texaco", "petrol", "parking", "bolt", "railway", "ringgo"),
         "Bills & Subscriptions" to listOf("netflix", "spotify", "disney", "prime", "amazon prime", "apple.com", "google storage", "youtube", "broadband", "bt", "virgin media", "ee", "o2", "vodafone", "three", "water", "british gas", "octopus", "edf", "e.on", "gym", "puregym"),
         "Shopping" to listOf("amazon", "ebay", "argos", "boots", "currys", "john lewis", "zara", "h&m", "primark", "tk maxx", "next", "asos", "shein", "ikea", "apple store"),
@@ -316,9 +348,13 @@ object SpendParser {
             )
         }
 
-        if (IGNORE.containsMatchIn(content) || PROMO.containsMatchIn(content)) return null
+        if (IGNORE.containsMatchIn(content) || PROMO.containsMatchIn(content) || INTERNAL_MOVE.containsMatchIn(content)) return null
 
-        var scrubbed = content
+        // Title and body are matched as separate lines so a name can never run across the join
+        // ("Salary" + "ACME LTD paid you" must not become "Salary Acme").
+        var scrubbed = normalizeCardMerchants(
+            listOfNotNull(title?.trim(), text?.trim()).filter { it.isNotEmpty() }.joinToString("\n")
+        )
         for (r in BALANCE_PHRASES) scrubbed = r.replace(scrubbed, " ")
 
         val money = findFirstMoney(scrubbed) ?: return null
@@ -331,6 +367,7 @@ object SpendParser {
         val type = when {
             money.sign == "+" -> TYPE_IN
             money.sign == "-" || money.sign == "\u2212" -> TYPE_OUT
+            OUT_YOU_SENT_TO.containsMatchIn(scrubbed) -> TYPE_OUT
             STRONG_IN.containsMatchIn(scrubbed) -> TYPE_IN
             STRONG_OUT.containsMatchIn(scrubbed) -> TYPE_OUT
             WEAK_IN.containsMatchIn(scrubbed) -> TYPE_IN
@@ -365,14 +402,23 @@ object SpendParser {
             clean = clean.replace(Regex("(?i)^$s\\s*[:\\-]?\\s*"), "").trim()
         }
 
+        // Strip card-processor prefixes ("SumUp *Cafe Nero" -> "Cafe Nero") and a leading '*'.
+        clean = LEADING_PROCESSOR.replace(clean, "")
+        clean = clean.replace(Regex("^[*_\\s]+"), "")
         // Strip leading indicators
         clean = clean.replace(Regex("(?i)^(?:at|to|from|with\\s+your\\s+card\\s+at|spent\\s+at|payment\\s+to|payment\\s+from)\\s+"), "").trim()
+        // A web domain ("your-saving.com") is kept as written, in lower case.
+        val isDomain = DOMAIN_FULL.matches(clean)
 
         // Strip trailing indicators & noise
         clean = clean.replace(Regex("(?i)\\s+on\\s+\\d{1,2}[/-]\\d{1,2}(?:[/-]\\d{2,4})?.*$"), "")
         clean = clean.replace(Regex("(?i)\\s+at\\s+\\d{1,2}:\\d{2}.*$"), "")
         clean = clean.replace(Regex("(?i)\\s+(?:via contactless|using card.*|card ending \\d+.*|was approved.*|ref:?.*)$"), "")
-        clean = clean.replace(Regex("(?i)\\b(?:ltd|limited|uk)\\b\\.?"), "")
+        if (!isDomain) {
+            clean = clean.replace(Regex("(?i)\\b(?:ltd|limited|uk)\\b\\.?"), "")
+            // Trailing company suffixes: "GREGGS PLC" -> "Greggs", "Spotify AB" -> "Spotify".
+            clean = COMPANY_SUFFIX.replace(clean.trim(), "")
+        }
         clean = clean.replace(Regex("[^a-zA-Z0-9 &'. -]"), " ")
         clean = clean.replace(Regex("\\s+"), " ").trim()
 
@@ -387,13 +433,15 @@ object SpendParser {
             lower.contains("steam") -> return "Steam Games"
             lower.contains("netflix") -> return "Netflix"
             lower.contains("uber eats") -> return "Uber Eats"
+            lower.contains("tfl") -> return "TfL"
             lower.contains("uber") && !lower.contains("eats") -> return "Uber"
-            lower.contains("amazon") -> return "Amazon"
+            lower.contains("amazon") || lower.contains("amzn") -> return "Amazon"
             lower.contains("shell") -> return "Shell Petrol"
             lower.contains("apple store") -> return "Apple Store"
             lower.contains("harrods") -> return "Harrods"
             lower.contains("british gas") -> return "British Gas"
         }
+        if (isDomain) return lower
 
         val words = clean.split(" ").filter { it.isNotEmpty() }
         if (words.isEmpty()) return ""
@@ -483,7 +531,7 @@ object SpendParser {
         "you", "your", "card", "cards", "account", "accounts", "make", "payment", "payments",
         "direct debit", "standing order", "transfer", "transfers", "alert", "alerts", "notification",
         "chase", "hsbc", "monzo", "revolut", "barclays", "paypal", "amex", "sent", "spend", "spent",
-        "charge", "charges", "transaction", "transactions", "ending", "approved"
+        "charge", "charges", "transaction", "transactions", "ending", "approved", "paid"
     )
 
     private fun isUsableName(candidate: String?): Boolean {
@@ -497,7 +545,9 @@ object SpendParser {
             }
         }
         if (lower.length < 2) return false
-        if (lower in ACTION_WORDS || lower == "money in" || lower == "money out" || PREM_ADV_LOWER.matches(lower)) return false
+        if (lower in ACTION_WORDS || lower == "money in" || lower == "money out" || PREM_ADV_LOWER.matches(lower) || PRONOUN_NAME.matches(lower)) return false
+        // A domain such as "your-saving.com" is a merchant even though it contains "your".
+        if (DOMAIN_FULL.matches(lower)) return true
         val words = Regex("[a-z0-9]+").findAll(lower).map { it.value }.toSet()
         if (words.intersect(ACTION_WORDS).isNotEmpty()) return false
         if (lower.startsWith("your ") || lower.startsWith("you ") || lower.startsWith("card ending") || lower.startsWith("make ")) return false
@@ -525,12 +575,18 @@ object SpendParser {
             OUT_DD.find(text)?.groupValues?.get(1)?.takeIf { isRealMerchant(it) }?.let { return it.trim() to false }
             // ...then anywhere ("Payment to Netflix: £8.99").
             OUT_AT_TO.findAll(text).map { it.groupValues[1] }.firstOrNull { isRealMerchant(it) }?.let { return it.trim() to false }
+            // Company names like "Uber Payments UK Limited" contain "payments", so also accept them
+            // when the cleaned name ("Uber") is a real merchant.
+            OUT_PURCHASE_FROM.find(text)?.groupValues?.get(1)
+                ?.takeIf { isRealMerchant(it) || isRealMerchant(cleanMerchantName(it, source)) }
+                ?.let { return it.trim() to false }
             OUT_PAID_VENDOR.find(text)?.groupValues?.get(1)?.takeIf { isRealMerchant(it) }?.let { return it.trim() to false }
             OUT_VENDOR_AMOUNT.find(text)?.groupValues?.get(1)?.takeIf { isRealMerchant(it) }?.let { return it.trim() to false }
+            OUT_DOMAIN_AMOUNT.find(text)?.groupValues?.get(1)?.takeIf { isRealMerchant(it) }?.let { return it.trim() to false }
         }
 
         // Wallet apps (Google Wallet etc.) put the merchant in the title: "Tesco" / "£4.00 with Visa ••1234".
-        val t = title?.trim().orEmpty()
+        val t = TRAILING_CHARGE.replace(title?.trim().orEmpty(), "")
         if (t.isNotEmpty() && !GENERIC_TITLE.containsMatchIn(t) && findFirstMoney(t) == null &&
             !PREMIER_SOURCE_WORDS.matches(t) &&
             BANK_CONTENT_WORDS.none { it.first.containsMatchIn(t) } && isRealMerchant(t)

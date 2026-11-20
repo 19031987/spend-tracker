@@ -12,7 +12,8 @@ import java.util.Locale
 class ComparisonIntervalTest {
 
     private val zone = ZoneId.of("UTC")
-    private val locale = Locale.US
+    // UK weeks start on Monday (the week start now follows the locale: D25).
+    private val locale = Locale.UK
     private val vm = ComparisonViewModel()
 
     private fun createTx(
@@ -182,5 +183,64 @@ class ComparisonIntervalTest {
         val yearPoints = vm.calculateIntervalComparison(ComparisonPeriod.YEAR, emptyList(), today, zone, locale)
         assertEquals(12, yearPoints.size)
         assertTrue(yearPoints.all { it.currentValue == 0.0 && it.previousValue == 0.0 })
+    }
+
+    // D25: the week starts on the locale's first day (Sunday in the US), like the repository.
+    @Test
+    fun `calculateIntervalComparison WEEK starts on the locale first day`() {
+        val today = LocalDate.of(2026, 11, 4) // Wednesday
+        val txs = listOf(createTx(id = 1, amount = -1000, date = LocalDate.of(2026, 11, 1))) // Sunday
+        val points = vm.calculateIntervalComparison(ComparisonPeriod.WEEK, txs, today, zone, Locale.US)
+        assertEquals("Sun", points[0].label)
+        assertEquals(10.00, points[0].currentValue, 0.001)
+    }
+
+    // D22: a refund lowers the day's spend instead of being ignored.
+    @Test
+    fun `calculateIntervalComparison subtracts refunds`() {
+        val today = LocalDate.of(2026, 11, 4)
+        val txs = listOf(
+            createTx(id = 1, amount = -3000, date = LocalDate.of(2026, 11, 2), merchant = "Zara"),
+            createTx(
+                id = 2, type = TransactionType.INCOME, amount = 1000, date = LocalDate.of(2026, 11, 2),
+                category = "OTHER_INCOME", merchant = "Zara"
+            ).copy(note = "refund")
+        )
+        val points = vm.calculateIntervalComparison(ComparisonPeriod.WEEK, txs, today, zone, locale)
+        assertEquals(20.00, points[0].currentValue, 0.001)
+    }
+
+    // A5 / A6: no sample data, and totals compare like-for-like.
+    @Test
+    fun `computeComparison has no data flag and no sample data when empty`() {
+        val result = vm.computeComparison(
+            ComparisonPeriod.MONTH, ComparisonMode.CATEGORIES, emptyList(), emptyMap(),
+            LocalDate.of(2026, 11, 3), zone, locale
+        )
+        assertTrue(result.breakdown.isEmpty())
+        assertEquals(false, result.hasData)
+        assertEquals(0.0, result.currentTotal, 0.001)
+    }
+
+    @Test
+    fun `computeComparison totals use the same elapsed days of the previous period`() {
+        val today = LocalDate.of(2026, 11, 3)
+        val txs = listOf(
+            createTx(id = 1, amount = -2000, date = LocalDate.of(2026, 10, 2)),
+            createTx(id = 2, amount = -50000, date = LocalDate.of(2026, 10, 25), category = "RENT"),
+            createTx(id = 3, amount = -1500, date = LocalDate.of(2026, 11, 2))
+        )
+        for (mode in ComparisonMode.values()) {
+            val result = vm.computeComparison(ComparisonPeriod.MONTH, mode, txs, emptyMap(), today, zone, locale)
+            assertEquals(15.00, result.currentTotal, 0.001)
+            assertEquals(20.00, result.previousTotal, 0.001)
+            assertTrue(result.hasData)
+        }
+        val categories = vm.computeComparison(
+            ComparisonPeriod.MONTH, ComparisonMode.CATEGORIES, txs, emptyMap(), today, zone, locale
+        ).breakdown
+        // Rent was paid later in October, so it is not part of the 1-3 Oct comparison.
+        assertEquals(1, categories.size)
+        assertEquals(20.00, categories.single().previousValue, 0.001)
     }
 }

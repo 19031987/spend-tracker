@@ -84,6 +84,15 @@ private val DarkColors: ColorScheme = darkColorScheme(
  * Semantic money colors that are not part of the Material color scheme.
  * Always read them through [SpendTrackerTheme.finance] so they follow the
  * app's own light/dark choice rather than the system setting.
+ *
+ * - [income] / [expense]: text/icon colour for money in / money out amounts.
+ * - [surplusContainer] / [onSurplusContainer]: green-tinted background + text
+ *   (saved, paid, "auto-categorised" hints).
+ * - [deficitContainer] / [onDeficitContainer]: red-tinted background + text
+ *   (overspent, overdue).
+ * - [warning], [warningContainer] / [onWarningContainer]: amber for cautions
+ *   (possible duplicate, needs review, different amount).
+ * Never use raw `Color(0x…)` in screens: pick one of these or a MaterialTheme role.
  */
 @Immutable
 data class FinanceColors(
@@ -92,7 +101,10 @@ data class FinanceColors(
     val surplusContainer: Color,
     val onSurplusContainer: Color,
     val deficitContainer: Color,
-    val onDeficitContainer: Color
+    val onDeficitContainer: Color,
+    val warning: Color,
+    val warningContainer: Color,
+    val onWarningContainer: Color
 )
 
 private val LightFinance = FinanceColors(
@@ -101,7 +113,10 @@ private val LightFinance = FinanceColors(
     surplusContainer = Color(0xFFD5F2E3),
     onSurplusContainer = Color(0xFF0B4A31),
     deficitContainer = Color(0xFFFCE1DD),
-    onDeficitContainer = Color(0xFF7A1D14)
+    onDeficitContainer = Color(0xFF7A1D14),
+    warning = Color(0xFFB45309),
+    warningContainer = Color(0xFFFEF3C7),
+    onWarningContainer = Color(0xFF78350F)
 )
 
 private val DarkFinance = FinanceColors(
@@ -110,7 +125,10 @@ private val DarkFinance = FinanceColors(
     surplusContainer = Color(0xFF16392A),
     onSurplusContainer = Color(0xFFB3EBCD),
     deficitContainer = Color(0xFF45201C),
-    onDeficitContainer = Color(0xFFFFD2CB)
+    onDeficitContainer = Color(0xFFFFD2CB),
+    warning = Color(0xFFFBBF24),
+    warningContainer = Color(0xFF4A3410),
+    onWarningContainer = Color(0xFFFDE68A)
 )
 
 val LocalFinanceColors = staticCompositionLocalOf { LightFinance }

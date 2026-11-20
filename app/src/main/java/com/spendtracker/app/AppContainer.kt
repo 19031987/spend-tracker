@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.spendtracker.app.data.AppDatabase
+import com.spendtracker.app.data.BackupRepository
 import com.spendtracker.app.data.PlanningRepository
 import com.spendtracker.app.data.SpendRepository
 import com.spendtracker.app.data.UserPreferences
@@ -17,11 +18,12 @@ class AppContainer(context: Context) {
     val preferences = UserPreferences(context)
     val repository = SpendRepository(db.transactionDao(), db.accountDao(), db.catalogDao())
     val planningRepository = PlanningRepository(db.planningDao())
+    val backupRepository = BackupRepository(db)
 
     val viewModelFactory = viewModelFactory {
         initializer { AnalyticsViewModel(repository) }
         initializer { AddTransactionViewModel(repository) }
-        initializer { SettingsViewModel(repository, preferences) }
+        initializer { SettingsViewModel(repository, preferences, backupRepository) }
         initializer { TransactionsViewModel(repository) }
         initializer { com.spendtracker.app.ui.ComparisonViewModel(repository) }
         initializer { com.spendtracker.app.ui.dashboard.DashboardViewModel(repository, planningRepository) }

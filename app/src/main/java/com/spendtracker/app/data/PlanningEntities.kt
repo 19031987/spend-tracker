@@ -121,4 +121,20 @@ abstract class PlanningDao {
 
     @Query("DELETE FROM goal_contributions WHERE id = :id")
     abstract suspend fun deleteContribution(id: Long)
+
+    // Backup / restore
+    @Query("SELECT * FROM budgets") abstract suspend fun getBudgets(): List<BudgetEntity>
+    @Query("SELECT * FROM recurring_items ORDER BY id") abstract suspend fun getRecurring(): List<RecurringItemEntity>
+    @Query("SELECT * FROM goals ORDER BY id") abstract suspend fun getGoals(): List<GoalEntity>
+    @Query("SELECT * FROM goal_contributions ORDER BY id") abstract suspend fun getContributions(): List<GoalContributionEntity>
+
+    @Insert abstract suspend fun insertBudgets(budgets: List<BudgetEntity>)
+    @Insert abstract suspend fun insertRecurringItems(items: List<RecurringItemEntity>)
+    @Insert abstract suspend fun insertGoals(goals: List<GoalEntity>)
+    @Insert abstract suspend fun insertContributions(contributions: List<GoalContributionEntity>)
+
+    @Query("DELETE FROM budgets") abstract suspend fun clearBudgets()
+    @Query("DELETE FROM recurring_items") abstract suspend fun clearRecurring()
+    @Query("DELETE FROM goals") abstract suspend fun clearGoals()
+    @Query("DELETE FROM goal_contributions") abstract suspend fun clearContributions()
 }

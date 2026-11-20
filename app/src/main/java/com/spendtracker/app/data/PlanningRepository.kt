@@ -27,6 +27,10 @@ class PlanningRepository(private val dao: PlanningDao) {
 
     suspend fun saveRecurring(entity: RecurringItemEntity): Long = dao.upsertRecurring(entity)
 
+    suspend fun updateRecurring(entity: RecurringItemEntity) {
+        dao.updateRecurring(entity)
+    }
+
     suspend fun setRecurringStatus(id: Long, status: String) {
         dao.setRecurringStatus(id, status)
     }

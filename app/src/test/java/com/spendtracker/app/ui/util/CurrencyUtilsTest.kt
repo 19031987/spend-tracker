@@ -80,4 +80,30 @@ class CurrencyUtilsTest {
         val parsed = CurrencyUtils.parseDecimalToMinor(CurrencyUtils.minorToDecimalString(minor))
         assertEquals(minor, parsed)
     }
+
+    @Test
+    fun `parseDecimalToMinor treats commas as thousands separators or a decimal comma`() {
+        assertEquals(100000L, CurrencyUtils.parseDecimalToMinor("1,000"))
+        assertEquals(123456L, CurrencyUtils.parseDecimalToMinor("1,234.56"))
+        assertEquals(999L, CurrencyUtils.parseDecimalToMinor("9,99"))
+        assertEquals(999L, CurrencyUtils.parseDecimalToMinor("9.99"))
+        assertEquals(123456700L, CurrencyUtils.parseDecimalToMinor("1,234,567"))
+        assertEquals(1200L, CurrencyUtils.parseDecimalToMinor("12"))
+        assertEquals(950L, CurrencyUtils.parseDecimalToMinor("9,5"))
+        assertNull(CurrencyUtils.parseDecimalToMinor("abc"))
+    }
+
+    @Test
+    fun `parseDecimalToMinor strips currency symbols and spaces`() {
+        assertEquals(123400L, CurrencyUtils.parseDecimalToMinor("£ 1,234"))
+        assertEquals(1050L, CurrencyUtils.parseDecimalToMinor("£10.50"))
+    }
+
+    @Test
+    fun `parseDecimalToMinor rejects malformed comma input`() {
+        assertNull(CurrencyUtils.parseDecimalToMinor("1,2345"))
+        assertNull(CurrencyUtils.parseDecimalToMinor("12,34,5"))
+        assertNull(CurrencyUtils.parseDecimalToMinor("1.234,56"))
+        assertNull(CurrencyUtils.parseDecimalToMinor(","))
+    }
 }

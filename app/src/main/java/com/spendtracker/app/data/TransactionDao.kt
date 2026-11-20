@@ -50,6 +50,13 @@ fun resolvePreferredBankSource(existingSource: String?, newSource: String?): Str
     if (isPremierOrHsbcBank(existingSource) || isPremierOrHsbcBank(newSource)) {
         return "HSBC"
     }
+    // A wallet/aggregator alert (PayPal, Google Pay...) never replaces the bank that actually paid.
+    if (isWalletSource(newSource) && !existingSource.isNullOrBlank() && !isWalletSource(existingSource)) {
+        return normalizeBankName(existingSource)
+    }
+    if (isWalletSource(existingSource) && !newSource.isNullOrBlank() && !isWalletSource(newSource)) {
+        return normalizeBankName(newSource)
+    }
     return normalizeBankName(newSource ?: existingSource)
 }
 
@@ -66,6 +73,240 @@ fun isMerchantDuplicate(existingMerchant: String?, newMerchant: String?, sourceN
     return exClean.isNotBlank() && exClean.equals(newClean, ignoreCase = true)
 }
 
+// ---------------------------------------------------------------------------------------------
+// Duplicate detection rules (one set of rules for insert time, the on-open repair and the view).
+// Mirrored 1:1 in test_bank_deduplication.py (dedup_decision & friends).
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Two alerts from the same bank (e.g. HSBC app + HSBC Premier SMS) for one payment.
+ * HSBC/Premier pairs have been seen up to ~3 minutes apart; the on-open repair already used 180 s,
+ * so insert time, the repair and the view all share this one window.
+ */
+const val DEDUP_WINDOW_MILLIS = 180_000L
+
+/**
+ * Same bank and the same known merchant on both alerts: a real duplicate arrives within seconds, so
+ * two genuine identical purchases ("Pret £3.20" twice a couple of minutes apart) stay separate.
+ * Generic-vs-known pairs (e.g. HSBC app + Premier SMS) keep [DEDUP_WINDOW_MILLIS].
+ */
+const val SAME_MERCHANT_DEDUP_WINDOW_MILLIS = 60_000L
+
+/**
+ * A wallet/aggregator alert (PayPal, Google Pay, ...) and the alert of the bank card that funded it.
+ * PayPal's push and the card issuer's alert can be a few minutes apart (PayPal charges the funding
+ * card after its own confirmation). 5 minutes covers that lag while keeping the chance of pairing
+ * two unrelated purchases of the exact same amount small; the pair must also have compatible merchants.
+ */
+const val WALLET_DEDUP_WINDOW_MILLIS = 300_000L
+
+/** Widest window any rule uses; the SQL candidate query uses it, [dedupDecision] applies the exact one. */
+const val MAX_DEDUP_WINDOW_MILLIS = 300_000L
+
+/** Sources that relay a payment made with a bank card/account rather than holding the money themselves. */
+val WALLET_SOURCES: Set<String> = setOf("PayPal", "Google Pay", "Apple Pay", "Samsung Pay")
+
+fun isWalletSource(source: String?): Boolean =
+    !source.isNullOrBlank() && normalizeBankName(source) in WALLET_SOURCES
+
+private val WALLET_MERCHANT_PREFIX = Regex(
+    "(?i)^\\s*(?:paypal|pp(?=\\s*\\*)|google\\s*pay|google|gpay|apple\\s*pay|samsung\\s*pay)\\b\\s*[*:\\-]?\\s*"
+)
+
+/** "PAYPAL *UBER" -> "UBER", "Google Pay" -> "", "Tesco" -> "Tesco". */
+fun stripWalletMerchantPrefix(merchant: String?): String =
+    merchant?.let { WALLET_MERCHANT_PREFIX.replace(it, "") }?.trim().orEmpty()
+
+/** True when a bank-side merchant only names the wallet ("PayPal", "PAYPAL *UBER", "GOOGLE *Pret"). */
+fun merchantNamesWallet(merchant: String?): Boolean =
+    !merchant.isNullOrBlank() && WALLET_MERCHANT_PREFIX.containsMatchIn(merchant)
+
+/** Loose comparison key: wallet prefix stripped, lower case, letters/digits only, single spaces. */
+fun walletMerchantKey(merchant: String?): String =
+    stripWalletMerchantPrefix(merchant)
+        .lowercase(java.util.Locale.ROOT)
+        .replace(Regex("[^a-z0-9]+"), " ")
+        .trim()
+
+/** Generic for its own source, or nothing left once the wallet name is stripped ("PayPal Payment"). */
+private fun isGenericForPairing(merchant: String?, source: String?): Boolean {
+    if (isUnknownOrGenericMerchant(merchant, source)) return true
+    val stripped = stripWalletMerchantPrefix(merchant)
+    return merchantNamesWallet(merchant) && (stripped.isBlank() || isUnknownOrGenericMerchant(stripped, source))
+}
+
+/**
+ * Can a bank-side merchant and a wallet-side merchant describe the same purchase?
+ * Yes when either is generic, or their keys are equal, one is a prefix of the other, or they share a
+ * first word of 3+ characters ("PAYPAL *UBER TRIP" vs "Uber"; "PRET A MANGER" vs "Pret").
+ */
+fun isWalletMerchantCompatible(bankMerchant: String?, bankSource: String?, walletMerchant: String?, walletSource: String?): Boolean {
+    if (isGenericForPairing(bankMerchant, bankSource) || isGenericForPairing(walletMerchant, walletSource)) return true
+    val b = walletMerchantKey(bankMerchant)
+    val w = walletMerchantKey(walletMerchant)
+    if (b.isEmpty() || w.isEmpty()) return true
+    if (b == w || b.startsWith(w) || w.startsWith(b)) return true
+    val bFirst = b.substringBefore(' ')
+    val wFirst = w.substringBefore(' ')
+    return bFirst.length >= 3 && bFirst == wFirst
+}
+
+/** True for rows captured from a bank/wallet notification (the listener writes "Captured from ... alert"). */
+fun isAutoCapturedNote(note: String?): Boolean =
+    note?.trimStart()?.startsWith("Captured from", ignoreCase = true) == true
+
+/** The facts the duplicate rules look at, for a stored row, a list item or a new alert. */
+data class DedupKey(
+    val amountMinor: Long,
+    val type: TransactionType,
+    val source: String?,
+    val accountId: Long?,
+    val merchant: String?,
+    val timestamp: Long,
+    /** TRANSFER rows, INTERNAL_TRANSFER category or a paired leg: never deduplicated. */
+    val isTransfer: Boolean = false,
+    /** Entered by the user (not captured from an alert): saved as-is, never merged with another row. */
+    val isManual: Boolean = false
+)
+
+fun TransactionEntity.toDedupKey(): DedupKey = DedupKey(
+    amountMinor = kotlin.math.abs(amount),
+    type = type,
+    source = source,
+    accountId = accountId,
+    merchant = merchant,
+    timestamp = timestamp,
+    isTransfer = type == TransactionType.TRANSFER || category == "INTERNAL_TRANSFER" || pairedTransactionId != null,
+    isManual = !isAutoCapturedNote(note)
+)
+
+enum class DedupKind { SAME_BANK, WALLET_BANK }
+enum class DedupSurvivor { EXISTING, INCOMING }
+
+/** How two rows are merged: which kind of duplicate, and which row's bank/account survives. */
+data class DedupDecision(val kind: DedupKind, val survivor: DedupSurvivor)
+
+/**
+ * The single duplicate rule:
+ *  - never for transfers or manual entries; type must match (an expense never merges with income, so no sign flip);
+ *  - same absolute amount (non-zero);
+ *  - SAME_BANK: equivalent bank (HSBC == Premier) or same account, within [DEDUP_WINDOW_MILLIS],
+ *    merchants equal or one generic; when both merchants are known (and equal) only within
+ *    [SAME_MERCHANT_DEDUP_WINDOW_MILLIS]. The existing row survives.
+ *  - WALLET_BANK: one side a wallet (PayPal/Google Pay/...), the other a bank, within
+ *    [WALLET_DEDUP_WINDOW_MILLIS], compatible merchants. The bank row survives.
+ *  - two different wallets, or a wallet and an unknown ("Others") source: never.
+ */
+fun dedupDecision(existing: DedupKey, incoming: DedupKey): DedupDecision? {
+    if (existing.isTransfer || incoming.isTransfer) return null
+    if (existing.isManual || incoming.isManual) return null
+    if (existing.type == TransactionType.TRANSFER || incoming.type == TransactionType.TRANSFER) return null
+    if (existing.type != incoming.type) return null
+    val amount = kotlin.math.abs(existing.amountMinor)
+    if (amount == 0L || amount != kotlin.math.abs(incoming.amountMinor)) return null
+    val dt = kotlin.math.abs(existing.timestamp - incoming.timestamp)
+
+    val existingWallet = isWalletSource(existing.source)
+    val incomingWallet = isWalletSource(incoming.source)
+    if (existingWallet != incomingWallet) {
+        if (dt > WALLET_DEDUP_WINDOW_MILLIS) return null
+        val bank = if (existingWallet) incoming else existing
+        val wallet = if (existingWallet) existing else incoming
+        val bankName = normalizeBankName(bank.source)
+        if (bankName == "Others") return null
+        if (!isWalletMerchantCompatible(bank.merchant, bank.source, wallet.merchant, wallet.source)) return null
+        return DedupDecision(DedupKind.WALLET_BANK, if (existingWallet) DedupSurvivor.INCOMING else DedupSurvivor.EXISTING)
+    }
+
+    if (dt > DEDUP_WINDOW_MILLIS) return null
+    val sameAccount = existing.accountId != null && existing.accountId == incoming.accountId
+    if (!sameAccount && !isSameOrEquivalentBank(existing.source, incoming.source)) return null
+    val bank = resolvePreferredBankSource(existing.source, incoming.source)
+    if (!isMerchantDuplicate(existing.merchant, incoming.merchant, bank)) return null
+    val bothKnown = !isUnknownOrGenericMerchant(existing.merchant, bank) && !isUnknownOrGenericMerchant(incoming.merchant, bank)
+    if (bothKnown && dt > SAME_MERCHANT_DEDUP_WINDOW_MILLIS) return null
+    return DedupDecision(DedupKind.SAME_BANK, DedupSurvivor.EXISTING)
+}
+
+/**
+ * Picks the stored row an incoming alert duplicates, or null. Preference: same-bank with both merchants
+ * known, any same-bank, wallet pair with both merchants known, any wallet pair; ties go to the closest time.
+ * Returns the index into [candidates].
+ */
+fun pickDedupMatch(candidates: List<DedupKey>, incoming: DedupKey): Pair<Int, DedupDecision>? {
+    var best: Triple<Int, DedupDecision, Pair<Int, Long>>? = null
+    candidates.forEachIndexed { index, candidate ->
+        val decision = dedupDecision(candidate, incoming) ?: return@forEachIndexed
+        val bothKnown = !isUnknownOrGenericMerchant(candidate.merchant, candidate.source) &&
+            !isUnknownOrGenericMerchant(incoming.merchant, incoming.source)
+        val tier = (if (decision.kind == DedupKind.SAME_BANK) 0 else 2) + (if (bothKnown) 0 else 1)
+        val rank = tier to kotlin.math.abs(candidate.timestamp - incoming.timestamp)
+        val current = best
+        if (current == null || rank.first < current.third.first ||
+            (rank.first == current.third.first && rank.second < current.third.second)
+        ) {
+            best = Triple(index, decision, rank)
+        }
+    }
+    return best?.let { it.first to it.second }
+}
+
+/**
+ * Merchant for the surviving row. SAME_BANK: the known merchant wins. WALLET_BANK: the wallet's
+ * merchant replaces a bank merchant that is generic or only names the wallet ("PAYPAL *UBER" -> "Uber").
+ */
+fun mergedDedupMerchant(survivor: DedupKey, other: DedupKey, kind: DedupKind): String? {
+    val survivorGeneric = isUnknownOrGenericMerchant(survivor.merchant, survivor.source)
+    return when (kind) {
+        DedupKind.SAME_BANK -> when {
+            !survivorGeneric -> survivor.merchant
+            !isUnknownOrGenericMerchant(other.merchant, other.source) -> other.merchant
+            else -> null
+        }
+        DedupKind.WALLET_BANK -> {
+            val otherUsable = !isGenericForPairing(other.merchant, other.source) && !merchantNamesWallet(other.merchant)
+            when {
+                otherUsable && (survivorGeneric || merchantNamesWallet(survivor.merchant)) -> other.merchant?.trim()
+                survivorGeneric -> null
+                else -> survivor.merchant
+            }
+        }
+    }
+}
+
+/** Category for the surviving row: a specific category beats a default/blank one. */
+fun mergedDedupCategory(survivorCategory: String?, otherCategory: String?): String? {
+    fun isDefault(c: String?) = c.isNullOrBlank() || c == "OTHER_EXPENSE" || c == "OTHER_INCOME" || c == "General Spend"
+    return if (isDefault(survivorCategory) && !isDefault(otherCategory)) otherCategory else survivorCategory
+}
+
+/**
+ * View-level de-duplication with the same rules as insert time. Rows are processed in order; when a
+ * row duplicates a kept one, [merge] (survivor, other, kind) produces the single row that is kept.
+ */
+fun <T> dedupeRows(rows: List<T>, key: (T) -> DedupKey, merge: (survivor: T, other: T, kind: DedupKind) -> T): List<T> {
+    val kept = mutableListOf<T>()
+    val keptKeys = mutableListOf<DedupKey>()
+    for (row in rows) {
+        val incoming = key(row)
+        val hit = pickDedupMatch(keptKeys, incoming)
+        if (hit == null) {
+            kept.add(row)
+            keptKeys.add(incoming)
+            continue
+        }
+        val (index, decision) = hit
+        val merged = if (decision.survivor == DedupSurvivor.EXISTING) {
+            merge(kept[index], row, decision.kind)
+        } else {
+            merge(row, kept[index], decision.kind)
+        }
+        kept[index] = merged
+        keptKeys[index] = key(merged)
+    }
+    return kept
+}
+
 fun isTransactionDuplicate(
     existingAmountMinor: Long,
     existingMerchant: String?,
@@ -75,12 +316,14 @@ fun isTransactionDuplicate(
     newMerchant: String?,
     newSource: String?,
     newTimestamp: Long,
-    windowMillis: Long = 60_000L
+    windowMillis: Long = DEDUP_WINDOW_MILLIS
 ): Boolean {
-    if (kotlin.math.abs(existingAmountMinor) != kotlin.math.abs(newAmountMinor)) return false
     if (kotlin.math.abs(existingTimestamp - newTimestamp) > windowMillis) return false
-    if (!isSameOrEquivalentBank(existingSource, newSource)) return false
-    return isMerchantDuplicate(existingMerchant, newMerchant, resolvePreferredBankSource(existingSource, newSource))
+    fun typeOf(amount: Long) = if (amount > 0) TransactionType.INCOME else TransactionType.EXPENSE
+    return dedupDecision(
+        DedupKey(existingAmountMinor, typeOf(existingAmountMinor), existingSource, null, existingMerchant, existingTimestamp),
+        DedupKey(newAmountMinor, typeOf(newAmountMinor), newSource, null, newMerchant, newTimestamp)
+    ) != null
 }
 
 @Dao
@@ -102,79 +345,34 @@ abstract class TransactionDao {
     abstract suspend fun getById(id: Long): TransactionEntity?
 
     /**
-     * Time-window fingerprinting deduplication:
-     * isDuplicate = exists where |t_new - t_existing| <= delta_t AND amount matches AND source bank matches (including Premier <-> HSBC).
+     * Candidate rows for duplicate detection: same absolute amount and same type within the widest
+     * window, never transfers or paired legs. [dedupDecision] then applies the exact bank/merchant/window rule.
      */
     @Query(
         """
         SELECT * FROM transactions
         WHERE ABS(amount) = :absAmountMinor
-          AND (
-              LOWER(TRIM(source)) = LOWER(TRIM(:sourceName))
-              OR accountId = :accountId
-              OR (
-                  LOWER(TRIM(:sourceName)) IN ('hsbc', 'premier', 'hsbc premier', 'premier account', 'premier bank', 'hsbc advance', 'advance', 'advance account')
-                  AND LOWER(TRIM(source)) IN ('hsbc', 'premier', 'hsbc premier', 'premier account', 'premier bank', 'hsbc advance', 'advance', 'advance account')
-              )
-          )
-          AND ABS(timestamp - :timestamp) <= :windowMillis
-        ORDER BY ABS(timestamp - :timestamp) ASC
-        LIMIT 1
-        """
-    )
-    abstract suspend fun findDuplicate(
-        absAmountMinor: Long,
-        sourceName: String,
-        accountId: Long,
-        timestamp: Long,
-        windowMillis: Long = 60_000L
-    ): TransactionEntity?
-
-    /**
-     * Finds all candidates within the time window matching amount and bank (including Premier <-> HSBC).
-     */
-    @Query(
-        """
-        SELECT * FROM transactions
-        WHERE ABS(amount) = :absAmountMinor
-          AND (
-              LOWER(TRIM(source)) = LOWER(TRIM(:sourceName))
-              OR accountId = :accountId
-              OR (
-                  LOWER(TRIM(:sourceName)) IN ('hsbc', 'premier', 'hsbc premier', 'premier account', 'premier bank', 'hsbc advance', 'advance', 'advance account')
-                  AND LOWER(TRIM(source)) IN ('hsbc', 'premier', 'hsbc premier', 'premier account', 'premier bank', 'hsbc advance', 'advance', 'advance account')
-              )
-          )
+          AND type = :type
+          AND type != 'TRANSFER'
+          AND (category IS NULL OR category != 'INTERNAL_TRANSFER')
+          AND pairedTransactionId IS NULL
           AND ABS(timestamp - :timestamp) <= :windowMillis
         ORDER BY ABS(timestamp - :timestamp) ASC
         """
     )
-    abstract suspend fun findDuplicates(
+    abstract suspend fun findDedupCandidates(
         absAmountMinor: Long,
-        sourceName: String,
-        accountId: Long,
+        type: String,
         timestamp: Long,
-        windowMillis: Long = 60_000L
+        windowMillis: Long = MAX_DEDUP_WINDOW_MILLIS
     ): List<TransactionEntity>
 
-    /**
-     * Deduplicates taking into account the sender/merchant name, preferring exact known-vendor matches first.
-     */
-    suspend fun findMatchingDuplicate(
-        absAmountMinor: Long,
-        sourceName: String,
-        accountId: Long,
-        timestamp: Long,
-        merchant: String?,
-        windowMillis: Long = 60_000L
-    ): TransactionEntity? {
-        val candidates = findDuplicates(absAmountMinor, sourceName, accountId, timestamp, windowMillis)
-        if (!isUnknownOrGenericMerchant(merchant, sourceName)) {
-            candidates.firstOrNull {
-                !isUnknownOrGenericMerchant(it.merchant, sourceName) && isMerchantDuplicate(it.merchant, merchant, sourceName)
-            }?.let { return it }
-        }
-        return candidates.firstOrNull { isMerchantDuplicate(it.merchant, merchant, sourceName) }
+    /** The stored row that [incoming] duplicates (see [dedupDecision]) and how to merge, or null. */
+    suspend fun findDedupMatch(incoming: DedupKey): Pair<TransactionEntity, DedupDecision>? {
+        if (incoming.isTransfer || incoming.type == TransactionType.TRANSFER) return null
+        val candidates = findDedupCandidates(kotlin.math.abs(incoming.amountMinor), incoming.type.name, incoming.timestamp)
+        val (index, decision) = pickDedupMatch(candidates.map { it.toDedupKey() }, incoming) ?: return null
+        return candidates[index] to decision
     }
 
     @Query("UPDATE transactions SET pairedTransactionId = :pairedId WHERE id = :id")
@@ -183,6 +381,10 @@ abstract class TransactionDao {
     /** Deleting either leg of a transfer removes both, in one statement. */
     @Query("DELETE FROM transactions WHERE id = :id OR pairedTransactionId = :id")
     abstract suspend fun deleteWithPair(id: Long): Int
+
+    /** Deletes exactly one row (e.g. the other leg when a transfer is re-filed as a payment). */
+    @Query("DELETE FROM transactions WHERE id = :id")
+    abstract suspend fun deleteById(id: Long): Int
 
     /**
      * Atomically writes both legs of an internal transfer and cross-links them.
