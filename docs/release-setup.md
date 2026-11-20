@@ -36,8 +36,10 @@ Then add these in GitHub → **Settings → Secrets and variables → Actions �
 | `RELEASE_KEY_ALIAS` | key alias (`upload`, or `spendtracker` for the old key) |
 | `RELEASE_KEY_PASSWORD` | key password |
 
-Without `RELEASE_KEYSTORE_BASE64`, pull-request builds still compile and test (unsigned output), but a
-push to `main` fails on purpose rather than publishing an unsigned release.
+Without `RELEASE_KEYSTORE_BASE64`, pull-request builds still compile and test (unsigned output), and a
+push to `main` signs with the original key from git history (see above) instead of failing. CI only
+refuses to publish when a key or password it needs comes out empty, so an unsigned release is never
+published.
 
 For local signed builds, create an untracked `keystore.properties` in the repo root:
 ```
