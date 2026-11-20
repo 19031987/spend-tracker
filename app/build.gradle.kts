@@ -27,8 +27,8 @@ android {
         applicationId = "com.spendtracker.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 34
-        versionName = "2.3.0"
+        versionCode = 35
+        versionName = "2.3.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -2,6 +2,7 @@ package com.spendtracker.app
 
 import android.os.Bundle
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.biometric.BiometricManager
@@ -9,12 +10,10 @@ import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spendtracker.app.data.UserPreferences
+import com.spendtracker.app.ui.AppLockSession
 import com.spendtracker.app.ui.BiometricLockScreen
 import com.spendtracker.app.ui.SpendTrackerScreen
 import com.spendtracker.app.ui.theme.SpendTrackerTheme
@@ -22,9 +21,9 @@ import com.spendtracker.app.ui.theme.SpendTrackerTheme
 class MainActivity : AppCompatActivity() {
     private val container by lazy { AppContainer(applicationContext) }
 
-    // Session authentication state (persists across activity pauses, resets on fresh launch or lock)
-    private var isUnlocked by mutableStateOf(false)
-    private var biometricErrorMessage by mutableStateOf<String?>(null)
+    // Session authentication state. Kept in a ViewModel so it survives rotation and other
+    // configuration changes (which recreate this Activity); resets on a fresh launch.
+    private val lockSession: AppLockSession by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,10 +44,13 @@ class MainActivity : AppCompatActivity() {
             }
 
             // If biometric lock is disabled in settings, app is immediately unlocked
-            val isAppAccessible = !isBiometricEnabled || isUnlocked
+            val isAppAccessible = !isBiometricEnabled || lockSession.isUnlocked
 
             LaunchedEffect(isBiometricEnabled) {
-                if (isBiometricEnabled && !isUnlocked) {
+                // Only auto-prompt once per session: after a rotation the prompt (if still open)
+                // is restored by BiometricPrompt itself, otherwise the user taps "Unlock".
+                if (isBiometricEnabled && !lockSession.isUnlocked && !lockSession.autoPromptShown) {
+                    lockSession.markAutoPromptShown()
                     showBiometricPrompt()
                 }
             }
@@ -58,9 +60,9 @@ class MainActivity : AppCompatActivity() {
                     SpendTrackerScreen(container)
                 } else {
                     BiometricLockScreen(
-                        errorMessage = biometricErrorMessage,
+                        errorMessage = lockSession.errorMessage,
                         onAuthenticateClick = {
-                            biometricErrorMessage = null
+                            lockSession.errorMessage = null
                             showBiometricPrompt()
                         },
                         onBypassFallback = {
@@ -82,12 +84,12 @@ class MainActivity : AppCompatActivity() {
             canAuth == BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE
         ) {
             // If device lacks biometric hardware, gracefully unlock
-            isUnlocked = true
+            lockSession.markUnlocked()
             return
         }
 
         if (canAuth == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED) {
-            biometricErrorMessage = "No biometric or screen lock enrolled on this device. Please set up a fingerprint or PIN in device Settings."
+            lockSession.errorMessage = "No biometric or screen lock enrolled on this device. Please set up a fingerprint or PIN in device Settings."
             return
         }
 
@@ -98,8 +100,7 @@ class MainActivity : AppCompatActivity() {
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
-                    isUnlocked = true
-                    biometricErrorMessage = null
+                    lockSession.markUnlocked()
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
@@ -107,13 +108,13 @@ class MainActivity : AppCompatActivity() {
                     if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
                         errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON
                     ) {
-                        biometricErrorMessage = errString.toString()
+                        lockSession.errorMessage = errString.toString()
                     }
                 }
 
                 override fun onAuthenticationFailed() {
                     super.onAuthenticationFailed()
-                    biometricErrorMessage = "Fingerprint not recognised. Please try again."
+                    lockSession.errorMessage = "Fingerprint not recognised. Please try again."
                 }
             }
         )
