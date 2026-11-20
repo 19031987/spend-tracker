@@ -124,6 +124,9 @@ jobs:
         tag_name: v${{ steps.version.outputs.name }}
         name: "SpendTracker Release v${{ steps.version.outputs.name }}"
         body: |
+          ### SpendTracker v2.3.1 - Stay signed in when rotating
+          - 🔄 **Rotating the phone no longer asks you to unlock again** in a session you've already unlocked. The lock still appears on a fresh launch, and the fingerprint prompt no longer appears twice after a rotation.
+
           ### SpendTracker v2.3.0 - Accuracy and usability fixes
           - 💷 **No more double counting** when PayPal or Google Wallet and your bank both report the same payment; an expense can no longer be merged into an unrelated incoming payment.
           - ↔️ PayPal "You sent £x to …" is money out; Chase round-ups and moves to your own savers are no longer counted as spending.
