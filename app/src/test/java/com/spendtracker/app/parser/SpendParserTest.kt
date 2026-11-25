@@ -31,6 +31,20 @@ class SpendParserTest {
     }
 
     @Test
+    fun `wallet-only pipe merchant PAYPAL PAYMENT is PayPal not unknown vendor`() {
+        val parsed = SpendParser.parse(hsbcPkg, "Money Out", "£20.52 transaction | PAYPAL PAYMENT | HSBC ADVANCE")
+        assertNotNull(parsed)
+        assertEquals(SpendParser.TYPE_OUT, parsed!!.type)
+        assertEquals(20.52, parsed.amount, 0.001)
+        assertEquals("PayPal", parsed.merchant)
+        assertEquals("HSBC", parsed.source)
+        assertFalse(parsed.merchantIsFallback)
+        // Stored-note repair path (source as package, no title)
+        assertEquals("PayPal", SpendParser.parse("HSBC", "", "Money Out £20.52 transaction | PAYPAL PAYMENT | HSBC ADVANCE")!!.merchant)
+        assertEquals("", SpendParser.parse(hsbcPkg, "Money Out", "£5.00 transaction | Payment | HSBC ADVANCE")!!.merchant)
+    }
+
+    @Test
     fun `exact counterpart Money Out extracts merchant and Money Out type with expense category`() {
         val parsed = SpendParser.parse(hsbcPkg, "Money Out", "£15.50 transaction | Costa Coffee | HSBC ADVANCE")
         assertNotNull(parsed)
