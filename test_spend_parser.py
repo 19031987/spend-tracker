@@ -114,6 +114,19 @@ OUT_YOU_SENT_TO = re.compile(r"\byou(?:'ve|’ve| have)?\s+(?:sent|paid)\s+(?:(?
 INTERNAL_MOVE = re.compile(r"\bmoved\b[^!?\n]{0,60}?\b(?:to|into)\s+your\b", I)
 # Card-processor prefixes ("PAYPAL *NETFLIX", "SQ *THE COFFEE HOUSE", "SumUp *Cafe Nero", "ZETTLE_*Shop").
 PROCESSOR_PREFIX = re.compile(r"\b(?:paypal|sq|sumup|zettle|iz|sp)\s?[*_]+\s*", I)
+# A pipe merchant that only names a wallet ("PAYPAL PAYMENT", "Google Pay"): the wallet is the vendor.
+WALLET_ONLY_MERCHANT = re.compile(
+    r"^\s*(paypal|google\s*pay|gpay|apple\s*pay|samsung\s*pay)(?:\s+(?:payments?|transaction|purchase))?\s*$", I)
+
+
+def wallet_only_merchant(raw):
+    m = WALLET_ONLY_MERCHANT.match(raw)
+    if not m:
+        return None
+    w = re.sub(r"\s+", "", m.group(1).lower())
+    return {"paypal": "PayPal", "googlepay": "Google Pay", "gpay": "Google Pay", "applepay": "Apple Pay"}.get(w, "Samsung Pay")
+
+
 LEADING_PROCESSOR = re.compile(r"^(?:paypal|sq|sumup|zettle|iz|sp)\s?[*_]+\s*", I)
 # Reference codes after '*' ("AMZN Mktp UK*AB12CD3E4"): 6+ capitals/digits including a digit.
 STAR_REFERENCE = re.compile(r"(?<=[A-Za-z0-9])\s?\*(?=[A-Z0-9]*[0-9])[A-Z0-9]{6,}\b")
@@ -356,7 +369,7 @@ def extract_pipe_segments(title, text, content):
         _, _, _, amount, _ = money
         if amount <= 0 or amount >= 1_000_000:
             return None
-        if not is_usable_name(segs[1]):
+        if not is_usable_name(segs[1]) and not wallet_only_merchant(segs[1]):
             return None
         return segs
 
@@ -437,6 +450,11 @@ def parse_spend(pkg: str, title, text):
         )
         cleaned = "" if is_generic_pipe_merchant else clean_merchant(raw_pipe_merchant, source)
         final_merchant = "" if is_generic_pipe_merchant else (cleaned if cleaned else raw_pipe_merchant)
+        wallet_merchant = wallet_only_merchant(raw_pipe_merchant)
+        if wallet_merchant:
+            final_merchant = wallet_merchant
+        elif final_merchant.lower() in ("unknown", "unknown vendor", "money in", "money out", "transaction", "card payment", "payment"):
+            final_merchant, is_generic_pipe_merchant = "", True
         direction = "INCOMING" if tx_type == TYPE_IN else "OUTGOING"
         return {"type": tx_type, "direction": direction, "source": source, "amount": amount, "currency": currency,
                 "merchant": final_merchant, "merchantIsFallback": is_generic_pipe_merchant,
@@ -596,6 +614,17 @@ class TestSpendParser(unittest.TestCase):
         # Counterpart "Money Out" notification
         self.check(parse_spend(HSBC, "Money Out", "£15.50 transaction | Costa Coffee | HSBC ADVANCE"),
                    TYPE_OUT, 15.5, "Costa Coffee", "Dining & Drinks", "HSBC")
+
+    def test_pipe_format_wallet_only_merchant_is_the_wallet(self):
+        # Regression: "PAYPAL PAYMENT" lost its "PayPal" prefix, left "Payment" and showed Unknown vendor.
+        self.check(parse_spend(HSBC, "Money Out", "£20.52 transaction | PAYPAL PAYMENT | HSBC ADVANCE"),
+                   TYPE_OUT, 20.52, "PayPal", source="HSBC")
+        res = parse_spend("", "", "Money Out £20.52 transaction | PAYPAL PAYMENT | HSBC ADVANCE")
+        self.check(res, TYPE_OUT, 20.52, "PayPal", source="HSBC")
+        self.assertFalse(res["merchantIsFallback"])
+        self.check(parse_spend(HSBC, "Money Out", "£5.00 transaction | PAYPAL | HSBC ADVANCE"), TYPE_OUT, 5.0, "PayPal", source="HSBC")
+        self.check(parse_spend(HSBC, "Money Out", "£5.00 transaction | PAYPAL *NETFLIX | HSBC ADVANCE"), TYPE_OUT, 5.0, "Netflix", source="HSBC")
+        self.check(parse_spend(HSBC, "Money Out", "£5.00 transaction | Payment | HSBC ADVANCE"), TYPE_OUT, 5.0, "", source="HSBC")
 
     def test_pipe_format_premier_and_hsbc_premier_resolve_to_hsbc(self):
         self.check(parse_spend(HSBC, "Money Out", "£15.50 transaction | Costa Coffee | PREMIER"),

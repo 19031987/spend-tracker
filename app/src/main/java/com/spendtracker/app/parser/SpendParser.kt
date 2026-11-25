@@ -200,6 +200,19 @@ object SpendParser {
     private val INTERNAL_MOVE = Regex("\\bmoved\\b[^!?\\n]{0,60}?\\b(?:to|into)\\s+your\\b", IC)
     // Card-processor prefixes ("PAYPAL *NETFLIX", "SQ *THE COFFEE HOUSE", "SumUp *Cafe Nero", "ZETTLE_*Shop").
     private val PROCESSOR_PREFIX = Regex("\\b(?:paypal|sq|sumup|zettle|iz|sp)\\s?[*_]+\\s*", IC)
+    // A pipe merchant that only names a wallet ("PAYPAL PAYMENT", "Google Pay"): the wallet is the vendor.
+    private val WALLET_ONLY_MERCHANT = Regex(
+        "^\\s*(paypal|google\\s*pay|gpay|apple\\s*pay|samsung\\s*pay)(?:\\s+(?:payments?|transaction|purchase))?\\s*$", IC
+    )
+    private fun walletOnlyMerchant(raw: String): String? {
+        val w = WALLET_ONLY_MERCHANT.find(raw)?.groupValues?.get(1)?.lowercase(Locale.ROOT)?.replace(Regex("\\s+"), "") ?: return null
+        return when (w) {
+            "paypal" -> "PayPal"
+            "googlepay", "gpay" -> "Google Pay"
+            "applepay" -> "Apple Pay"
+            else -> "Samsung Pay"
+        }
+    }
     private val LEADING_PROCESSOR = Regex("^(?:paypal|sq|sumup|zettle|iz|sp)\\s?[*_]+\\s*", IC)
     // Reference codes after '*' ("AMZN Mktp UK*AB12CD3E4"): 6+ capitals/digits including a digit.
     private val STAR_REFERENCE = Regex("(?<=[A-Za-z0-9])\\s?\\*(?=[A-Z0-9]*[0-9])[A-Z0-9]{6,}\\b")
@@ -325,7 +338,7 @@ object SpendParser {
             val detected = detectSource("", seg2)
             val source = if (detected == "Card Payment" && seg2.isNotBlank()) seg2.trim() else if (detected != "Card Payment") detected else detectSource(pkg, content)
             val cleaned = cleanMerchantName(pipeSegments[1], source)
-            val rawMerchant = cleaned.ifBlank { pipeSegments[1].trim() }
+            val rawMerchant = walletOnlyMerchant(pipeSegments[1]) ?: cleaned.ifBlank { pipeSegments[1].trim() }
             val isGenericMerchant = rawMerchant.isBlank() ||
                 rawMerchant.equals("Unknown", ignoreCase = true) ||
                 rawMerchant.equals("Unknown Vendor", ignoreCase = true) ||
@@ -482,7 +495,7 @@ object SpendParser {
             for (r in BALANCE_PHRASES) seg0Scrubbed = r.replace(seg0Scrubbed, " ")
             val money = findFirstMoney(seg0Scrubbed) ?: return null
             if (money.amount <= 0.0 || money.amount >= 1_000_000.0) return null
-            if (!isUsableName(segs[1])) return null
+            if (!isUsableName(segs[1]) && walletOnlyMerchant(segs[1]) == null) return null
             return segs
         }
 

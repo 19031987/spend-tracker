@@ -327,7 +327,12 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
                 .trim()
 
             val parsed = com.spendtracker.app.parser.SpendParser.parse(source, "", cleanNote)
-            if (parsed != null && parsed.merchant.isNotBlank()) {
+            // A wallet-only name ("PayPal") never replaces a real merchant already on the row
+            // (e.g. one merged in from the PayPal app's own alert).
+            val walletOnlyOverKnown = parsed != null && merchantNamesWallet(parsed.merchant) &&
+                stripWalletMerchantPrefix(parsed.merchant).isBlank() &&
+                !isUnknownOrGenericMerchant(existingMerchant, source)
+            if (parsed != null && parsed.merchant.isNotBlank() && !walletOnlyOverKnown) {
                 val hasExplicitInSignal = Regex("(?i)\\bmoney[ -]in\\b").containsMatchIn(note) ||
                     cleanNote.trimStart().startsWith("+")
                 val resolvedType = if (existingType == "EXPENSE" && !hasExplicitInSignal && !isUnknownOrGenericMerchant(existingMerchant, source)) {
