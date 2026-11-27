@@ -161,6 +161,11 @@ const val TRANSFER_PAIR_WINDOW_MILLIS = 600_000L
 /** Written into the note of both legs; also stops a pair the user re-filed from being matched again. */
 const val TRANSFER_MATCH_MARKER = "Internal transfer: matched with"
 
+/** The alert text of a "Captured from ..." note, without the lines the app added below it. */
+fun alertTextOfNote(note: String): String =
+    note.substringBefore("\n" + TRANSFER_MATCH_MARKER)
+        .substringBefore("\n" + com.spendtracker.app.domain.AiAlertReader.NOTE_MARKER)
+
 /** The facts the own-account transfer rule looks at, for a stored row or a new alert. */
 data class TransferLeg(
     val amountMinor: Long,

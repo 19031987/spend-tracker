@@ -14,6 +14,9 @@ import com.spendtracker.app.data.TransactionEntity
 import com.spendtracker.app.data.TransactionType
 import com.spendtracker.app.data.isUnknownOrGenericMerchant
 import com.spendtracker.app.data.TransferLeg
+import com.spendtracker.app.data.UserPreferences
+import com.spendtracker.app.domain.AiAlertReader
+import com.spendtracker.app.llm.OnDeviceModel
 import com.spendtracker.app.data.transferMatchNote
 import com.spendtracker.app.data.mergedDedupCategory
 import com.spendtracker.app.data.mergedDedupMerchant
@@ -236,12 +239,82 @@ class SpendNotificationListenerService : NotificationListenerService() {
                             }
 
                             val insertedId = roomDb.transactionDao().insert(transaction)
+                            if (merchantName == null) readWithOnDeviceModel(insertedId, rawAlertText, sourceAccount.name)
                             Log.i(TAG, "Successfully inserted transaction into Room db (id=$insertedId, source=${sourceAccount.name}, merchant=${parsedWithBank.merchant}, cat=$resolvedCategoryKey)")
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to insert parsed notification into Room: ${e.message}", e)
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * The rules found no merchant: ask the on-device Gemma model (if the user switched it on and
+     * chose a model file). The answer is checked by [AiAlertReader.validMerchant] before the row is
+     * touched; the amount and direction stay as the rules read them. Runs after the row is saved,
+     * so capture never waits for the model.
+     */
+    private fun readWithOnDeviceModel(txId: Long, alertText: String, bank: String) {
+        val prefs = UserPreferences(applicationContext)
+        if (!prefs.isAiReaderEnabled) return
+        val modelPath = prefs.aiModelPath?.takeIf { java.io.File(it).canRead() } ?: return
+        serviceScope.launch {
+            try {
+                val reply = OnDeviceModel.generate(
+                    applicationContext, modelPath, AiAlertReader.SYSTEM_PROMPT, AiAlertReader.prompt(alertText)
+                )
+                val reading = reply?.let { AiAlertReader.parseReply(it) }
+                val merchant = AiAlertReader.validMerchant(alertText, reading?.merchant, bank)
+                    ?.let { name -> SpendParser.cleanMerchantName(name, bank).ifBlank { name } }
+                    ?.takeIf { !isUnknownOrGenericMerchant(it, bank) }
+                val looksLikeTransfer = reading?.ownTransfer == true
+                if (merchant != null || looksLikeTransfer) {
+                    roomDedupMutex.withLock {
+                        val roomDb = AppDatabase.get(applicationContext)
+                        val row = roomDb.transactionDao().getById(txId)
+                        if (row != null && isUnknownOrGenericMerchant(row.merchant, row.source)) {
+                            var category = row.category
+                            if (merchant != null && (category == null || category == "OTHER_EXPENSE" || category == "OTHER_INCOME")) {
+                                val rules = roomDb.catalogDao().getRules().mapNotNull { r ->
+                                    runCatching {
+                                        MerchantRule(
+                                            id = r.id,
+                                            matchType = MatchType.valueOf(r.matchType),
+                                            pattern = r.pattern,
+                                            categoryKey = r.categoryKey
+                                        )
+                                    }.getOrNull()
+                                }
+                                val validKeys = roomDb.catalogDao().getCategories()
+                                    .filter { !it.isHidden && it.type == row.type }.map { it.key }.toSet()
+                                val classification = CategorizationEngine.classify(merchant, rules, emptyList(), validKeys)
+                                if (classification is Classification.Matched) category = classification.categoryKey
+                            }
+                            val lines = listOfNotNull(
+                                merchant?.let { "${AiAlertReader.NOTE_MARKER} merchant read on this phone by Gemma" },
+                                if (looksLikeTransfer && row.category != "INTERNAL_TRANSFER") {
+                                    "${AiAlertReader.NOTE_MARKER} looks like a move between your own accounts"
+                                } else {
+                                    null
+                                }
+                            )
+                            if (lines.isNotEmpty()) {
+                                roomDb.transactionDao().update(
+                                    row.copy(
+                                        merchant = merchant ?: row.merchant,
+                                        category = category,
+                                        note = (listOfNotNull(row.note?.trimEnd()) + lines).joinToString("\n")
+                                    )
+                                )
+                                Log.i(TAG, "On-device model read transaction id=$txId (merchant set=${merchant != null})")
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "On-device model read failed: ${e.message}")
             }
         }
     }

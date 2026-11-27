@@ -28,10 +28,12 @@ android {
         applicationId = "com.spendtracker.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 38
-        versionName = "2.4.0"
+        versionCode = 39
+        versionName = "2.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // The on-device model runtime ships native code; phones are arm64.
+        ndk { abiFilters += listOf("arm64-v8a") }
     }
 
     buildFeatures {
@@ -59,6 +61,11 @@ android {
                 "proguard-rules.pro"
             )
         }
+    }
+    packaging {
+        jniLibs { useLegacyPackaging = true }
+        resources { excludes += setOf("META-INF/NOTICE.md", "META-INF/LICENSE.md", "META-INF/NOTICE", "META-INF/LICENSE",
+            "META-INF/DEPENDENCIES", "META-INF/versions/9/OSGI-INF/MANIFEST.MF") }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -95,6 +102,9 @@ dependencies {
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
+
+    // On-device LLM runtime (Gemma .litertlm models), same version as Pocket Agent. Offline.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.0")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

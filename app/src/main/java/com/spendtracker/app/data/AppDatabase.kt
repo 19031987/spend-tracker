@@ -187,7 +187,7 @@ fun cleanupAndConsolidateAccounts(db: SupportSQLiteDatabase) {
             }
 
             // C. Ensure canonical account name is properly normalized and trimmed
-            db.execSQL("UPDATE accounts SET name = ? WHERE id = ?", arrayOf(canonicalName, canonicalId))
+            db.execSQL("UPDATE accounts SET name = ? WHERE id = ?", arrayOf<Any?>(canonicalName, canonicalId))
         }
 
         // 3. Re-link orphan transactions having matching or recognizable source name to accounts
@@ -212,14 +212,14 @@ fun cleanupAndConsolidateAccounts(db: SupportSQLiteDatabase) {
             val norm = normalizeBankName(rawSource)
             val matched = remainingAccounts.firstOrNull { it.second.equals(norm, ignoreCase = true) }
             if (matched != null) {
-                db.execSQL("UPDATE transactions SET accountId = ?, source = ? WHERE id = ?", arrayOf(matched.first, matched.second, txId))
+                db.execSQL("UPDATE transactions SET accountId = ?, source = ? WHERE id = ?", arrayOf<Any?>(matched.first, matched.second, txId))
             } else {
                 db.execSQL("INSERT OR IGNORE INTO accounts(name) VALUES (?)", arrayOf(norm))
                 val getCursor = db.query("SELECT id, name FROM accounts WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1", arrayOf(norm))
                 if (getCursor.moveToFirst()) {
                     val newId = getCursor.getLong(0)
                     val newName = getCursor.getString(1)
-                    db.execSQL("UPDATE transactions SET accountId = ?, source = ? WHERE id = ?", arrayOf(newId, newName, txId))
+                    db.execSQL("UPDATE transactions SET accountId = ?, source = ? WHERE id = ?", arrayOf<Any?>(newId, newName, txId))
                     remainingAccounts.add(newId to newName)
                 }
                 getCursor.close()
@@ -321,8 +321,7 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
             val existingMerchant = if (cursor.isNull(4)) null else cursor.getString(4)
             val existingType = cursor.getString(5) ?: "EXPENSE"
 
-            val cleanNote = note
-                .substringBefore("\n" + TRANSFER_MATCH_MARKER)
+            val cleanNote = alertTextOfNote(note)
                 .replace(Regex("(?i)^Captured from [^:]+:\\s*"), "")
                 .replace(Regex("(?i)^Captured from [^:]+ alert:?\\s*"), "")
                 .trim()
@@ -345,7 +344,7 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
                 val newAmount = if (resolvedType == "INCOME") absMinor else -absMinor
                 db.execSQL(
                     "UPDATE transactions SET merchant = ?, type = ?, amount = ? WHERE id = ?",
-                    arrayOf(parsed.merchant, resolvedType, newAmount, txId)
+                    arrayOf<Any?>(parsed.merchant, resolvedType, newAmount, txId)
                 )
             }
         }
@@ -370,8 +369,7 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
             val landed = currentAmount < 0 && Regex("(?i)\\blanded in\\b").containsMatchIn(note)
             if (!landed && !isUnknownOrGenericMerchant(existingMerchant)) continue
 
-            val cleanNote = note
-                .substringBefore("\n" + TRANSFER_MATCH_MARKER)
+            val cleanNote = alertTextOfNote(note)
                 .replace(Regex("(?i)^Captured from [^:]+:\\s*"), "")
                 .trim()
             val parsed = com.spendtracker.app.parser.SpendParser.parse("", "", cleanNote) ?: continue
@@ -387,7 +385,7 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
             if (!isUnknownOrGenericMerchant(existingMerchant)) continue
             if (parsed.merchant.isBlank() || parsed.merchantIsFallback) continue
             if (kotlin.math.round(parsed.amount * 100).toLong() != kotlin.math.abs(currentAmount)) continue
-            db.execSQL("UPDATE transactions SET merchant = ? WHERE id = ?", arrayOf(parsed.merchant, txId))
+            db.execSQL("UPDATE transactions SET merchant = ? WHERE id = ?", arrayOf<Any?>(parsed.merchant, txId))
         }
         cursor.close()
     } catch (e: Exception) {
@@ -434,7 +432,7 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
                           AND ABS(timestamp - ?) <= 60000
                           AND (merchant IS NULL OR merchant = '' OR merchant IN ('Money In', 'Money Out', 'Unknown Vendor', 'HSBC Payment', 'Chase Payment', 'Card Payment', 'Payment', 'HSBC', 'Chase'))
                         """.trimIndent(),
-                        arrayOf(parsed.merchant, newType, newAmount, absMinor, timestamp)
+                        arrayOf<Any?>(parsed.merchant, newType, newAmount, absMinor, timestamp)
                     )
                 }
             }

@@ -102,5 +102,7 @@ fun PreferencesSection(viewModel: SettingsViewModel) {
                 }
             )
         }
+
+        AiReaderCard(viewModel)
     }
 }
