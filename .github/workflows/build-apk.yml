@@ -124,6 +124,13 @@ jobs:
         tag_name: v${{ steps.version.outputs.name }}
         name: "SpendTracker Release v${{ steps.version.outputs.name }}"
         body: |
+          ### SpendTracker v2.3.3 - Transfers between your own accounts
+          - 🔄 **Moving money between your own banks no longer counts as spending.** Money out of one bank and the same amount into another within 10 minutes is marked Internal transfer and excluded from totals; existing ones are fixed when the app opens.
+          - 🏷️ Chase "£x just landed in … from …" is money in with the sender's name; an HSBC payee that contains a bank name keeps its name instead of Unknown vendor.
+
+          ### SpendTracker v2.3.2 - PayPal bank alerts
+          - 🏷️ HSBC alerts like "PAYPAL PAYMENT" now record **PayPal** as the vendor instead of Unknown vendor.
+
           ### SpendTracker v2.3.1 - Stay signed in when rotating
           - 🔄 **Rotating the phone no longer asks you to unlock again** in a session you've already unlocked. The lock still appears on a fresh launch, and the fingerprint prompt no longer appears twice after a rotation.
 

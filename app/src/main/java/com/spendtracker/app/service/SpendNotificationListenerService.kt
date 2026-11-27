@@ -13,6 +13,8 @@ import com.spendtracker.app.data.SpendDatabase
 import com.spendtracker.app.data.TransactionEntity
 import com.spendtracker.app.data.TransactionType
 import com.spendtracker.app.data.isUnknownOrGenericMerchant
+import com.spendtracker.app.data.TransferLeg
+import com.spendtracker.app.data.transferMatchNote
 import com.spendtracker.app.data.mergedDedupCategory
 import com.spendtracker.app.data.mergedDedupMerchant
 import com.spendtracker.app.data.normalizeBankName
@@ -138,9 +140,24 @@ class SpendNotificationListenerService : NotificationListenerService() {
                             merchant = merchantName,
                             timestamp = eventTimestamp
                         )
+                        val rawAlert = parsedWithBank.rawText.ifBlank { content.orEmpty() }
+                        val incomingLeg = TransferLeg(
+                            amountMinor = minorAmount,
+                            type = txType,
+                            source = sourceAccount.name,
+                            category = resolvedCategoryKey,
+                            timestamp = eventTimestamp,
+                            note = "Captured from ${sourceAccount.name} alert: $rawAlert"
+                        )
+                        val repeatOfMatchedLeg = roomDb.transactionDao().isRepeatOfMatchedTransferLeg(incomingLeg)
                         val dedupHit = roomDb.transactionDao().findDedupMatch(incomingKey)
+                        // Money out of one bank + the same amount into another within minutes: a move
+                        // between the user's own accounts. Both legs are excluded from totals.
+                        val transferOther = if (dedupHit == null) roomDb.transactionDao().findTransferCounterpart(incomingLeg) else null
 
-                        if (dedupHit != null) {
+                        if (repeatOfMatchedLeg) {
+                            Log.i(TAG, "Skipped repeat alert for an already matched internal transfer leg")
+                        } else if (dedupHit != null) {
                             val (existingTx, decision) = dedupHit
                             val existingKey = existingTx.toDedupKey()
                             val survivorKey = if (decision.survivor == DedupSurvivor.EXISTING) existingKey else incomingKey
@@ -194,18 +211,29 @@ class SpendNotificationListenerService : NotificationListenerService() {
                             Log.i(TAG, "Deduplication (${decision.kind}): enriched existing transaction id=${existingTx.id} (bank=${preferredAccount.name}) instead of creating duplicate row")
                         } else {
                             val rawAlertText = parsedWithBank.rawText.ifBlank { content.orEmpty() }
+                            val baseNote = "Captured from ${sourceAccount.name} alert: $rawAlertText"
                             val transaction = TransactionEntity(
                                 accountId = sourceAccount.id,
                                 amount = signedAmount,
-                                category = resolvedCategoryKey,
-                                note = "Captured from ${sourceAccount.name} alert: $rawAlertText",
+                                category = if (transferOther != null) "INTERNAL_TRANSFER" else resolvedCategoryKey,
+                                note = if (transferOther != null) transferMatchNote(baseNote, transferOther.source, transferOther.type) else baseNote,
                                 timestamp = eventTimestamp,
                                 type = txType,
-                                excludeFromSpending = false,
+                                excludeFromSpending = transferOther != null,
                                 merchant = merchantName,
                                 source = sourceAccount.name,
                                 needsReview = true
                             )
+                            if (transferOther != null) {
+                                roomDb.transactionDao().update(
+                                    transferOther.copy(
+                                        category = "INTERNAL_TRANSFER",
+                                        excludeFromSpending = true,
+                                        note = transferMatchNote(transferOther.note, sourceAccount.name, txType)
+                                    )
+                                )
+                                Log.i(TAG, "Matched internal transfer with existing transaction id=${transferOther.id}")
+                            }
 
                             val insertedId = roomDb.transactionDao().insert(transaction)
                             Log.i(TAG, "Successfully inserted transaction into Room db (id=$insertedId, source=${sourceAccount.name}, merchant=${parsedWithBank.merchant}, cat=$resolvedCategoryKey)")
