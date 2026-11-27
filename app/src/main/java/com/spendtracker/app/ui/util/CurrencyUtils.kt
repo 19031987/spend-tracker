@@ -1,6 +1,10 @@
 package com.spendtracker.app.ui.util
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import java.math.BigDecimal
+import java.text.DecimalFormat
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -14,15 +18,38 @@ object CurrencyUtils {
      * Formats a minor amount (e.g. 1250L -> "£12.50").
      */
     fun formatMinor(minor: Long, locale: Locale = Locale.getDefault()): String {
-        return NumberFormat.getCurrencyInstance(locale)
-            .format(BigDecimal.valueOf(minor).movePointLeft(2))
+        return currencyFormat(locale).format(BigDecimal.valueOf(minor).movePointLeft(2))
+    }
+
+    /**
+     * Currency symbol chosen in Settings; null = the device locale's own symbol. Compose state,
+     * so amounts drawn on screen update when the setting changes.
+     */
+    var symbolOverride: String? by mutableStateOf<String?>(null)
+
+    /** The symbol amounts are shown with (e.g. "£"). */
+    fun symbol(locale: Locale = Locale.getDefault()): String =
+        symbolOverride?.takeIf { it.isNotBlank() }
+            ?: runCatching { NumberFormat.getCurrencyInstance(locale).currency?.getSymbol(locale) }
+                .getOrNull()?.takeIf { it.isNotBlank() }
+            ?: "£"
+
+    private fun currencyFormat(locale: Locale): NumberFormat {
+        val format = NumberFormat.getCurrencyInstance(locale)
+        val override = symbolOverride?.takeIf { it.isNotBlank() }
+        if (override != null && format is DecimalFormat) {
+            val symbols = format.decimalFormatSymbols
+            symbols.currencySymbol = override
+            format.decimalFormatSymbols = symbols
+        }
+        return format
     }
 
     /**
      * Formats a major amount in double (e.g. 12.5 -> "£12.50").
      */
     fun formatMajor(amount: Double, locale: Locale = Locale.getDefault()): String {
-        return NumberFormat.getCurrencyInstance(locale).format(amount)
+        return currencyFormat(locale).format(amount)
     }
 
     /**

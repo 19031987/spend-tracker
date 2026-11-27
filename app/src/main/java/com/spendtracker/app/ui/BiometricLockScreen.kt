@@ -72,7 +72,7 @@ fun BiometricLockScreen(
                     ) {
                         Icon(
                             Icons.Default.Fingerprint,
-                            contentDescription = "Fingerprint Sensor",
+                            contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(44.dp)
                         )

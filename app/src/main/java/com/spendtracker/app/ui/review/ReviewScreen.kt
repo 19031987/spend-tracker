@@ -40,6 +40,7 @@ import com.spendtracker.app.ui.components.CategoryEmojiBox
 import com.spendtracker.app.ui.components.CategoryPill
 import com.spendtracker.app.ui.components.EmptyState
 import com.spendtracker.app.ui.components.TonalButton
+import com.spendtracker.app.ui.components.isUnknownMerchant
 import com.spendtracker.app.ui.theme.ScreenPadding
 import com.spendtracker.app.ui.theme.Spacing
 import com.spendtracker.app.ui.theme.SpendTrackerTheme
@@ -234,7 +235,7 @@ private fun ReviewCard(
         }
     ) {
         val isIncome = tx.type == TransactionType.INCOME
-        val isUnknown = tx.merchant.isNullOrBlank()
+        val isUnknown = isUnknownMerchant(tx.merchant)
         AppCard(onClick = onOpen, contentPadding = 0.dp) {
             Row(
                 modifier = Modifier
@@ -253,7 +254,7 @@ private fun ReviewCard(
                         horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
                         Text(
-                            text = if (isUnknown) "Unknown vendor" else tx.merchant.orEmpty(),
+                            text = if (isUnknown) "Unknown merchant" else tx.merchant.orEmpty(),
                             style = MaterialTheme.typography.bodyLarge,
                             color = if (isUnknown) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,

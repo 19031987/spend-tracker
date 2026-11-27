@@ -1,13 +1,11 @@
 package com.spendtracker.app.ui.components
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -16,21 +14,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import com.spendtracker.app.data.AccountEntity
 import com.spendtracker.app.data.normalizeBankName
 import java.util.Locale
 
 /**
- * Shared account/source dropdown selector for Add and Edit transaction sheets.
+ * Shared account dropdown for the Add and Edit transaction sheets: a read-only field with a
+ * trailing arrow, the same control the Recurring sheet uses for its dropdowns.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccountDropdownSelector(
     accounts: List<AccountEntity>,
     selected: AccountEntity?,
     onAccountSelected: (AccountEntity) -> Unit,
     modifier: Modifier = Modifier,
-    label: String = "Account (Source)"
+    label: String = "Account"
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val uniqueAccounts = remember(accounts) {
@@ -40,29 +39,31 @@ fun AccountDropdownSelector(
             .sortedBy { it.name }
     }
 
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, style = MaterialTheme.typography.labelLarge)
-        Box {
-            OutlinedButton(
-                onClick = { expanded = true },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = selected?.name?.trim() ?: "Select account",
-                    maxLines = 1,
-                    modifier = Modifier.weight(1f)
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = modifier
+    ) {
+        OutlinedTextField(
+            value = selected?.name?.trim() ?: "Select account",
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            uniqueAccounts.forEach { account ->
+                DropdownMenuItem(
+                    text = { Text(account.name.trim()) },
+                    onClick = {
+                        onAccountSelected(account)
+                        expanded = false
+                    }
                 )
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                uniqueAccounts.forEach { account ->
-                    DropdownMenuItem(
-                        text = { Text(account.name.trim()) },
-                        onClick = {
-                            onAccountSelected(account)
-                            expanded = false
-                        }
-                    )
-                }
             }
         }
     }

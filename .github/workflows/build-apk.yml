@@ -124,6 +124,13 @@ jobs:
         tag_name: v${{ steps.version.outputs.name }}
         name: "SpendTracker Release v${{ steps.version.outputs.name }}"
         body: |
+          ### SpendTracker v2.4.0 - Clearer edit sheet, excluded transactions and wording
+          - 🚫 **Excluded transactions are marked** "Excluded" in every list and have their own filter; "Nullify from spend calculations" is now "Exclude from totals".
+          - 🔄 Opening a transfer and saving it keeps it a transfer; choose Money out / Money in or a category to turn it back into a payment.
+          - ✏️ Edit sheet: signed, coloured amount (−£ / +£), a hint when the merchant is unknown, and a proper dropdown for the account.
+          - 💱 The currency symbol in Settings now applies to every amount.
+          - 🗣️ One wording everywhere: Money in / Money out, Merchant, UK spelling; Review and Transactions agree on unknown merchants; category pills no longer clip at large font sizes; bank icons readable in dark mode.
+
           ### SpendTracker v2.3.3 - Transfers between your own accounts
           - 🔄 **Moving money between your own banks no longer counts as spending.** Money out of one bank and the same amount into another within 10 minutes is marked Internal transfer and excluded from totals; existing ones are fixed when the app opens.
           - 🏷️ Chase "£x just landed in … from …" is money in with the sender's name; an HSBC payee that contains a bank name keeps its name instead of Unknown vendor.

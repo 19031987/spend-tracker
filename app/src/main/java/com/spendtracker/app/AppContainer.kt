@@ -15,7 +15,10 @@ import com.spendtracker.app.ui.TransactionsViewModel
 
 class AppContainer(context: Context) {
     val db = AppDatabase.get(context)
-    val preferences = UserPreferences(context)
+    val preferences = UserPreferences(context).also {
+        // The currency symbol picked in Settings applies to every amount in the app.
+        com.spendtracker.app.ui.util.CurrencyUtils.symbolOverride = it.currencySymbol
+    }
     val repository = SpendRepository(db.transactionDao(), db.accountDao(), db.catalogDao())
     val planningRepository = PlanningRepository(db.planningDao())
     val backupRepository = BackupRepository(db)

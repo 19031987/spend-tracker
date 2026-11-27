@@ -79,7 +79,10 @@ class SettingsViewModel(
     val isBiometricLockEnabled: Flow<Boolean> = preferences.observeBiometricLock()
 
     fun getCurrentCurrency(): String = preferences.currencySymbol
-    fun setCurrency(symbol: String) { preferences.currencySymbol = symbol }
+    fun setCurrency(symbol: String) {
+        preferences.currencySymbol = symbol
+        com.spendtracker.app.ui.util.CurrencyUtils.symbolOverride = symbol
+    }
 
     fun getDefaultPeriod(): Period = preferences.defaultPeriod
     fun setDefaultPeriod(period: Period) { preferences.defaultPeriod = period }

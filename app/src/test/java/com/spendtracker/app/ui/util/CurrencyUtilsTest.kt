@@ -19,6 +19,20 @@ class CurrencyUtilsTest {
     }
 
     @Test
+    fun `currency symbol chosen in Settings replaces the locale symbol`() {
+        try {
+            CurrencyUtils.symbolOverride = "£"
+            assertEquals("£12.50", CurrencyUtils.formatMinor(1250L, us))
+            assertEquals("−£5.00", CurrencyUtils.formatSignedMinor(500L, isPositive = false, locale = us))
+            assertEquals("£", CurrencyUtils.symbol(us))
+        } finally {
+            CurrencyUtils.symbolOverride = null
+        }
+        assertEquals("$12.50", CurrencyUtils.formatMinor(1250L, us))
+        assertEquals("$", CurrencyUtils.symbol(us))
+    }
+
+    @Test
     fun `formatMinor formats zero`() {
         assertEquals("$0.00", CurrencyUtils.formatMinor(0L, us))
     }

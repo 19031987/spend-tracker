@@ -1033,7 +1033,7 @@ private fun RecurringFormSheet(
                     amountTouched = true
                 },
                 label = { Text(if (isIncome) "Amount you receive" else "Amount you pay") },
-                prefix = { Text("£") },
+                prefix = { Text(CurrencyUtils.symbol()) },
                 singleLine = true,
                 isError = amountError != null,
                 supportingText = if (amountError != null) {
