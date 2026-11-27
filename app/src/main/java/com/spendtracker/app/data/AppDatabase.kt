@@ -322,6 +322,7 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
             val existingType = cursor.getString(5) ?: "EXPENSE"
 
             val cleanNote = note
+                .substringBefore("\n" + TRANSFER_MATCH_MARKER)
                 .replace(Regex("(?i)^Captured from [^:]+:\\s*"), "")
                 .replace(Regex("(?i)^Captured from [^:]+ alert:?\\s*"), "")
                 .trim()
@@ -366,12 +367,24 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
             val currentAmount = cursor.getLong(1)
             val note = cursor.getString(2) ?: ""
             val existingMerchant = if (cursor.isNull(3)) null else cursor.getString(3)
-            if (!isUnknownOrGenericMerchant(existingMerchant)) continue
+            val landed = currentAmount < 0 && Regex("(?i)\\blanded in\\b").containsMatchIn(note)
+            if (!landed && !isUnknownOrGenericMerchant(existingMerchant)) continue
 
             val cleanNote = note
+                .substringBefore("\n" + TRANSFER_MATCH_MARKER)
                 .replace(Regex("(?i)^Captured from [^:]+:\\s*"), "")
                 .trim()
             val parsed = com.spendtracker.app.parser.SpendParser.parse("", "", cleanNote) ?: continue
+            // "£32.00 just landed in ... from X" was once saved as money out: it is money in.
+            if (landed && parsed.type == com.spendtracker.app.parser.SpendParser.TYPE_IN) {
+                db.execSQL(
+                    "UPDATE transactions SET type = 'INCOME', amount = ?, " +
+                        "category = CASE WHEN category IS NULL OR category IN ('OTHER_EXPENSE', 'General Spend') THEN 'OTHER_INCOME' ELSE category END " +
+                        "WHERE id = ? AND type = 'EXPENSE'",
+                    arrayOf<Any?>(kotlin.math.abs(currentAmount), txId)
+                )
+            }
+            if (!isUnknownOrGenericMerchant(existingMerchant)) continue
             if (parsed.merchant.isBlank() || parsed.merchantIsFallback) continue
             if (kotlin.math.round(parsed.amount * 100).toLong() != kotlin.math.abs(currentAmount)) continue
             db.execSQL("UPDATE transactions SET merchant = ? WHERE id = ?", arrayOf(parsed.merchant, txId))
@@ -616,6 +629,57 @@ fun cleanupAndRepairTransactions(db: SupportSQLiteDatabase, context: Context) {
         }
     } catch (e: Exception) {
         android.util.Log.w("AppDatabase", "Clean Money In labels and deduplicate notice: ${e.message}")
+    }
+
+    // 6. Moves between the user's own accounts already saved as two separate transactions
+    //    (money out of one bank + the same amount into another within minutes, see isOwnTransferPair):
+    //    both legs become Internal transfer and are excluded from totals. A matched leg carries
+    //    TRANSFER_MATCH_MARKER in its note, so a pair the user re-files is never matched again.
+    try {
+        data class LegRow(val id: Long, val leg: TransferLeg)
+        val legCursor = db.query(
+            "SELECT id, amount, type, source, category, timestamp, excludeFromSpending, pairedTransactionId, note " +
+                "FROM transactions WHERE type IN ('EXPENSE', 'INCOME') AND excludeFromSpending = 0 " +
+                "AND pairedTransactionId IS NULL AND note LIKE 'Captured from %' ORDER BY timestamp ASC, id ASC"
+        )
+        val legs = mutableListOf<LegRow>()
+        while (legCursor.moveToNext()) {
+            val type = runCatching { TransactionType.valueOf(legCursor.getString(2)) }.getOrNull() ?: continue
+            legs.add(
+                LegRow(
+                    legCursor.getLong(0),
+                    TransferLeg(
+                        amountMinor = kotlin.math.abs(legCursor.getLong(1)),
+                        type = type,
+                        source = if (legCursor.isNull(3)) null else legCursor.getString(3),
+                        category = if (legCursor.isNull(4)) null else legCursor.getString(4),
+                        timestamp = legCursor.getLong(5),
+                        note = if (legCursor.isNull(8)) null else legCursor.getString(8)
+                    )
+                )
+            )
+        }
+        legCursor.close()
+        val used = mutableSetOf<Long>()
+        for ((_, sameAmount) in legs.groupBy { it.leg.amountMinor }) {
+            if (sameAmount.size < 2) continue
+            for (a in sameAmount) {
+                if (a.id in used) continue
+                val b = sameAmount
+                    .filter { it.id != a.id && it.id !in used && isOwnTransferPair(a.leg, it.leg) }
+                    .minByOrNull { kotlin.math.abs(it.leg.timestamp - a.leg.timestamp) } ?: continue
+                used.add(a.id)
+                used.add(b.id)
+                for ((self, other) in listOf(a to b, b to a)) {
+                    db.execSQL(
+                        "UPDATE transactions SET category = 'INTERNAL_TRANSFER', excludeFromSpending = 1, note = ? WHERE id = ?",
+                        arrayOf<Any?>(transferMatchNote(self.leg.note, other.leg.source, other.leg.type), self.id)
+                    )
+                }
+            }
+        }
+    } catch (e: Exception) {
+        android.util.Log.w("AppDatabase", "Match internal transfers notice: ${e.message}")
     }
 }
 

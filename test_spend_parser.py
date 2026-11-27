@@ -84,7 +84,7 @@ STRONG_IN = re.compile(
     r"\b(?:received from|you(?:'ve|’ve| have)? received|received|sent you|paid you|refund(?:ed)?|cashback|salary|wages|payroll|"
     r"paid in|paid into|credited|deposit(?:ed)?|top(?:ped)?[ -]?up|added to your|has been added|"
     r"have been added|you(?:'ve|’ve| have)? added|added money|money in|reimburs(?:ed|ement)|"
-    r"transfer from|reversal|reversed|incoming payment|incoming transfer)\b", I)
+    r"transfer from|reversal|reversed|incoming payment|incoming transfer|landed in)\b", I)
 STRONG_OUT = re.compile(
     r"\b(?:you(?:'ve|’ve| have)? (?:spent|paid|sent|bought|made a payment)|spent|paid to|payment to|paid|"
     r"direct debit|standing order|purchase[ds]?|charged|debited|withdrawal|withdrawn|withdrew|"
@@ -353,6 +353,17 @@ def extract_merchant(tx_type, text, amount_end, title, source):
     return "", True
 
 
+BANK_WORD = re.compile(r"\b(?:chase|hsbc|monzo|revolut|barclays|amex)\b", I)
+
+
+def is_usable_pipe_name(seg):
+    # A payee in the pipe position may contain a bank word ("Raghavendra chase raghav").
+    if is_usable_name(seg) or wallet_only_merchant(seg):
+        return True
+    stripped = re.sub(r"\s+", " ", BANK_WORD.sub(" ", seg)).strip()
+    return stripped != seg.strip() and is_usable_name(stripped)
+
+
 def extract_pipe_segments(title, text, content):
     def check_candidate(raw_str):
         if not raw_str or ("|" not in raw_str and "¦" not in raw_str):
@@ -369,7 +380,7 @@ def extract_pipe_segments(title, text, content):
         _, _, _, amount, _ = money
         if amount <= 0 or amount >= 1_000_000:
             return None
-        if not is_usable_name(segs[1]) and not wallet_only_merchant(segs[1]):
+        if not is_usable_pipe_name(segs[1]):
             return None
         return segs
 
@@ -625,6 +636,15 @@ class TestSpendParser(unittest.TestCase):
         self.check(parse_spend(HSBC, "Money Out", "£5.00 transaction | PAYPAL | HSBC ADVANCE"), TYPE_OUT, 5.0, "PayPal", source="HSBC")
         self.check(parse_spend(HSBC, "Money Out", "£5.00 transaction | PAYPAL *NETFLIX | HSBC ADVANCE"), TYPE_OUT, 5.0, "Netflix", source="HSBC")
         self.check(parse_spend(HSBC, "Money Out", "£5.00 transaction | Payment | HSBC ADVANCE"), TYPE_OUT, 5.0, "", source="HSBC")
+
+    def test_own_account_transfer_alerts_parse_both_legs(self):
+        # Regression: Chase "just landed" was read as money out with no sender; the HSBC payee
+        # containing the word "chase" was dropped.
+        res = parse_spend(CHASE, "Chase", "\U0001F389 £32.00 just landed in Raghavendra\u2019s Account from GUDIPA R P")
+        self.check(res, TYPE_IN, 32.0, "Gudipa R P", source="Chase")
+        res = parse_spend(HSBC, "Money Out", "£32.00 transaction | Raghavendra chase raghav | HSBC ADVANCE")
+        self.check(res, TYPE_OUT, 32.0, "Raghavendra Chase Raghav", source="HSBC")
+        self.check(parse_spend(HSBC, "Money Out", "£5.00 transaction | HSBC Payment | HSBC ADVANCE"), TYPE_OUT, 5.0, "", source="HSBC")
 
     def test_pipe_format_premier_and_hsbc_premier_resolve_to_hsbc(self):
         self.check(parse_spend(HSBC, "Money Out", "£15.50 transaction | Costa Coffee | PREMIER"),

@@ -50,7 +50,9 @@ import com.spendtracker.app.ui.components.DestructiveTextButton
 import com.spendtracker.app.ui.components.PrimaryButton
 import com.spendtracker.app.ui.components.SheetContainer
 import com.spendtracker.app.ui.components.SheetHeader
+import com.spendtracker.app.ui.components.isUnknownMerchant
 import com.spendtracker.app.ui.theme.Spacing
+import com.spendtracker.app.ui.theme.SpendTrackerTheme
 import com.spendtracker.app.ui.util.CurrencyUtils
 import com.spendtracker.app.ui.util.DateUtils
 import java.util.Calendar
@@ -118,6 +120,9 @@ fun EditTransactionSheet(
     val context = LocalContext.current
     val currencySymbol = remember { localCurrencySymbol() }
     val wasTransfer = transaction.type == TransactionType.TRANSFER || transaction.categoryKey == "INTERNAL_TRANSFER"
+    // Stays a transfer on save until the user picks Money out / Money in or another category.
+    var keepTransfer by rememberSaveable { mutableStateOf(wasTransfer) }
+    val finance = SpendTrackerTheme.finance
 
     val deduplicatedAccounts = remember(accounts) { deduplicateAccounts(accounts) }
 
@@ -126,7 +131,9 @@ fun EditTransactionSheet(
         ?: deduplicatedAccounts.firstOrNull { it.name.trim().equals(normalizeBankName(transaction.accountName), ignoreCase = true) }
         ?: deduplicatedAccounts.firstOrNull()
 
-    val activeCategory = categories.firstOrNull { it.key == selectedCategoryKey && it.type == type }
+    val activeCategory = if (keepTransfer) categories.firstOrNull { it.key == "INTERNAL_TRANSFER" }
+    else categories.firstOrNull { it.key == selectedCategoryKey && it.type == type }
+    val merchantUnknown = isUnknownMerchant(merchantText)
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         SheetContainer {
@@ -135,7 +142,7 @@ fun EditTransactionSheet(
                 subtitle = DateUtils.formatDateTime(timestamp)
             )
 
-            if (wasTransfer) {
+            if (keepTransfer) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.small,
@@ -143,8 +150,8 @@ fun EditTransactionSheet(
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                 ) {
                     Text(
-                        "Filed as a transfer between your accounts, so it's left out of totals. " +
-                            "If it's really a payment, pick Money out or Money in and save.",
+                        "Transfer between your own accounts, so it's excluded from totals. " +
+                            "If it's really a payment, choose Money out or Money in, or pick a category.",
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm)
                     )
@@ -153,14 +160,18 @@ fun EditTransactionSheet(
 
             // 2-way Transaction Type Selector: Money Out vs Money In
             val types = listOf(
-                TransactionType.EXPENSE to "↓ Money Out",
-                TransactionType.INCOME to "↑ Money In"
+                TransactionType.EXPENSE to "Money out",
+                TransactionType.INCOME to "Money in"
             )
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 types.forEachIndexed { index, (t, label) ->
                     SegmentedButton(
-                        selected = type == t,
+                        selected = !keepTransfer && type == t,
                         onClick = {
+                            if (keepTransfer) {
+                                keepTransfer = false
+                                excludeFromSpending = false
+                            }
                             type = t
                             val curCat = categories.firstOrNull { it.key == selectedCategoryKey }
                             if (curCat != null && curCat.type != t) {
@@ -179,7 +190,13 @@ fun EditTransactionSheet(
             OutlinedTextField(
                 value = merchantText,
                 onValueChange = { merchantText = it },
-                label = { Text("Payee / Merchant Name") },
+                label = { Text("Merchant") },
+                placeholder = { Text("e.g. Tesco, Shell") },
+                supportingText = if (merchantUnknown && !keepTransfer) {
+                    { Text("Unknown merchant: add a name so it can be categorised") }
+                } else {
+                    null
+                },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -188,7 +205,14 @@ fun EditTransactionSheet(
             OutlinedTextField(
                 value = amountText,
                 onValueChange = { amountText = it.filter { c -> c.isDigit() || c == '.' || c == ',' } },
-                label = { Text("Amount ($currencySymbol)") },
+                label = { Text("Amount") },
+                prefix = {
+                    when {
+                        keepTransfer -> Text("$currencySymbol ")
+                        type == TransactionType.INCOME -> Text("+$currencySymbol ", color = finance.income)
+                        else -> Text("−$currencySymbol ", color = finance.expense)
+                    }
+                },
                 placeholder = { Text("0.00") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -235,7 +259,7 @@ fun EditTransactionSheet(
                     onClick = { showCategoryPicker = true }
                 )
 
-                if (merchantText.isNotBlank() && activeCategory != null) {
+                if (merchantText.isNotBlank() && activeCategory != null && !keepTransfer) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -246,14 +270,14 @@ fun EditTransactionSheet(
                             onCheckedChange = { autoRuleChecked = it }
                         )
                         Text(
-                            "Always categorize \"${merchantText.trim()}\" as ${activeCategory.name}",
+                            "Always categorise \"${merchantText.trim()}\" as ${activeCategory.name}",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
                 }
             }
 
-            // Nullify / Exclude toggle
+            // Exclude-from-totals toggle
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.medium,
@@ -266,18 +290,22 @@ fun EditTransactionSheet(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "Nullify from spend calculations",
+                            "Exclude from totals",
                             style = MaterialTheme.typography.titleSmall
                         )
                         Text(
-                            "Exclude this transaction from total spending and analytics",
+                            "Won't count towards spending, income or budgets",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Switch(
                         checked = excludeFromSpending,
-                        onCheckedChange = { excludeFromSpending = it }
+                        onCheckedChange = {
+                            excludeFromSpending = it
+                            // A transfer the user wants counted is an ordinary payment again.
+                            if (!it) keepTransfer = false
+                        }
                     )
                 }
             }
@@ -304,15 +332,16 @@ fun EditTransactionSheet(
                     val amount = parseMinorUnits(amountText)
                     val source = effectiveSource
                     when {
-                        amount == null -> localError = "Enter a valid amount"
+                        amount == null -> localError = "Enter a valid amount (max 2 decimals)"
                         source == null -> localError = "Select an account"
                         else -> onSave(
                             transaction.id,
-                            type,
+                            if (keepTransfer) transaction.type else type,
                             source.id,
-                            null,
+                            if (keepTransfer) transaction.destinationAccountId else null,
                             amount,
-                            selectedCategoryKey ?: if (type == TransactionType.INCOME) "OTHER_INCOME" else "OTHER_EXPENSE",
+                            if (keepTransfer) "INTERNAL_TRANSFER"
+                            else selectedCategoryKey ?: if (type == TransactionType.INCOME) "OTHER_INCOME" else "OTHER_EXPENSE",
                             merchantText.trim().takeIf { it.isNotEmpty() },
                             note.trim().takeIf { it.isNotEmpty() },
                             excludeFromSpending,
@@ -364,8 +393,11 @@ fun EditTransactionSheet(
             onDismiss = { showCategoryPicker = false },
             onCategorySelected = { cat ->
                 selectedCategoryKey = cat.key
+                keepTransfer = false
                 if (cat.key == "INTERNAL_TRANSFER") {
                     excludeFromSpending = true
+                } else if (wasTransfer) {
+                    excludeFromSpending = false
                 }
                 showCategoryPicker = false
             },
@@ -373,6 +405,7 @@ fun EditTransactionSheet(
                 onCreateCategory(name, groupId, newGroupName, emoji, colorHex, cType, ruleMerchant) { created ->
                     // Apply the category the user just made.
                     selectedCategoryKey = created.key
+                    keepTransfer = false
                     if (created.key == "INTERNAL_TRANSFER") excludeFromSpending = true
                 }
                 showCategoryPicker = false

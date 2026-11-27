@@ -601,8 +601,7 @@ private fun SuggestionsDialog(
 
 // region Edit sheet
 
-private fun currencySymbol(): String =
-    runCatching { Currency.getInstance(Locale.getDefault()).symbol }.getOrNull() ?: "£"
+private fun currencySymbol(): String = CurrencyUtils.symbol()
 
 /**
  * Bottom sheet to set, change or remove the budget of one category.

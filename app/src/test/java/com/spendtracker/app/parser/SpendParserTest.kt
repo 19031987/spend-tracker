@@ -45,6 +45,25 @@ class SpendParserTest {
     }
 
     @Test
+    fun `own account transfer alerts parse as money in with sender and money out with payee`() {
+        val landed = SpendParser.parse(chasePkg, "Chase", "\uD83C\uDF89 £32.00 just landed in Raghavendra\u2019s Account from GUDIPA R P")
+        assertNotNull(landed)
+        assertEquals(SpendParser.TYPE_IN, landed!!.type)
+        assertEquals(32.0, landed.amount, 0.001)
+        assertEquals("Gudipa R P", landed.merchant)
+        assertEquals("Chase", landed.source)
+        // Stored-note repair path
+        assertEquals(SpendParser.TYPE_IN, SpendParser.parse("", "", "\uD83C\uDF89 £32.00 just landed in Raghavendra\u2019s Account from GUDIPA R P")!!.type)
+
+        val out = SpendParser.parse(hsbcPkg, "Money Out", "£32.00 transaction | Raghavendra chase raghav | HSBC ADVANCE")
+        assertNotNull(out)
+        assertEquals(SpendParser.TYPE_OUT, out!!.type)
+        assertEquals("Raghavendra Chase Raghav", out.merchant)
+        assertEquals("HSBC", out.source)
+        assertEquals("", SpendParser.parse(hsbcPkg, "Money Out", "£5.00 transaction | HSBC Payment | HSBC ADVANCE")!!.merchant)
+    }
+
+    @Test
     fun `exact counterpart Money Out extracts merchant and Money Out type with expense category`() {
         val parsed = SpendParser.parse(hsbcPkg, "Money Out", "£15.50 transaction | Costa Coffee | HSBC ADVANCE")
         assertNotNull(parsed)

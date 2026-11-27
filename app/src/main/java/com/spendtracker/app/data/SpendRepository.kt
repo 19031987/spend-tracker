@@ -215,7 +215,11 @@ class SpendRepository(
         val srcName = normalizeBankName(rawAccounts[accountId]?.name ?: "Chase")
         val canonicalSrc = accountDao.getOrCreate(srcName)
         val dstName = normalizeBankName(destinationAccountId?.let { rawAccounts[it]?.name } ?: "HSBC")
-        val isTransfer = type == TransactionType.TRANSFER || categoryKey == "INTERNAL_TRANSFER"
+        // A captured alert matched as one leg of an own-account transfer keeps its own row and
+        // direction (money out / money in); only manual transfers are stored as a linked pair.
+        val matchedLeg = type != TransactionType.TRANSFER && categoryKey == "INTERNAL_TRANSFER" &&
+            transactionDao.getById(id)?.let { it.type != TransactionType.TRANSFER && it.category == "INTERNAL_TRANSFER" } == true
+        val isTransfer = !matchedLeg && (type == TransactionType.TRANSFER || categoryKey == "INTERNAL_TRANSFER")
 
         if (isTransfer) {
             val targetDestId = destinationAccountId ?: rawAccounts.values.firstOrNull { it.id != canonicalSrc.id }?.id ?: canonicalSrc.id

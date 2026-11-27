@@ -148,7 +148,7 @@ object SpendParser {
         "\\b(?:received from|you(?:'ve|’ve| have)? received|received|sent you|paid you|refund(?:ed)?|cashback|salary|wages|payroll|" +
             "paid in|paid into|credited|deposit(?:ed)?|top(?:ped)?[ -]?up|added to your|has been added|" +
             "have been added|you(?:'ve|’ve| have)? added|added money|money in|reimburs(?:ed|ement)|" +
-            "transfer from|reversal|reversed|incoming payment|incoming transfer)\\b",
+            "transfer from|reversal|reversed|incoming payment|incoming transfer|landed in)\\b",
         IC
     )
     private val STRONG_OUT = Regex(
@@ -495,7 +495,7 @@ object SpendParser {
             for (r in BALANCE_PHRASES) seg0Scrubbed = r.replace(seg0Scrubbed, " ")
             val money = findFirstMoney(seg0Scrubbed) ?: return null
             if (money.amount <= 0.0 || money.amount >= 1_000_000.0) return null
-            if (!isUsableName(segs[1]) && walletOnlyMerchant(segs[1]) == null) return null
+            if (!isUsablePipeName(segs[1])) return null
             return segs
         }
 
@@ -546,6 +546,15 @@ object SpendParser {
         "chase", "hsbc", "monzo", "revolut", "barclays", "paypal", "amex", "sent", "spend", "spent",
         "charge", "charges", "transaction", "transactions", "ending", "approved", "paid"
     )
+
+    // A payee in the pipe position may contain a bank word ("Raghavendra chase raghav": a transfer
+    // to the user's own Chase account). It is a name as long as something else is left.
+    private val BANK_WORD = Regex("\\b(?:chase|hsbc|monzo|revolut|barclays|amex)\\b", IC)
+    private fun isUsablePipeName(seg: String): Boolean {
+        if (isUsableName(seg) || walletOnlyMerchant(seg) != null) return true
+        val stripped = BANK_WORD.replace(seg, " ").replace(Regex("\\s+"), " ").trim()
+        return stripped != seg.trim() && isUsableName(stripped)
+    }
 
     private fun isUsableName(candidate: String?): Boolean {
         val c = candidate?.trim() ?: return false

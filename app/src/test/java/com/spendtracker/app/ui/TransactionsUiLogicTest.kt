@@ -107,6 +107,27 @@ class TransactionsUiLogicTest {
     }
 
     @Test
+    fun `excluded rows have their own filter and a captured transfer leg counts as a transfer`() {
+        val rows = listOf(
+            tx(1),
+            tx(2, exclude = true, merchant = "Refunded lunch"),
+            tx(3, type = TransactionType.INCOME, categoryKey = "INTERNAL_TRANSFER", exclude = true, merchant = "Gudipa R P")
+        )
+        assertEquals(listOf(2L), filterFeed(rows, "EXCLUDED", "").map { it.id })
+        assertEquals(listOf(3L), filterFeed(rows, "TRANSFERS", "").map { it.id })
+        assertEquals(listOf(1L), filterFeed(rows, "EXPENSE", "").map { it.id })
+        assertTrue(filterFeed(rows, "INCOME", "").isEmpty())
+    }
+
+    @Test
+    fun `blank and generic merchants are unknown`() {
+        assertTrue(com.spendtracker.app.ui.components.isUnknownMerchant(null))
+        assertTrue(com.spendtracker.app.ui.components.isUnknownMerchant("  "))
+        assertTrue(com.spendtracker.app.ui.components.isUnknownMerchant("Card Payment"))
+        assertFalse(com.spendtracker.app.ui.components.isUnknownMerchant("PayPal"))
+    }
+
+    @Test
     fun `a transfer pair is listed once, by its sending leg`() {
         val sending = tx(10, type = TransactionType.TRANSFER, categoryKey = "INTERNAL_TRANSFER", exclude = true)
             .copy(accountId = 1L, destinationAccountId = 2L)

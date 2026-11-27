@@ -88,6 +88,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -700,12 +703,14 @@ private fun TransactionsFeed(
         item(key = "filters") {
             val reviewPending = visibleTransactions.count { it.needsReview }
             val transferCount = visibleTransactions.count { isTransferItem(it) }
+            val excludedCount = visibleTransactions.count { it.excludeFromSpending && !isTransferItem(it) }
             val baseFilters = listOf(
                 "ALL" to "All · ${visibleTransactions.size}"
             ) + (if (reviewPending > 0 || filterType == "REVIEW") listOf("REVIEW" to "Needs review · $reviewPending") else emptyList()) + listOf(
                 "EXPENSE" to "Money out",
                 "INCOME" to "Money in"
-            ) + (if (transferCount > 0 || filterType == "TRANSFERS") listOf("TRANSFERS" to "Transfers · $transferCount") else emptyList())
+            ) + (if (transferCount > 0 || filterType == "TRANSFERS") listOf("TRANSFERS" to "Transfers · $transferCount") else emptyList()) +
+                (if (excludedCount > 0 || filterType == "EXCLUDED") listOf("EXCLUDED" to "Excluded · $excludedCount") else emptyList())
             val bankFilters = deduplicatedAccounts.map { acc ->
                 val cleanName = normalizeBankName(acc.name)
                 val count = visibleTransactions.count {
@@ -855,7 +860,9 @@ private fun AccountCard(
     selected: Boolean,
     onClick: () -> Unit
 ) {
-    val (_, brand) = ColorUtils.getBankBrandColors(name)
+    val (_, rawBrand) = ColorUtils.getBankBrandColors(name)
+    // Brand tones are dark; lighten them on a dark surface so the icon stays readable.
+    val brand = if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) lerp(rawBrand, Color.White, 0.45f) else rawBrand
     val finance = SpendTrackerTheme.finance
     AppCard(
         modifier = Modifier
@@ -937,6 +944,7 @@ internal fun filterFeed(
             it.type == TransactionType.INCOME && !it.excludeFromSpending && !isTransferItem(it)
         }
         filterType == "TRANSFERS" -> transactions.filter { isTransferItem(it) }
+        filterType == "EXCLUDED" -> transactions.filter { it.excludeFromSpending && !isTransferItem(it) }
         filterType.startsWith("BANK_") -> {
             val bankKey = filterType.removePrefix("BANK_").trim().lowercase(Locale.ROOT)
             transactions.filter {

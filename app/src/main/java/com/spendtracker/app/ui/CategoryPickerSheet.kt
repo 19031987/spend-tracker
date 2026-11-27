@@ -73,7 +73,7 @@ fun parseColorHex(hex: String): Color = ColorUtils.parseColorHex(hex)
 
 /**
  * "Category" field shared by the Add and Edit transaction sheets: category avatar + name
- * (or an amber "Uncategorized" placeholder) with a "Change" action. Tapping anywhere opens
+ * (or an amber "Uncategorised" placeholder) with a "Change" action. Tapping anywhere opens
  * the picker.
  */
 @Composable
@@ -113,14 +113,20 @@ internal fun CategoryField(
                     }
                 }
                 Text(
-                    text = category?.name ?: "Uncategorized",
+                    text = category?.name ?: "Uncategorised",
                     style = MaterialTheme.typography.bodyLarge,
                     color = if (category != null) MaterialTheme.colorScheme.onSurface else finance.warning,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                TextButton(onClick = onClick) { Text("Change") }
+                // The whole card is the button; this is only its label (one tap target, one TalkBack stop).
+                Text(
+                    "Change",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm)
+                )
             }
         }
     }
@@ -472,7 +478,7 @@ fun CategoryPickerContent(
                                 onCheckedChange = { autoRuleChecked = it }
                             )
                             Text(
-                                "Always categorize future transactions from \"$currentMerchant\" as this category",
+                                "Always categorise future transactions from \"$currentMerchant\" as this category",
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }

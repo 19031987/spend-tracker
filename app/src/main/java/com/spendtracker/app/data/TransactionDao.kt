@@ -155,6 +155,67 @@ fun isWalletMerchantCompatible(bankMerchant: String?, bankSource: String?, walle
 fun isAutoCapturedNote(note: String?): Boolean =
     note?.trimStart()?.startsWith("Captured from", ignoreCase = true) == true
 
+/** How far apart the two alerts of a move between the user's own accounts may be. */
+const val TRANSFER_PAIR_WINDOW_MILLIS = 600_000L
+
+/** Written into the note of both legs; also stops a pair the user re-filed from being matched again. */
+const val TRANSFER_MATCH_MARKER = "Internal transfer: matched with"
+
+/** The facts the own-account transfer rule looks at, for a stored row or a new alert. */
+data class TransferLeg(
+    val amountMinor: Long,
+    val type: TransactionType,
+    val source: String?,
+    val category: String?,
+    val timestamp: Long,
+    val excluded: Boolean = false,
+    val linked: Boolean = false,
+    val note: String? = null
+)
+
+fun TransactionEntity.toTransferLeg(): TransferLeg = TransferLeg(
+    amountMinor = kotlin.math.abs(amount),
+    type = type,
+    source = source,
+    category = category,
+    timestamp = timestamp,
+    excluded = excludeFromSpending,
+    linked = pairedTransactionId != null,
+    note = note
+)
+
+private fun isUncategorised(category: String?): Boolean =
+    category.isNullOrBlank() || category == "OTHER_EXPENSE" || category == "OTHER_INCOME" ||
+        category == "General Spend" || category == "Money In"
+
+private fun TransferLeg.canBePaired(): Boolean =
+    amountMinor > 0 && !excluded && !linked && isAutoCapturedNote(note) &&
+        note?.contains(TRANSFER_MATCH_MARKER) != true &&
+        !source.isNullOrBlank() && !source.trim().equals("Card Payment", ignoreCase = true) &&
+        !isWalletSource(source) && isUncategorised(category)
+
+/**
+ * True when the two alerts are the two legs of a move between the user's own accounts: money out
+ * of one bank and the same amount into a different bank within [TRANSFER_PAIR_WINDOW_MILLIS].
+ * Both must be captured from alerts, uncategorised (a recognised shop or salary is a real payment),
+ * not wallets (PayPal / Google Pay), and not already excluded, linked or matched before.
+ */
+fun isOwnTransferPair(a: TransferLeg, b: TransferLeg): Boolean {
+    val types = setOf(a.type, b.type)
+    if (types != setOf(TransactionType.EXPENSE, TransactionType.INCOME)) return false
+    if (a.amountMinor != b.amountMinor) return false
+    if (!a.canBePaired() || !b.canBePaired()) return false
+    if (isSameOrEquivalentBank(a.source, b.source)) return false
+    return kotlin.math.abs(a.timestamp - b.timestamp) <= TRANSFER_PAIR_WINDOW_MILLIS
+}
+
+/** Note for one leg of a matched pair, e.g. "... \nInternal transfer: matched with HSBC (money out)". */
+fun transferMatchNote(note: String?, otherSource: String?, otherType: TransactionType): String {
+    val side = if (otherType == TransactionType.INCOME) "money in" else "money out"
+    val line = "$TRANSFER_MATCH_MARKER ${otherSource?.trim().orEmpty()} ($side)"
+    return if (note.isNullOrBlank()) line else "${note.trimEnd()}\n$line"
+}
+
 /** The facts the duplicate rules look at, for a stored row, a list item or a new alert. */
 data class DedupKey(
     val amountMinor: Long,
@@ -374,6 +435,39 @@ abstract class TransactionDao {
         val (index, decision) = pickDedupMatch(candidates.map { it.toDedupKey() }, incoming) ?: return null
         return candidates[index] to decision
     }
+
+    /** Rows of the opposite type with the same amount near [timestamp]: possible other leg of a transfer. */
+    @Query(
+        """
+        SELECT * FROM transactions
+        WHERE ABS(amount) = :absAmountMinor
+          AND type = :type
+          AND ABS(timestamp - :timestamp) <= :windowMillis
+        ORDER BY ABS(timestamp - :timestamp) ASC
+        """
+    )
+    abstract suspend fun findSameAmountRows(
+        absAmountMinor: Long,
+        type: String,
+        timestamp: Long,
+        windowMillis: Long = TRANSFER_PAIR_WINDOW_MILLIS
+    ): List<TransactionEntity>
+
+    /** The stored opposite leg of an own-account transfer for a new alert (see [isOwnTransferPair]), or null. */
+    suspend fun findTransferCounterpart(incoming: TransferLeg): TransactionEntity? {
+        val opposite = when (incoming.type) {
+            TransactionType.EXPENSE -> TransactionType.INCOME
+            TransactionType.INCOME -> TransactionType.EXPENSE
+            else -> return null
+        }
+        return findSameAmountRows(incoming.amountMinor, opposite.name, incoming.timestamp)
+            .firstOrNull { isOwnTransferPair(incoming, it.toTransferLeg()) }
+    }
+
+    /** A second alert for a leg that was already matched as a transfer (same bank, amount, direction). */
+    suspend fun isRepeatOfMatchedTransferLeg(incoming: TransferLeg): Boolean =
+        findSameAmountRows(incoming.amountMinor, incoming.type.name, incoming.timestamp, MAX_DEDUP_WINDOW_MILLIS)
+            .any { it.note?.contains(TRANSFER_MATCH_MARKER) == true && isSameOrEquivalentBank(it.source, incoming.source) }
 
     @Query("UPDATE transactions SET pairedTransactionId = :pairedId WHERE id = :id")
     abstract suspend fun setPairedId(id: Long, pairedId: Long)

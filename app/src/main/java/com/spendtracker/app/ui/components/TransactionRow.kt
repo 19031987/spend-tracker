@@ -70,7 +70,7 @@ fun groupTransactionsByDay(transactions: List<TransactionItem>): List<DayGroup> 
                 else -> fullDateFormat.format(Date(firstTimestamp))
             }
         } else {
-            "Other Transactions"
+            "Other transactions"
         }
 
         val daySpend = items
@@ -106,8 +106,7 @@ fun TransactionRowItem(
     isFirst: Boolean = true,
     isLast: Boolean = true
 ) {
-    val isUnknownVendor = tx.merchant.isNullOrBlank() ||
-        tx.merchant.trim().lowercase(Locale.ROOT) in GENERIC_MERCHANTS
+    val isUnknownVendor = isUnknownMerchant(tx.merchant)
 
     val timeStr = if (tx.timestamp > 0) DateUtils.formatTime(tx.timestamp) else "—"
     val corner = 20.dp
@@ -147,7 +146,7 @@ fun TransactionRowItem(
                         modifier = Modifier.clickable(onClick = onClick)
                     ) {
                         Text(
-                            text = "Unknown vendor",
+                            text = "Unknown merchant",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.error,
                             maxLines = 1,
@@ -156,7 +155,7 @@ fun TransactionRowItem(
                         )
                         Icon(
                             Icons.Outlined.Edit,
-                            contentDescription = "Set vendor",
+                            contentDescription = "Set merchant",
                             tint = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(16.dp)
                         )
@@ -197,6 +196,8 @@ fun TransactionRowItem(
             ) {
                 val isIncome = tx.type == TransactionType.INCOME
                 val transfer = isTransferItem(tx)
+                // Left out of totals by the user: muted like a transfer and labelled, so it is not mistaken for counted money.
+                val excluded = tx.excludeFromSpending && !transfer
                 val finance = SpendTrackerTheme.finance
                 Text(
                     // Transfers move money between your own accounts: no sign, muted, not in totals.
@@ -206,13 +207,17 @@ fun TransactionRowItem(
                     maxLines = 1,
                     softWrap = false,
                     color = when {
-                        transfer -> MaterialTheme.colorScheme.onSurfaceVariant
+                        transfer || excluded -> MaterialTheme.colorScheme.onSurfaceVariant
                         isIncome -> finance.income
                         else -> MaterialTheme.colorScheme.onSurface
                     }
                 )
                 Text(
-                    text = if (transfer) "⇄ Transfer · $timeStr" else timeStr,
+                    text = when {
+                        transfer -> "⇄ Transfer · $timeStr"
+                        excluded -> "Excluded · $timeStr"
+                        else -> timeStr
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -222,6 +227,10 @@ fun TransactionRowItem(
         }
     }
 }
+
+/** No merchant, or only a generic label such as "Card payment": shown as "Unknown merchant" everywhere. */
+fun isUnknownMerchant(merchant: String?): Boolean =
+    merchant.isNullOrBlank() || merchant.trim().lowercase(Locale.ROOT) in GENERIC_MERCHANTS
 
 /** Internal transfer rows: shown in the feed but never counted in spending or income totals. */
 fun isTransferItem(tx: TransactionItem): Boolean =

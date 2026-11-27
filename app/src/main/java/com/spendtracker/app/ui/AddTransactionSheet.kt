@@ -111,8 +111,8 @@ fun AddTransactionSheet(
 
             // 2-way Direction Selector: Money Out vs Money In
             val types = listOf(
-                TransactionType.EXPENSE to "↓ Money Out",
-                TransactionType.INCOME to "↑ Money In"
+                TransactionType.EXPENSE to "Money out",
+                TransactionType.INCOME to "Money in"
             )
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 types.forEachIndexed { index, (t, label) ->
@@ -142,7 +142,7 @@ fun AddTransactionSheet(
                     horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val days = listOf(0 to "Today", 1 to "Yesterday", 2 to "2 Days Ago")
+                    val days = listOf(0 to "Today", 1 to "Yesterday", 2 to "2 days ago")
                     items(days) { (offset, label) ->
                         FilterChip(
                             selected = selectedDayOffset == offset && customTimestamp == null,
@@ -181,7 +181,7 @@ fun AddTransactionSheet(
                             },
                             label = {
                                 Text(
-                                    text = if (customTimestamp != null) "📅 ${DateUtils.formatDateYear(customTimestamp!!)}" else "📅 Pick Date",
+                                    text = if (customTimestamp != null) "📅 ${DateUtils.formatDateYear(customTimestamp!!)}" else "📅 Pick date",
                                     maxLines = 1,
                                     softWrap = false
                                 )
@@ -209,7 +209,7 @@ fun AddTransactionSheet(
                             }
                         }
                     },
-                    label = { Text("Payee / Merchant Name") },
+                    label = { Text("Merchant") },
                     placeholder = { Text("e.g. Tesco, Shell, Starbucks, Netflix...") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -351,10 +351,7 @@ fun AddTransactionSheet(
 
 /** Symbol of the device currency, as used by [CurrencyUtils.formatMinor] (e.g. "£"). */
 internal fun localCurrencySymbol(locale: Locale = Locale.getDefault()): String =
-    runCatching { java.text.NumberFormat.getCurrencyInstance(locale).currency?.getSymbol(locale) }
-        .getOrNull()
-        ?.takeIf { it.isNotBlank() }
-        ?: "£"
+    CurrencyUtils.symbol(locale)
 
 /** "12.34" or "12,34" to 1234. Returns null if invalid, <= 0, or has more than 2 decimals. */
 internal fun parseMinorUnits(input: String): Long? = CurrencyUtils.parseDecimalToMinor(input)
