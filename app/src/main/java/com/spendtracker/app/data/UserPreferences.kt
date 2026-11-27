@@ -16,6 +16,8 @@ class UserPreferences(context: Context) {
         private const val KEY_DEFAULT_PERIOD = "pref_default_period"
         private const val KEY_THEME = "pref_theme_mode"
         private const val KEY_BIOMETRIC_LOCK = "pref_biometric_lock_enabled"
+        private const val KEY_AI_READER = "pref_ai_reader_enabled"
+        private const val KEY_AI_MODEL_PATH = "pref_ai_model_path"
 
         const val THEME_SYSTEM = "SYSTEM"
         const val THEME_LIGHT = "LIGHT"
@@ -39,6 +41,16 @@ class UserPreferences(context: Context) {
     var isBiometricLockEnabled: Boolean
         get() = prefs.getBoolean(KEY_BIOMETRIC_LOCK, false)
         set(value) = prefs.edit().putBoolean(KEY_BIOMETRIC_LOCK, value).apply()
+
+    /** Read alerts the rules cannot fully read with the on-device Gemma model. Off by default. */
+    var isAiReaderEnabled: Boolean
+        get() = prefs.getBoolean(KEY_AI_READER, false)
+        set(value) = prefs.edit().putBoolean(KEY_AI_READER, value).apply()
+
+    /** Absolute path of the .litertlm model file on this phone, or null when none is chosen. */
+    var aiModelPath: String?
+        get() = prefs.getString(KEY_AI_MODEL_PATH, null)
+        set(value) = prefs.edit().putString(KEY_AI_MODEL_PATH, value).apply()
 
     fun observeCurrency(): Flow<String> = callbackFlow {
         trySend(currencySymbol)

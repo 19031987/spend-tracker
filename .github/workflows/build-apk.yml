@@ -124,6 +124,11 @@ jobs:
         tag_name: v${{ steps.version.outputs.name }}
         name: "SpendTracker Release v${{ steps.version.outputs.name }}"
         body: |
+          ### SpendTracker v2.5.0 - Read unclear alerts with Gemma on your phone
+          - 🤖 **Optional on-device AI** (Settings → Preferences → "Read unclear alerts with Gemma"): when the rules can't read the merchant from a bank alert, a Gemma model running on the phone is asked. The answer is checked before it is used (the name must appear in the alert; the amount is never taken from the model). Off by default; nothing is sent anywhere.
+          - 📁 Use the Gemma model file already in Download/PocketAgent/models (needs "All files access"), or choose a .litertlm file to copy in.
+          - 🛠️ Build tools updated (Kotlin 2.4). **Back up first** (Settings → Data) before installing this version.
+
           ### SpendTracker v2.4.0 - Clearer edit sheet, excluded transactions and wording
           - 🚫 **Excluded transactions are marked** "Excluded" in every list and have their own filter; "Nullify from spend calculations" is now "Exclude from totals".
           - 🔄 Opening a transfer and saving it keeps it a transfer; choose Money out / Money in or a category to turn it back into a payment.

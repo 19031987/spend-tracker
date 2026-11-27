@@ -90,6 +90,11 @@ class SettingsViewModel(
     fun getThemeMode(): String = preferences.themeMode
     fun setThemeMode(mode: String) { preferences.themeMode = mode }
 
+    fun isAiReaderEnabled(): Boolean = preferences.isAiReaderEnabled
+    fun setAiReaderEnabled(enabled: Boolean) { preferences.isAiReaderEnabled = enabled }
+    fun getAiModelPath(): String? = preferences.aiModelPath
+    fun setAiModelPath(path: String?) { preferences.aiModelPath = path }
+
     fun isBiometricEnabled(): Boolean = preferences.isBiometricLockEnabled
     fun setBiometricEnabled(enabled: Boolean) { preferences.isBiometricLockEnabled = enabled }
 
